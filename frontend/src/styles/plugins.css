@@ -1,0 +1,269 @@
+/* Generic declarative nodes. Layout stays flat; only interactive controls own
+ * borders or surfaces. The host panel remains the single scrolling container. */
+.plugin-renderer {
+  min-width: 0;
+  max-width: 100%;
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-body);
+  overflow-wrap: anywhere;
+}
+
+/* Only viewport hosts allocate height. Message slots retain their natural size. */
+.client-plugin-panel > .plugin-renderer,
+.client-plugin-workspace-body > .plugin-renderer {
+  display: flex;
+  flex-direction: column;
+  flex: 1 0 auto;
+}
+
+.client-plugin-panel > .plugin-renderer > .plugin-node-column,
+.client-plugin-workspace-body > .plugin-renderer > .plugin-node-column {
+  flex: 1 0 auto;
+}
+
+.plugin-node-payload {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* Sibling payloads share spare height, while long content grows in the host's
+ * one scroll region. No plugin identity or business-specific tree is assumed. */
+.client-plugin-panel .plugin-node-column > .plugin-node-payload,
+.client-plugin-workspace-body .plugin-node-column > .plugin-node-payload,
+.client-plugin-panel > .plugin-renderer > .plugin-node-payload,
+.client-plugin-workspace-body > .plugin-renderer > .plugin-node-payload {
+  flex: 1 0 auto;
+  min-height: calc(var(--sp-6) * 7 + var(--sp-4));
+}
+
+.plugin-node-payload > .payload[data-variant="inspector"] {
+  flex: 1 0 auto;
+}
+
+.plugin-node-column {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  min-width: 0;
+  gap: var(--sp-3);
+  margin: 0;
+}
+
+.plugin-node-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  min-width: 0;
+  gap: var(--sp-2);
+}
+
+.plugin-node-row > *,
+.plugin-node-column > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.plugin-node-text {
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.plugin-node-field {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: var(--sp-1);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+.plugin-node-row > .plugin-node-field {
+  flex: 1 1 calc(var(--sp-6) * 4);
+}
+
+.plugin-node-row > .plugin-node-field > input {
+  height: 32px;
+  min-height: 32px;
+  box-sizing: border-box;
+}
+
+.plugin-node-row > .plugin-node-button {
+  height: 32px;
+  min-height: 32px;
+  box-sizing: border-box;
+}
+
+.plugin-node-field > input,
+.plugin-node-field > select {
+  width: 100%;
+  min-width: 0;
+  min-height: var(--sp-6);
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--control-border);
+  border-radius: var(--r-sm);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  line-height: var(--lh-body);
+}
+
+.plugin-node-field > input::placeholder {
+  color: var(--text-2);
+}
+
+.plugin-node-field > input:disabled,
+.plugin-node-field > select:disabled,
+.plugin-node-button:disabled,
+.plugin-node-tabs > button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.plugin-node-field > input:focus-visible,
+.plugin-node-field > select:focus-visible,
+.plugin-node-button:focus-visible,
+.plugin-node-tabs > button:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.plugin-node-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  min-width: var(--sp-5);
+  min-height: var(--sp-6);
+  gap: var(--sp-1);
+  white-space: normal;
+  text-align: start;
+  font-size: var(--fs-sm);
+}
+
+.plugin-node-button > svg {
+  flex-shrink: 0;
+  color: var(--text-2);
+}
+
+.plugin-node-button.active,
+.plugin-node-button[aria-pressed="true"] {
+  background: var(--bg-muted, rgba(255, 255, 255, 0.08));
+  border-color: var(--accent, #60a5fa);
+  color: var(--accent, #60a5fa);
+}
+
+.plugin-node-button.active > svg,
+.plugin-node-button[aria-pressed="true"] > svg {
+  color: var(--accent, #60a5fa);
+}
+
+.plugin-node-notice {
+  padding: var(--sp-1) 0 var(--sp-1) var(--sp-3);
+  border-left: 2px solid var(--info);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.plugin-node-notice[data-tone="warning"] {
+  border-left-color: var(--warn);
+}
+
+.plugin-node-notice[data-tone="error"] {
+  border-left-color: var(--danger);
+}
+
+.plugin-node-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  min-width: 0;
+  gap: var(--sp-1);
+}
+
+.plugin-node-tabs > button {
+  min-height: var(--sp-6);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+
+.plugin-node-tabs > button[aria-selected="true"] {
+  background: var(--bg-muted);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.plugin-node-markdown {
+  min-width: 0;
+  max-width: 100%;
+  font-size: var(--fs-md);
+  line-height: var(--lh-body);
+  overflow-wrap: anywhere;
+}
+
+.plugin-node-markdown > :first-child {
+  margin-top: 0;
+}
+
+.plugin-node-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+/* An embedded trailing action reserves its width even when the field is empty. */
+.plugin-node-input-wrap {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  width: 100%;
+}
+.plugin-node-input-wrap > input {
+  width: 100%;
+  min-width: 0;
+  min-height: var(--sp-6);
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--control-border);
+  border-radius: var(--r-sm);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  line-height: var(--lh-body);
+  box-sizing: border-box;
+}
+.plugin-node-input-wrap[data-clear="true"] > input {
+  padding-inline-end: calc(var(--sp-6) + var(--sp-1));
+}
+.plugin-node-input-wrap[data-clear="true"]
+  > input[type="search"]::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+}
+.plugin-node-input-clear {
+  position: absolute;
+  inset-inline-end: var(--sp-1);
+  top: 50%;
+  transform: translateY(-50%);
+  width: var(--sp-5);
+  min-width: var(--sp-5);
+  height: var(--sp-5);
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.plugin-node-input-wrap > input:focus-visible,
+.plugin-node-input-clear:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.plugin-node-input-wrap > input::placeholder {
+  color: var(--text-2);
+}
+.plugin-node-input-wrap > input:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

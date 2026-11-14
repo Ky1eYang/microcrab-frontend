@@ -1,0 +1,27 @@
+<!doctype html>
+<html>
+  <head>
+    <style>
+      body {
+        display: block;
+      }
+      #inline {
+        font-weight: 600;
+      }
+    </style>
+  </head>
+  <body>
+    <p id="inline">Inline content</p>
+    <svg id="static-svg" viewBox="0 0 10 10"><path d="M0 0L10 10" /></svg>
+    <output id="projection"></output><button id="action">Action</button>
+    <script>
+      window.boots = (window.boots || 0) + 1;
+      microcrab.onViewState((state) => {
+        document.getElementById("projection").textContent =
+          JSON.stringify(state);
+      });
+      document.getElementById("action").onclick = () =>
+        microcrab.action("fixture.action", { boots: window.boots });
+    </script>
+  </body>
+</html>

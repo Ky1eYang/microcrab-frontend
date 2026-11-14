@@ -1,0 +1,12 @@
+[package]
+name = "microcrab-xtask"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+serde_json.workspace = true
+sha2 = "0.10.9"
+wasmparser = "=0.247.0"

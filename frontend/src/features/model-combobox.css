@@ -1,0 +1,108 @@
+.model-combobox {
+  position: relative;
+  min-width: 0;
+  width: 100%;
+}
+.model-combobox > input {
+  width: 100%;
+}
+.model-combobox-menu {
+  position: absolute;
+  inset-inline: 0;
+  top: 100%;
+  z-index: var(--z-dropdown);
+  max-height: min(40vh, calc(var(--sp-6) * 10));
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--control-border);
+  border-radius: var(--r-sm);
+  box-shadow: var(--shadow-pop);
+  padding: var(--sp-1);
+}
+.model-combobox-option {
+  padding: var(--sp-2) var(--sp-3);
+  cursor: pointer;
+  overflow-wrap: anywhere;
+  font-size: var(--fs-sm);
+}
+.model-combobox-option[data-active="true"] {
+  background: var(--bg-muted);
+  color: var(--text);
+  outline: 1px solid var(--border-strong);
+}
+.model-combobox-option[aria-selected="true"] {
+  font-weight: 600;
+}
+.model-combobox-group,
+.model-combobox-empty {
+  padding: var(--sp-2) var(--sp-3);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+}
+.model-combobox-group {
+  font-weight: 500;
+}
+.settings-ergonomics > h4 {
+  margin-block: var(--sp-5) var(--sp-3);
+}
+.settings-ergonomics > .settings-row {
+  border: none;
+  padding-block: var(--sp-2);
+}
+.settings-ergonomics > .settings-form-group {
+  margin-block: var(--sp-3);
+}
+.settings-ergonomics > .settings-row-sub {
+  display: block;
+  margin-block: var(--sp-2) var(--sp-4);
+  overflow-wrap: anywhere;
+}
+.settings-ergonomics > .settings-flat-fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+.settings-ergonomics .settings-section + .settings-section {
+  border-top: 1px solid var(--border);
+  padding-top: var(--sp-4);
+}
+.settings-model-default {
+  margin-block: var(--sp-2) var(--sp-5);
+  padding-bottom: var(--sp-4);
+  border-bottom: 1px solid var(--border);
+}
+.settings-model-default > h4 {
+  margin-block: 0 var(--sp-2);
+  font-size: var(--fs-lg);
+  font-weight: 600;
+}
+.settings-model-default > .settings-row-sub {
+  display: block;
+  margin-top: var(--sp-2);
+  overflow-wrap: anywhere;
+}
+.settings-field-error {
+  color: var(--danger);
+  font-size: var(--fs-sm);
+  margin-block: var(--sp-2);
+}
+.settings-ergonomics [aria-invalid="true"] {
+  border-color: var(--danger);
+}
+.settings-dialog .settings-card {
+  border: none;
+  background: none;
+  border-radius: 0;
+  padding: 0;
+  margin-bottom: var(--sp-5);
+}
+.settings-dialog .settings-card .settings-row {
+  border-bottom: none;
+  padding-block: var(--sp-3);
+}
+.settings-dialog .settings-tip-box {
+  border: none;
+  background: none;
+  border-radius: 0;
+  border-left: 2px solid var(--border);
+}

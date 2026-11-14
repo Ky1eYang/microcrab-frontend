@@ -1,0 +1,28 @@
+[package]
+name = "microcrab-client-plugin-state-viewer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[package.metadata.microcrab]
+artifact-kind = "client-plugin"
+component-name = "state-viewer"
+plugin-id = "microcrab.state-viewer"
+default-enabled = true
+# Exact same-namespace predecessors; never replace custom bytes or retired IDs.
+supersedes = [
+    "781d4bd5abf1708a22936060fbe4df063590e86cd50eac9f02056a7e27fa33e5",
+    "2986d8730a92e2a6a48b13fa89ec56138ca5eff4a822e23ddc18505bbd9bc73f",
+]
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wit-bindgen = "=0.57.1"

@@ -1,0 +1,48 @@
+{
+  "name": "microcrab-frontend",
+  "version": "0.1.16",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Ky1eYang/microcrab-frontend.git",
+    "directory": "frontend"
+  },
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 8080",
+    "build": "tsc -b && vite build",
+    "check": "tsc -b",
+    "test:browser": "playwright test",
+    "format": "prettier --write \"src/**/*.{ts,tsx}\" tests playwright.config.ts vite.config.ts",
+    "preview": "vite preview --host 127.0.0.1 --port 8080",
+    "fixture": "node fixture/serve.mjs"
+  },
+  "dependencies": {
+    "@bytecodealliance/jco": "1.41.0",
+    "@bytecodealliance/jco-transpile": "0.23.0",
+    "@bytecodealliance/preview2-shim": "0.31.0",
+    "@codemirror/autocomplete": "^6.20.4",
+    "@codemirror/commands": "^6.11.1",
+    "@codemirror/lang-json": "^6.0.2",
+    "@codemirror/language": "^6.13.1",
+    "@codemirror/lint": "^6.9.8",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.15",
+    "@lezer/highlight": "^1.2.5",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.1",
+    "@types/node": "^26.6.5",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^5.1.0",
+    "prettier": "^3.9.10",
+    "typescript": "~5.9.3",
+    "vite": "^7.3.0"
+  }
+}

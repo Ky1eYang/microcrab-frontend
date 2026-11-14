@@ -1,0 +1,42 @@
+# Build output, dependencies, and test artifacts
+/target/
+node_modules/
+dist/
+coverage/
+test-results/
+playwright-report/
+playwright/.cache/
+.vite/
+*.tsbuildinfo
+
+# Generated plugin components and browser Host runtime assets
+/frontend/public/plugins/**/plugin.wasm
+/frontend/public/plugins/current.json
+/frontend/public/plugins/**/.*.xtask-*.tmp
+/frontend/public/browser-host/
+
+# Local split metadata and private configuration
+/split-project.json
+.microcrab/
+.env
+.env.*
+!.env.example
+!.env.*.example
+config.local.*
+config.private.*
+*.local.json
+*.local.jsonc
+*.local.toml
+*.private.json
+*.private.jsonc
+*.private.toml
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Local editor and OS files
+/.idea/
+/.vscode/
+.DS_Store
+Thumbs.db

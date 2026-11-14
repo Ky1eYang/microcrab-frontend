@@ -1,0 +1,167 @@
+.trajectory-history-load {
+  position: absolute;
+  left: var(--sp-1);
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: var(--z-sticky);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--sp-5);
+  height: var(--sp-5);
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-full);
+  background: var(--bg);
+  color: var(--text-2);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.trajectory-timeline:has(> .trajectory-history-load) {
+  padding-left: var(--sp-6);
+}
+.trajectory-history-load:hover {
+  color: var(--text);
+}
+.trajectory-history-load:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.trajectory-history-load:disabled {
+  cursor: wait;
+}
+
+.payload-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  margin-left: auto;
+}
+.payload-actions .payload-copy {
+  margin-left: 0;
+}
+.payload[data-variant="trajectory"] .payload-copy,
+.payload-dialog-expand,
+.trajectory-content-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--sp-5);
+  height: var(--sp-5);
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+  scroll-margin-bottom: 72px;
+}
+.payload:where(:hover, :focus-within) .payload-actions > button,
+.payload[data-variant="trajectory"]:where(:hover, :focus-within)
+  .payload-actions
+  > button,
+.trajectory-content:where(:hover, :focus-within) .trajectory-content-action {
+  opacity: 1;
+}
+.payload-actions > button:hover,
+.payload[data-variant="trajectory"] .payload-actions > button:hover,
+.trajectory-content-action:hover {
+  color: var(--text);
+}
+.payload-actions > button:focus-visible,
+.trajectory-content-action:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.payload[data-variant="trajectory"][data-labelled] > .payload-head {
+  position: static;
+  height: auto;
+  min-height: var(--sp-5);
+  margin-bottom: var(--sp-1);
+}
+.payload[data-variant="trajectory"][data-labelled] > .payload-body {
+  max-height: 320px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding-right: 0;
+  mask-image: none;
+  -webkit-mask-image: none;
+}
+.payload[data-variant="trajectory"][data-labelled][data-fill-body="true"]
+  > .payload-body {
+  flex: 1 1 auto;
+  max-height: none;
+  overflow: auto;
+}
+/* Single scroll owner: outer .trajectory-scroll-area scrolls; inner bodies grow.
+   Must follow the fill-body rule (equal class/attr count) so visible wins. */
+.trajectory-scroll-area
+  .payload[data-variant="trajectory"][data-labelled]
+  > .payload-body,
+.trajectory-scroll-area
+  .payload[data-variant="trajectory"][data-labelled][data-fill-body="true"]
+  > .payload-body,
+.request-audit-diff
+  .payload[data-variant="trajectory"][data-labelled]
+  > .payload-body,
+.request-audit-diff
+  .payload[data-variant="trajectory"][data-labelled][data-fill-body="true"]
+  > .payload-body,
+.request-audit-tokens
+  .payload[data-variant="trajectory"][data-labelled]
+  > .payload-body,
+.request-audit-tokens
+  .payload[data-variant="trajectory"][data-labelled][data-fill-body="true"]
+  > .payload-body {
+  flex: 0 0 auto;
+  max-height: none;
+  overflow: visible;
+  overscroll-behavior: auto;
+}
+.trajectory-content {
+  min-width: 0;
+  min-height: 0;
+}
+.trajectory-content-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-1);
+}
+.trajectory-content-body {
+  max-height: 320px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  overflow-wrap: anywhere;
+}
+.trajectory-scroll-area > .trajectory-content {
+  display: flex;
+  flex-direction: column;
+  height: auto;
+  min-height: 0;
+}
+.trajectory-scroll-area > .trajectory-content > .trajectory-content-body {
+  flex: 0 0 auto;
+  min-height: 0;
+  max-height: none;
+  overflow: visible;
+  overscroll-behavior: auto;
+}
+.content-dialog-body .trajectory-content-body {
+  max-height: none;
+  overflow: visible;
+}
+@media (hover: none) {
+  .payload[data-variant="trajectory"] .payload-actions > button,
+  .trajectory-content-action {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .payload[data-variant="trajectory"] .payload-copy,
+  .payload-dialog-expand,
+  .trajectory-content-action {
+    transition: none;
+  }
+}

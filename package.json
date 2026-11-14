@@ -1,0 +1,26 @@
+{
+  "name": "microcrab-frontend-workspace",
+  "version": "0.1.16",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Ky1eYang/microcrab-frontend.git"
+  },
+  "scripts": {
+    "setup": "npm --prefix frontend ci",
+    "dev": "npm --prefix frontend run dev",
+    "build": "npm --prefix frontend run build",
+    "check": "npm --prefix frontend run check",
+    "preview": "npm --prefix frontend run preview",
+    "fixture": "npm --prefix frontend run fixture",
+    "test:browser": "npm --prefix frontend run test:browser",
+    "test:browser:unit": "npm --prefix frontend run test:browser -- --config playwright.unit.config.ts",
+    "test:browser:production": "npm --prefix frontend run test:browser -- --config playwright.production.config.ts",
+    "test:browser:sso": "npm --prefix frontend run test:browser -- --config playwright.sso.config.ts",
+    "test:host": "node --test crates/host/frontend/browser/*.test.mjs",
+    "resources:refresh": "node scripts/refresh-browser-host.mjs",
+    "plugins:build": "cargo xtask build-client-plugins --release --validate --install"
+  }
+}

@@ -1,0 +1,146 @@
+{
+  "fresh": [
+    {
+      "v": 1,
+      "type": "subscribed",
+      "subscription_id": "contract-subscription",
+      "generation": "contract-generation",
+      "sequence": 0,
+      "session_id": "s1",
+      "meta": {
+        "session": { "id": "s1" },
+        "operations": [],
+        "executions": [],
+        "executions_omitted": false
+      },
+      "pending": { "permissions": null, "round_limits": null },
+      "resume": { "mode": "fresh" },
+      "initial_events": 1
+    },
+    {
+      "v": 1,
+      "type": "event",
+      "subscription_id": "contract-subscription",
+      "generation": "contract-generation",
+      "sequence": 1,
+      "session_id": "s1",
+      "event": "blocks.page",
+      "data": { "reason": "attach", "messages": [] }
+    }
+  ],
+  "reset": [
+    {
+      "v": 1,
+      "type": "subscribed",
+      "subscription_id": "contract-subscription",
+      "generation": "contract-generation",
+      "sequence": 0,
+      "session_id": "s1",
+      "meta": {
+        "session": { "id": "s1" },
+        "operations": [],
+        "executions": [],
+        "executions_omitted": false
+      },
+      "pending": { "permissions": null, "round_limits": null },
+      "resume": { "mode": "reset" },
+      "initial_events": 1
+    },
+    {
+      "v": 1,
+      "type": "event",
+      "subscription_id": "contract-subscription",
+      "generation": "contract-generation",
+      "sequence": 1,
+      "session_id": "s1",
+      "event": "blocks.page",
+      "data": { "reason": "attach", "messages": [] }
+    }
+  ],
+  "agent_init_fresh": [
+    {
+      "v": 1,
+      "type": "subscribed",
+      "subscription_id": "contract-subscription",
+      "generation": "contract-generation",
+      "sequence": 0,
+      "session_id": "s1",
+      "meta": {
+        "session": { "id": "s1" },
+        "operations": [],
+        "executions": [
+          {
+            "subject": { "kind": "agent_init", "component": "contract-component", "generation": 1, "attempt": 1 },
+            "execution_id": 1,
+            "session_id": "s1",
+            "call_id": "agent-init:1:1:contract-component",
+            "tool": "",
+            "agent": "coding",
+            "mode": "plan",
+            "status": "running",
+            "capabilities": { "input": false },
+            "arguments_available": false,
+            "result_available": false
+          }
+        ],
+        "executions_omitted": false
+      },
+      "pending": { "permissions": null, "round_limits": null },
+      "resume": { "mode": "fresh" },
+      "initial_events": 1
+    },
+    {
+      "v": 1,
+      "type": "event",
+      "subscription_id": "contract-subscription",
+      "generation": "contract-generation",
+      "sequence": 1,
+      "session_id": "s1",
+      "event": "blocks.page",
+      "data": { "reason": "attach", "messages": [] }
+    }
+  ],
+  "agent_init_reset": [
+    {
+      "v": 1,
+      "type": "subscribed",
+      "subscription_id": "contract-subscription",
+      "generation": "contract-generation",
+      "sequence": 0,
+      "session_id": "s1",
+      "meta": {
+        "session": { "id": "s1" },
+        "operations": [],
+        "executions": [
+          {
+            "subject": { "kind": "agent_init", "component": "contract-component", "generation": 1, "attempt": 1 },
+            "execution_id": 1,
+            "session_id": "s1",
+            "call_id": "agent-init:1:1:contract-component",
+            "tool": "",
+            "agent": "coding",
+            "mode": "plan",
+            "status": "running",
+            "capabilities": { "input": false },
+            "arguments_available": false,
+            "result_available": false
+          }
+        ],
+        "executions_omitted": false
+      },
+      "pending": { "permissions": null, "round_limits": null },
+      "resume": { "mode": "reset" },
+      "initial_events": 1
+    },
+    {
+      "v": 1,
+      "type": "event",
+      "subscription_id": "contract-subscription",
+      "generation": "contract-generation",
+      "sequence": 1,
+      "session_id": "s1",
+      "event": "blocks.page",
+      "data": { "reason": "attach", "messages": [] }
+    }
+  ]
+}

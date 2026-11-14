@@ -1,0 +1,17 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/xtask",
+    "crates/client/plugins/state-viewer",
+    "crates/client/plugins/fixture",
+]
+
+[workspace.package]
+version = "0.1.16"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/Ky1eYang/microcrab-frontend"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

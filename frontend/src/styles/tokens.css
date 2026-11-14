@@ -1,0 +1,253 @@
+/* microcrab design tokens (beautify 0.1.6 + 0.1.8 timeline).
+   The only file allowed to contain literal colours. Every other stylesheet and
+   component references these custom properties without fallbacks.
+   <html data-theme> always carries the resolved scheme (light | dark);
+   <html data-theme-pref> carries the stored preference (system | light | dark). */
+:root,
+[data-theme="dark"] {
+  /* neutral surfaces */
+  --bg: #1f1f1f;
+  --bg-subtle: #191919;
+  --surface: #262626;
+  --bg-muted: #2b2b2b;
+  --border: #363636;
+  --border-strong: #4a4a4a;
+  /* Boundary of controls whose outline identifies them (WCAG 1.4.11 ≥3:1). */
+  --control-border: #7a7a7a;
+  /* text and ink */
+  --text: #ececec;
+  --text-2: #a3a3a3;
+  --text-3: #767676;
+  --ink: #ececec;
+  --ink-contrast: #1f1f1f;
+  /* Restrained source syntax only; never interface/status chrome. */
+  --syntax-key: #b4c7da;
+  --syntax-string: #bdcbb7;
+  --syntax-literal: #d4c0ae;
+  --syntax-muted: #aaaaaa;
+  --syntax-added: #bdcbb7;
+  --syntax-removed: #d5aaa7;
+  /* functional status: never decorative */
+  --success: #4ade80;
+  --danger: #f87171;
+  --on-danger: #1f1f1f;
+  --warn: #fbbf24;
+  --info: #93c5fd;
+  --focus: #93c5fd;
+  /* timeline segments (beautify 0.1.8) */
+  --timeline-track: var(--bg-muted);
+  --timeline-seg: color-mix(in srgb, var(--text-2) 55%, transparent);
+  --timeline-seg-hover: color-mix(in srgb, var(--text-2) 75%, transparent);
+  --timeline-seg-current: var(--text);
+  --timeline-seg-error: var(--danger);
+  --timeline-seg-error-muted: color-mix(
+    in srgb,
+    var(--danger) 55%,
+    transparent
+  );
+  /* chart-only categorical palette (dashboard charts) */
+  --chart-1: #8fb5a6;
+  --chart-2: #8fa5c4;
+  --chart-3: #b3a3c9;
+  --chart-4: #c9b48f;
+  --chart-5: #c49a9a;
+  --chart-6: #9ab9c4;
+  /* elevation */
+  --shadow-color: #000000;
+  --shadow-pop: 0 8px 24px rgba(0, 0, 0, 0.45);
+  --shadow-modal: 0 24px 64px rgba(0, 0, 0, 0.55);
+  --overlay: rgba(0, 0, 0, 0.55);
+  --scrollbar-thumb: rgba(255, 255, 255, 0.18);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.35);
+  color-scheme: dark;
+}
+
+[data-theme="light"] {
+  --bg: #ffffff;
+  --bg-subtle: #f7f7f7;
+  --surface: #ffffff;
+  --bg-muted: #f2f2f2;
+  --border: #e5e5e5;
+  --border-strong: #d0d0d0;
+  /* Boundary of controls whose outline identifies them (WCAG 1.4.11 ≥3:1). */
+  --control-border: #8a8a8a;
+  --text: #171717;
+  --text-2: #5f5f5f;
+  --text-3: #9a9a9a;
+  --ink: #171717;
+  --ink-contrast: #ffffff;
+  /* Document structure stays neutral; values carry restrained type cues.
+     Shared by pretty text and editing, never by controls or operation status. */
+  --syntax-key: #32383e;
+  --syntax-string: #35624d;
+  --syntax-literal: #4b5f82;
+  --syntax-muted: #686868;
+  --syntax-added: #35624d;
+  --syntax-removed: #954a4a;
+  --success: #15803d;
+  --danger: #dc2626;
+  --on-danger: #ffffff;
+  --warn: #b45309;
+  --info: #1d4ed8;
+  --focus: #2563eb;
+  --timeline-track: var(--bg-muted);
+  --timeline-seg: color-mix(in srgb, var(--text-2) 55%, transparent);
+  --timeline-seg-hover: color-mix(in srgb, var(--text-2) 75%, transparent);
+  --timeline-seg-current: var(--text);
+  --timeline-seg-error: var(--danger);
+  --timeline-seg-error-muted: color-mix(
+    in srgb,
+    var(--danger) 55%,
+    transparent
+  );
+  --chart-1: #4f7d6c;
+  --chart-2: #4f6a91;
+  --chart-3: #75629a;
+  --chart-4: #94783f;
+  --chart-5: #9a5c5c;
+  --chart-6: #4f8494;
+  --shadow-color: #000000;
+  --shadow-pop: 0 8px 24px rgba(0, 0, 0, 0.1);
+  --shadow-modal: 0 24px 64px rgba(0, 0, 0, 0.16);
+  --overlay: rgba(0, 0, 0, 0.32);
+  --scrollbar-thumb: rgba(0, 0, 0, 0.18);
+  --scrollbar-thumb-hover: rgba(0, 0, 0, 0.35);
+  color-scheme: light;
+}
+
+:root {
+  /* type: system fonts only, no bundled webfonts */
+  --font-sans:
+    system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC",
+    "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, "Cascadia Mono", "JetBrains Mono", Menlo,
+    Consolas, "Noto Sans Mono CJK SC", monospace;
+  --fs-2xs: 11px;
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-md: 14px;
+  --fs-lg: 16px;
+  --fs-xl: 20px;
+  --lh-body: 22px;
+  --lh-code: 19px;
+  /* shape */
+  --r-sm: 4px;
+  --r-md: 8px;
+  --r-lg: 12px;
+  --r-full: 999px;
+  /* spacing */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+  /* layers */
+  --z-sticky: 10;
+  --z-rail: 20;
+  --z-header: 30;
+  --z-dropdown: 40;
+  --z-popover: 50;
+  --z-backdrop: 60;
+  --z-drawer: 65;
+  --z-modal: 70;
+  --z-toast: 80;
+  --z-fatal: 90;
+  /* motion */
+  --dur-fast: 120ms;
+  --dur: 160ms;
+  /* layout values that components overwrite inline at runtime */
+  --right-rail-width: 320px;
+  --left-rail-width: 260px;
+  --main-min-width: 640px;
+  --chat-content-width: 820px;
+  --pointer-y: 50%;
+  --turn-preview-center: 50%;
+}
+
+/* Dashboard aliases: the dashboard keeps its own token names (decision 6:
+   colour only), mapped onto the neutral palette. */
+:root,
+[data-theme] {
+  --dash-bg: var(--bg);
+  --dash-sidebar: var(--bg-subtle);
+  --dash-card: var(--surface);
+  --dash-card-hover: var(--bg-muted);
+  --dash-line: var(--border);
+  --dash-soft: var(--bg-muted);
+  --dash-terminal: var(--bg-muted);
+  --dash-text: var(--text);
+  --dash-muted: var(--text-2);
+  --dash-faint: var(--text-3);
+  --dash-accent: var(--ink);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#main {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+}
+
+body {
+  font-size: var(--fs-md);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+small {
+  font-size: var(--fs-xs);
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

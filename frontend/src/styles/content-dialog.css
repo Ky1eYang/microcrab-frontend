@@ -1,0 +1,141 @@
+.content-dialog[data-layout="workspace"] {
+  width: min(
+    calc(var(--chat-content-width) + var(--sp-6) * 4),
+    calc(100vw - var(--sp-6) * 2)
+  );
+  height: calc(100dvh - var(--sp-6) * 2);
+}
+.content-dialog[data-layout="workspace"] > .content-dialog-body {
+  flex: 1;
+  display: flex;
+  padding: 0;
+  overflow: hidden;
+}
+.client-plugin-workspace {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+.client-plugin-workspace > .client-plugins-page,
+.client-plugin-workspace-body {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.client-plugin-workspace-body {
+  display: flex;
+  flex-direction: column;
+  padding: var(--sp-4);
+}
+.client-plugin-workspace-body > .plugin-renderer {
+  flex: 1;
+}
+.payload[data-variant="inspector"] {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.payload[data-variant="inspector"] > .payload-body {
+  flex: 1;
+  max-height: none;
+  overflow: visible;
+}
+.payload[data-variant="inspector"] .payload-actions {
+  opacity: 1;
+}
+@media (max-width: 767px) {
+  .content-dialog[data-layout="workspace"] {
+    width: calc(100vw - var(--sp-2) * 2);
+    max-width: calc(100vw - var(--sp-2) * 2);
+    height: calc(100dvh - var(--sp-2) * 2);
+    max-height: calc(100dvh - var(--sp-2) * 2);
+    border-radius: var(--r-md);
+  }
+  .content-dialog[data-layout="workspace"] .content-dialog-head {
+    padding: var(--sp-2) var(--sp-3);
+  }
+  .client-plugin-workspace-body {
+    padding: var(--sp-3);
+  }
+}
+
+.content-dialog {
+  width: min(var(--chat-content-width), calc(100vw - var(--sp-6)));
+  max-width: calc(100vw - var(--sp-4));
+  max-height: calc(100dvh - var(--sp-6));
+  margin: auto;
+  padding: 0;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-modal);
+  overflow: hidden;
+}
+.content-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+.content-dialog::backdrop {
+  background: var(--overlay);
+}
+.content-dialog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  flex: 0 0 auto;
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--border);
+}
+.content-dialog-head h2 {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+}
+.content-dialog-head button {
+  flex: 0 0 auto;
+}
+.content-dialog-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  flex: 0 0 auto;
+}
+.content-dialog[data-maximized="true"] {
+  width: calc(100vw - var(--sp-4));
+  height: calc(100dvh - var(--sp-4));
+  max-width: calc(100vw - var(--sp-4));
+  max-height: calc(100dvh - var(--sp-4));
+}
+.content-dialog[data-maximized="true"] > .content-dialog-body {
+  flex: 1;
+}
+.content-dialog-body {
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: var(--sp-4);
+}
+.content-dialog :focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.content-dialog-body .payload[data-fill-body="true"] {
+  height: auto;
+}
+.content-dialog
+  .content-dialog-body
+  .payload[data-variant="trajectory"]
+  > .payload-body {
+  max-height: none;
+  overflow: visible;
+}

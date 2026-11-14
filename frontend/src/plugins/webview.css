@@ -1,0 +1,32 @@
+.plugin-webview-error {
+  margin: var(--sp-2) 0;
+  color: var(--danger);
+  font-size: var(--fs-sm);
+}
+
+.plugin-webview {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  min-height: calc(var(--sp-6) * 6);
+  flex: 1;
+  border: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.plugin-node-textarea {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  min-height: calc(var(--sp-6) * 4);
+  padding: var(--sp-2);
+  resize: vertical;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-code);
+  color: var(--text);
+  background: var(--bg);
+  border-color: var(--border);
+  border-radius: var(--r-sm);
+}

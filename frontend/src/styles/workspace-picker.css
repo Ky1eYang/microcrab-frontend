@@ -1,0 +1,110 @@
+/* Workspace picker dropdown host group styles */
+.workspace-menu-section {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 6px;
+}
+
+.workspace-host-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.workspace-host-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  background: transparent;
+  border-radius: var(--r-md);
+  cursor: pointer;
+  text-align: left;
+  color: var(--text);
+  transition: background 0.12s ease;
+}
+
+.workspace-host-toggle:hover {
+  background: var(--bg-muted);
+}
+
+.ws-host-folder-icon {
+  flex-shrink: 0;
+  color: var(--text-2);
+}
+
+.ws-host-chevron {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--text-2);
+  transition: transform 0.15s ease;
+  transform-origin: center;
+}
+
+.ws-host-chevron.expanded {
+  transform: rotate(90deg);
+}
+
+.workspace-host-projects {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-left: 24px;
+  margin-top: 2px;
+}
+
+.workspace-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  background: transparent;
+  border-radius: var(--r-md);
+  cursor: pointer;
+  text-align: left;
+  color: var(--text);
+  font-size: var(--fs-sm);
+  transition: background 0.12s ease;
+}
+
+.workspace-menu-item:hover {
+  background: var(--bg-muted);
+}
+
+.workspace-menu-item[data-active="true"] {
+  background: var(--bg-muted);
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.ws-item-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ws-item-check {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink);
+  font-size: var(--fs-md);
+}
+
+.picker-project-status {
+  flex-shrink: 0;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}

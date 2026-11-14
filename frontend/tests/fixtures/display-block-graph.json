@@ -1,0 +1,471 @@
+{
+  "frames": [
+    {
+      "sequence": 1,
+      "attempt_id": "first",
+      "event": {
+        "call_id": "first",
+        "epoch": 0,
+        "turn": 1,
+        "round": 1,
+        "subagent": null,
+        "phase": "started",
+        "attempt_id": "first",
+        "display_graph_version": 1
+      }
+    },
+    {
+      "sequence": 2,
+      "attempt_id": "first",
+      "event": {
+        "call_id": "first",
+        "epoch": 0,
+        "turn": 1,
+        "round": 1,
+        "subagent": null,
+        "phase": "reasoning_delta",
+        "text": "first thought",
+        "attempt_id": "first",
+        "display_graph_version": 1,
+        "stream_offset": 0,
+        "display_head": {
+          "previous_block_id": null,
+          "selected_block_id": "51b236d606409d8834e9a2b3f04bdc04757f0233d8ff527426f12baff643560d"
+        },
+        "display_block": {
+          "block_id": "51b236d606409d8834e9a2b3f04bdc04757f0233d8ff527426f12baff643560d",
+          "parent_block_id": null,
+          "block_type": "reasoning",
+          "content_ref": "display:51b236d606409d8834e9a2b3f04bdc04757f0233d8ff527426f12baff643560d",
+          "sequence": 2,
+          "timestamp_ms": 0,
+          "attempt_id": "first",
+          "stream_key": "reasoning",
+          "content_offset": 0,
+          "content_bytes": 13
+        }
+      }
+    },
+    {
+      "sequence": 3,
+      "attempt_id": "first",
+      "event": {
+        "call_id": "first",
+        "epoch": 0,
+        "turn": 1,
+        "round": 1,
+        "subagent": null,
+        "phase": "text_delta",
+        "text": "intermediate answer",
+        "attempt_id": "first",
+        "display_graph_version": 1,
+        "stream_offset": 0,
+        "display_head": {
+          "previous_block_id": "51b236d606409d8834e9a2b3f04bdc04757f0233d8ff527426f12baff643560d",
+          "selected_block_id": "b230901c7db420ad8510f9a389aaf900aa9788a25db879a4fe45ebb5e836d459"
+        },
+        "display_block": {
+          "block_id": "b230901c7db420ad8510f9a389aaf900aa9788a25db879a4fe45ebb5e836d459",
+          "parent_block_id": "51b236d606409d8834e9a2b3f04bdc04757f0233d8ff527426f12baff643560d",
+          "block_type": "text",
+          "content_ref": "display:b230901c7db420ad8510f9a389aaf900aa9788a25db879a4fe45ebb5e836d459",
+          "sequence": 3,
+          "timestamp_ms": 0,
+          "attempt_id": "first",
+          "stream_key": "text",
+          "content_offset": 0,
+          "content_bytes": 19
+        }
+      }
+    },
+    {
+      "sequence": 4,
+      "attempt_id": "first",
+      "event": {
+        "call_id": "first",
+        "epoch": 0,
+        "turn": 1,
+        "round": 1,
+        "subagent": null,
+        "phase": "reasoning_delta",
+        "text": "abandoned thought",
+        "attempt_id": "first",
+        "display_graph_version": 1,
+        "stream_offset": 13,
+        "display_head": {
+          "previous_block_id": "b230901c7db420ad8510f9a389aaf900aa9788a25db879a4fe45ebb5e836d459",
+          "selected_block_id": "e31cff7cde674642584c16b9638d5d62761373491d3d5b447e30828011c4e36c"
+        },
+        "display_block": {
+          "block_id": "e31cff7cde674642584c16b9638d5d62761373491d3d5b447e30828011c4e36c",
+          "parent_block_id": "b230901c7db420ad8510f9a389aaf900aa9788a25db879a4fe45ebb5e836d459",
+          "block_type": "reasoning",
+          "content_ref": "display:e31cff7cde674642584c16b9638d5d62761373491d3d5b447e30828011c4e36c",
+          "sequence": 4,
+          "timestamp_ms": 0,
+          "attempt_id": "first",
+          "stream_key": "reasoning",
+          "content_offset": 0,
+          "content_bytes": 17
+        }
+      }
+    },
+    {
+      "sequence": 5,
+      "attempt_id": "display-selection",
+      "event": {
+        "phase": "display_head_selected",
+        "parent_block_id": "b230901c7db420ad8510f9a389aaf900aa9788a25db879a4fe45ebb5e836d459",
+        "display_graph_version": 1,
+        "display_head": {
+          "previous_block_id": "e31cff7cde674642584c16b9638d5d62761373491d3d5b447e30828011c4e36c",
+          "selected_block_id": "b230901c7db420ad8510f9a389aaf900aa9788a25db879a4fe45ebb5e836d459"
+        }
+      }
+    },
+    {
+      "sequence": 6,
+      "attempt_id": "retry",
+      "event": {
+        "call_id": "retry",
+        "epoch": 0,
+        "turn": 1,
+        "round": 1,
+        "subagent": null,
+        "phase": "started",
+        "attempt_id": "retry",
+        "display_graph_version": 1
+      }
+    },
+    {
+      "sequence": 7,
+      "attempt_id": "retry",
+      "event": {
+        "call_id": "retry",
+        "epoch": 0,
+        "turn": 1,
+        "round": 1,
+        "subagent": null,
+        "phase": "reasoning_delta",
+        "text": "retry thought",
+        "attempt_id": "retry",
+        "display_graph_version": 1,
+        "stream_offset": 0,
+        "display_head": {
+          "previous_block_id": "b230901c7db420ad8510f9a389aaf900aa9788a25db879a4fe45ebb5e836d459",
+          "selected_block_id": "89780b251c8d65d3c0056327c66e3e9014c3133db1491960178617b3b74e9e3d"
+        },
+        "display_block": {
+          "block_id": "89780b251c8d65d3c0056327c66e3e9014c3133db1491960178617b3b74e9e3d",
+          "parent_block_id": "b230901c7db420ad8510f9a389aaf900aa9788a25db879a4fe45ebb5e836d459",
+          "block_type": "reasoning",
+          "content_ref": "display:89780b251c8d65d3c0056327c66e3e9014c3133db1491960178617b3b74e9e3d",
+          "sequence": 7,
+          "timestamp_ms": 0,
+          "attempt_id": "retry",
+          "stream_key": "reasoning",
+          "content_offset": 0,
+          "content_bytes": 13
+        }
+      }
+    },
+    {
+      "sequence": 8,
+      "attempt_id": "retry",
+      "event": {
+        "call_id": "retry",
+        "epoch": 0,
+        "turn": 1,
+        "round": 1,
+        "subagent": null,
+        "phase": "tool_call_delta",
+        "index": 0,
+        "id": "invocation-1",
+        "name": "read",
+        "arguments": "{\"path\":\"README.md\"}",
+        "attempt_id": "retry",
+        "display_graph_version": 1,
+        "stream_offset": 0,
+        "display_head": {
+          "previous_block_id": "89780b251c8d65d3c0056327c66e3e9014c3133db1491960178617b3b74e9e3d",
+          "selected_block_id": "93d69558cd79200b7ab2bc1ca93c1dc1d33756097d2eba782dfa880f08d56ced"
+        },
+        "display_block": {
+          "block_id": "93d69558cd79200b7ab2bc1ca93c1dc1d33756097d2eba782dfa880f08d56ced",
+          "parent_block_id": "89780b251c8d65d3c0056327c66e3e9014c3133db1491960178617b3b74e9e3d",
+          "block_type": "tool_call",
+          "content_ref": "display:93d69558cd79200b7ab2bc1ca93c1dc1d33756097d2eba782dfa880f08d56ced",
+          "sequence": 8,
+          "timestamp_ms": 0,
+          "attempt_id": "retry",
+          "stream_key": "tool:0",
+          "content_offset": 0,
+          "content_bytes": 20
+        }
+      }
+    },
+    {
+      "sequence": 9,
+      "attempt_id": "retry",
+      "event": {
+        "call_id": "retry",
+        "epoch": 0,
+        "turn": 1,
+        "round": 1,
+        "subagent": null,
+        "phase": "invalidated",
+        "reason": "cancelled",
+        "attempt_id": "retry",
+        "display_graph_version": 1,
+        "reasoning_bytes": 13,
+        "text_bytes": 0,
+        "archive_complete": true
+      }
+    }
+  ],
+  "page": {
+    "records": [
+      {
+        "sequence": 1,
+        "attempt_id": "first",
+        "event": {
+          "call_id": "first",
+          "epoch": 0,
+          "turn": 1,
+          "round": 1,
+          "subagent": null,
+          "phase": "started",
+          "attempt_id": "first",
+          "display_graph_version": 1
+        }
+      },
+      {
+        "sequence": 2,
+        "attempt_id": "first",
+        "event": {
+          "call_id": "first",
+          "epoch": 0,
+          "turn": 1,
+          "round": 1,
+          "subagent": null,
+          "phase": "reasoning_delta",
+          "text": "first thought",
+          "attempt_id": "first",
+          "display_graph_version": 1,
+          "stream_offset": 0,
+          "display_head": {
+            "previous_block_id": null,
+            "selected_block_id": "51b236d606409d8834e9a2b3f04bdc04757f0233d8ff527426f12baff643560d"
+          },
+          "display_block": {
+            "block_id": "51b236d606409d8834e9a2b3f04bdc04757f0233d8ff527426f12baff643560d",
+            "parent_block_id": null,
+            "block_type": "reasoning",
+            "content_ref": "display:51b236d606409d8834e9a2b3f04bdc04757f0233d8ff527426f12baff643560d",
+            "sequence": 2,
+            "timestamp_ms": 0,
+            "attempt_id": "first",
+            "stream_key": "reasoning",
+            "content_offset": 0,
+            "content_bytes": 13
+          }
+        }
+      },
+      {
+        "sequence": 3,
+        "attempt_id": "first",
+        "event": {
+          "call_id": "first",
+          "epoch": 0,
+          "turn": 1,
+          "round": 1,
+          "subagent": null,
+          "phase": "text_delta",
+          "text": "intermediate answer",
+          "attempt_id": "first",
+          "display_graph_version": 1,
+          "stream_offset": 0,
+          "display_head": {
+            "previous_block_id": "51b236d606409d8834e9a2b3f04bdc04757f0233d8ff527426f12baff643560d",
+            "selected_block_id": "b230901c7db420ad8510f9a389aaf900aa9788a25db879a4fe45ebb5e836d459"
+          },
+          "display_block": {
+            "block_id": "b230901c7db420ad8510f9a389aaf900aa9788a25db879a4fe45ebb5e836d459",
+            "parent_block_id": "51b236d606409d8834e9a2b3f04bdc04757f0233d8ff527426f12baff643560d",
+            "block_type": "text",
+            "content_ref": "display:b230901c7db420ad8510f9a389aaf900aa9788a25db879a4fe45ebb5e836d459",
+            "sequence": 3,
+            "timestamp_ms": 0,
+            "attempt_id": "first",
+            "stream_key": "text",
+            "content_offset": 0,
+            "content_bytes": 19
+          }
+        }
+      },
+      {
+        "sequence": 6,
+        "attempt_id": "retry",
+        "event": {
+          "call_id": "retry",
+          "epoch": 0,
+          "turn": 1,
+          "round": 1,
+          "subagent": null,
+          "phase": "started",
+          "attempt_id": "retry",
+          "display_graph_version": 1
+        }
+      },
+      {
+        "sequence": 7,
+        "attempt_id": "retry",
+        "event": {
+          "call_id": "retry",
+          "epoch": 0,
+          "turn": 1,
+          "round": 1,
+          "subagent": null,
+          "phase": "reasoning_delta",
+          "text": "retry thought",
+          "attempt_id": "retry",
+          "display_graph_version": 1,
+          "stream_offset": 0,
+          "display_head": {
+            "previous_block_id": "b230901c7db420ad8510f9a389aaf900aa9788a25db879a4fe45ebb5e836d459",
+            "selected_block_id": "89780b251c8d65d3c0056327c66e3e9014c3133db1491960178617b3b74e9e3d"
+          },
+          "display_block": {
+            "block_id": "89780b251c8d65d3c0056327c66e3e9014c3133db1491960178617b3b74e9e3d",
+            "parent_block_id": "b230901c7db420ad8510f9a389aaf900aa9788a25db879a4fe45ebb5e836d459",
+            "block_type": "reasoning",
+            "content_ref": "display:89780b251c8d65d3c0056327c66e3e9014c3133db1491960178617b3b74e9e3d",
+            "sequence": 7,
+            "timestamp_ms": 0,
+            "attempt_id": "retry",
+            "stream_key": "reasoning",
+            "content_offset": 0,
+            "content_bytes": 13
+          }
+        }
+      },
+      {
+        "sequence": 8,
+        "attempt_id": "retry",
+        "event": {
+          "call_id": "retry",
+          "epoch": 0,
+          "turn": 1,
+          "round": 1,
+          "subagent": null,
+          "phase": "tool_call_delta",
+          "index": 0,
+          "id": "invocation-1",
+          "name": "read",
+          "arguments": "{\"path\":\"README.md\"}",
+          "attempt_id": "retry",
+          "display_graph_version": 1,
+          "stream_offset": 0,
+          "display_head": {
+            "previous_block_id": "89780b251c8d65d3c0056327c66e3e9014c3133db1491960178617b3b74e9e3d",
+            "selected_block_id": "93d69558cd79200b7ab2bc1ca93c1dc1d33756097d2eba782dfa880f08d56ced"
+          },
+          "display_block": {
+            "block_id": "93d69558cd79200b7ab2bc1ca93c1dc1d33756097d2eba782dfa880f08d56ced",
+            "parent_block_id": "89780b251c8d65d3c0056327c66e3e9014c3133db1491960178617b3b74e9e3d",
+            "block_type": "tool_call",
+            "content_ref": "display:93d69558cd79200b7ab2bc1ca93c1dc1d33756097d2eba782dfa880f08d56ced",
+            "sequence": 8,
+            "timestamp_ms": 0,
+            "attempt_id": "retry",
+            "stream_key": "tool:0",
+            "content_offset": 0,
+            "content_bytes": 20
+          }
+        }
+      },
+      {
+        "sequence": 9,
+        "attempt_id": "retry",
+        "event": {
+          "call_id": "retry",
+          "epoch": 0,
+          "turn": 1,
+          "round": 1,
+          "subagent": null,
+          "phase": "invalidated",
+          "reason": "cancelled",
+          "attempt_id": "retry",
+          "display_graph_version": 1,
+          "reasoning_bytes": 13,
+          "text_bytes": 0,
+          "archive_complete": true
+        }
+      }
+    ],
+    "high_water": 9,
+    "next_cursor": null,
+    "graph": {
+      "selected_head": "93d69558cd79200b7ab2bc1ca93c1dc1d33756097d2eba782dfa880f08d56ced",
+      "selection_known": true,
+      "revision": 9,
+      "nodes": [
+        {
+          "block_id": "51b236d606409d8834e9a2b3f04bdc04757f0233d8ff527426f12baff643560d",
+          "parent_block_id": null,
+          "block_type": "reasoning",
+          "content_ref": "display:51b236d606409d8834e9a2b3f04bdc04757f0233d8ff527426f12baff643560d",
+          "sequence": 2,
+          "timestamp_ms": 0,
+          "attempt_id": "first",
+          "stream_key": "reasoning"
+        },
+        {
+          "block_id": "b230901c7db420ad8510f9a389aaf900aa9788a25db879a4fe45ebb5e836d459",
+          "parent_block_id": "51b236d606409d8834e9a2b3f04bdc04757f0233d8ff527426f12baff643560d",
+          "block_type": "text",
+          "content_ref": "display:b230901c7db420ad8510f9a389aaf900aa9788a25db879a4fe45ebb5e836d459",
+          "sequence": 3,
+          "timestamp_ms": 0,
+          "attempt_id": "first",
+          "stream_key": "text"
+        },
+        {
+          "block_id": "89780b251c8d65d3c0056327c66e3e9014c3133db1491960178617b3b74e9e3d",
+          "parent_block_id": "b230901c7db420ad8510f9a389aaf900aa9788a25db879a4fe45ebb5e836d459",
+          "block_type": "reasoning",
+          "content_ref": "display:89780b251c8d65d3c0056327c66e3e9014c3133db1491960178617b3b74e9e3d",
+          "sequence": 7,
+          "timestamp_ms": 0,
+          "attempt_id": "retry",
+          "stream_key": "reasoning"
+        },
+        {
+          "block_id": "93d69558cd79200b7ab2bc1ca93c1dc1d33756097d2eba782dfa880f08d56ced",
+          "parent_block_id": "89780b251c8d65d3c0056327c66e3e9014c3133db1491960178617b3b74e9e3d",
+          "block_type": "tool_call",
+          "content_ref": "display:93d69558cd79200b7ab2bc1ca93c1dc1d33756097d2eba782dfa880f08d56ced",
+          "sequence": 8,
+          "timestamp_ms": 0,
+          "attempt_id": "retry",
+          "stream_key": "tool:0"
+        }
+      ],
+      "complete": true
+    },
+    "coverage": "available"
+  },
+  "settled": {
+    "records": [],
+    "high_water": 9,
+    "next_cursor": null,
+    "graph": {
+      "selected_head": "93d69558cd79200b7ab2bc1ca93c1dc1d33756097d2eba782dfa880f08d56ced",
+      "selection_known": true,
+      "revision": 9,
+      "nodes": [],
+      "complete": true
+    },
+    "coverage": "available"
+  }
+}

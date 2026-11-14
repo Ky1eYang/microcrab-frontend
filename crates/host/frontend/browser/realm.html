@@ -1,0 +1,41 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>microcrab browser execution realm</title>
+<script>
+// This opaque sandbox separates execution from application DOM authority.
+// CSP denies all direct connections; credentialless alone did not isolate a
+// descendant Worker's ambient cookies in Chromium. Only the supervisor brokers
+// HTTP. This bootstrap owns the port and Worker lifecycle acknowledgements.
+(() => {
+  const config = JSON.parse(decodeURIComponent(location.hash.slice(1)));
+  if (config.origins !== null && (!Array.isArray(config.origins) || config.origins.length > 32)) throw Error('Invalid network ceiling');
+  for (const value of config.origins ?? []) {
+    const url = new URL(value);
+    if (url.origin !== value || url.protocol !== 'https:' || url.origin === config.backend) throw Error('Invalid network ceiling');
+  }
+  const policy = document.createElement('meta');
+  policy.httpEquiv = 'Content-Security-Policy';
+  policy.content = `default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob:; worker-src blob:; connect-src 'none'; img-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'`;
+  document.head.append(policy);
+  onmessage = event => {
+    if (event.source !== parent || !event.ports[0]) return;
+    onmessage = null;
+    const port = event.ports[0]; let worker;
+    port.onmessage = ({ data }) => {
+      if (data.type === 'terminate') { worker?.terminate(); worker = null; port.postMessage({ type: 'terminated', nonce: data.nonce }); return; }
+      if (data.type === 'start') {
+        try {
+          const source = URL.createObjectURL(new Blob([data.source], { type: 'text/javascript' }));
+          worker = new Worker(source); URL.revokeObjectURL(source);
+          worker.onmessage = event => { if (!['terminated', 'realm_ready'].includes(event.data?.type)) port.postMessage(event.data); };
+          worker.onerror = () => port.postMessage({ type: 'failed', message: 'Execution worker unavailable' });
+          worker.postMessage(data.boot);
+        } catch { port.postMessage({ type: 'failed', message: 'Opaque execution worker unsupported' }); }
+        return;
+      }
+      worker?.postMessage(data);
+    };
+    port.start(); port.postMessage({ type: 'realm_ready' });
+  };
+})();
+</script>

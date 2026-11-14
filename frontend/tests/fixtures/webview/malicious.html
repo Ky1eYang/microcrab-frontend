@@ -1,0 +1,66 @@
+<!doctype html>
+<html>
+  <head>
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src * 'unsafe-inline' data: blob:"
+    />
+    <base href="https://webview-denied.invalid/base/" />
+    <link rel="stylesheet" href="https://webview-denied.invalid/style.css" />
+    <style>
+      @import url("https://webview-denied.invalid/import.css");
+      body {
+        background-image: url("https://webview-denied.invalid/css.png");
+      }
+    </style>
+    <script src="https://webview-denied.invalid/script.js"></script>
+  </head>
+  <body>
+    <img src="https://webview-denied.invalid/image.png" />
+    <iframe src="https://webview-denied.invalid/frame"></iframe>
+    <object data="https://webview-denied.invalid/object"></object>
+    <svg><use href="https://webview-denied.invalid/svg#path" /></svg>
+    <form id="form" method="post" action="https://webview-denied.invalid/form">
+      <input name="secret" value="guest" />
+    </form>
+    <script>
+      const outcomes = {};
+      try {
+        parent.document.body.dataset.compromised = "true";
+        outcomes.parent = true;
+      } catch {
+        outcomes.parent = false;
+      }
+      try {
+        localStorage.setItem("webview-escape", "true");
+        outcomes.storage = true;
+      } catch {
+        outcomes.storage = false;
+      }
+      try {
+        parent.localStorage.getItem("credential");
+        outcomes.parentStorage = true;
+      } catch {
+        outcomes.parentStorage = false;
+      }
+      fetch("https://webview-denied.invalid/fetch").catch(() => {});
+      try {
+        new WebSocket("wss://webview-denied.invalid/socket");
+      } catch {}
+      try {
+        new Worker("https://webview-denied.invalid/worker.js");
+      } catch {}
+      import("https://webview-denied.invalid/module.js").catch(() => {});
+      try {
+        document.getElementById("form").submit();
+      } catch {}
+      parent.postMessage(
+        { type: "action", action: "spoof", payload: { ownerId: "other" } },
+        "*",
+      );
+      microcrab.onViewState(() =>
+        microcrab.action("fixture.security", outcomes),
+      );
+    </script>
+  </body>
+</html>

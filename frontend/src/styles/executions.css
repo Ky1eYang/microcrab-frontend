@@ -1,0 +1,295 @@
+.client-tools-settings {
+  min-width: 0;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-body);
+  overflow-wrap: anywhere;
+}
+
+.client-tools-settings > h3 {
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+
+.client-tools-settings > h3:not(:first-child),
+.client-tools-settings > .executions,
+.client-tools-settings > details {
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--border);
+}
+
+.client-tools-settings > p {
+  margin: 0;
+  color: var(--text-2);
+}
+
+.client-tools-settings > button,
+.client-tools-settings > .settings-row > button,
+.client-tools-settings > details > button {
+  align-self: flex-start;
+  max-width: 100%;
+  height: auto;
+  min-height: var(--sp-6);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.client-tools-settings > details > summary {
+  color: var(--text-2);
+  cursor: pointer;
+  margin-bottom: var(--sp-2);
+}
+
+.client-tools-settings .settings-row > span {
+  min-width: 0;
+}
+
+/* Execution history stays inside the settings dialog's single container.
+   Output remains Payload-owned; these rules only arrange controls and metadata. */
+.executions,
+.tool-diagnostic {
+  min-width: 0;
+  color: var(--text);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-body);
+  overflow-wrap: anywhere;
+}
+
+.executions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.executions > h3 {
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+
+.executions > .execution-record {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--sp-3);
+  min-width: 0;
+  padding: var(--sp-3) 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 0;
+}
+
+.execution-record-body {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.execution-record-body > strong {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.executions > p,
+.execution-record-body > p {
+  margin: 0;
+  color: var(--text-2);
+}
+
+.executions > p[role="status"],
+.execution-record-body > p[role="status"],
+.execution-record-body > p[role="alert"] {
+  padding-inline-start: var(--sp-3);
+  border-inline-start: 2px solid var(--border-strong);
+}
+
+.execution-record-body > strong + p[role="status"] {
+  padding-inline-start: 0;
+  border-inline-start: 0;
+  font-size: var(--fs-xs);
+}
+
+.execution-record[data-status="failed"] > .execution-record-body > strong + p,
+.execution-record-body > p[role="alert"] {
+  color: var(--danger);
+}
+
+.execution-record-body > p[role="alert"] {
+  border-inline-start-color: var(--danger);
+}
+
+.execution-metadata {
+  display: grid;
+  grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
+  gap: var(--sp-1) var(--sp-4);
+  min-width: 0;
+  margin: 0;
+}
+
+.execution-metadata > dt {
+  min-width: 0;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+}
+
+.execution-metadata > dd {
+  min-width: 0;
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-code);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.tool-diagnostic {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding-block: var(--sp-2);
+  border-top: 1px solid var(--border);
+}
+
+.tool-diagnostic-summary {
+  color: var(--danger);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.execution-action.ghost-btn {
+  align-self: flex-start;
+  max-width: 100%;
+  min-height: var(--sp-6);
+  height: auto;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: start;
+  font-size: var(--fs-sm);
+}
+
+.execution-cancel.ghost-btn {
+  color: var(--danger);
+}
+
+.execution-action:focus-visible,
+.execution-record-body > details > summary:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.execution-record-body > details {
+  min-width: 0;
+}
+
+.execution-record-body > details > summary {
+  color: var(--text-2);
+  cursor: pointer;
+  padding-block: var(--sp-1);
+}
+
+.execution-record-body > details[open] > summary {
+  margin-bottom: var(--sp-2);
+}
+
+.execution-peek {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--fs-sm);
+}
+
+.execution-peek-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+
+.execution-peek p {
+  margin: 0;
+  color: var(--text-2);
+}
+
+.execution-peek [role="alert"] {
+  color: var(--danger);
+}
+
+.execution-peek-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--border);
+}
+
+.execution-peek-section > h3 {
+  margin: 0;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.running-tools-menu {
+  max-width: calc(100vw - var(--sp-4));
+}
+
+.running-tools-menu .running-tool-item {
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  min-width: 0;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+}
+
+.running-tools-menu .running-tool-name {
+  overflow-wrap: anywhere;
+}
+
+.running-tool-right {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.execution-peek-button.ghost-btn {
+  min-width: var(--sp-5);
+  min-height: var(--sp-5);
+  padding: var(--sp-1);
+}
+
+.running-tool-item[data-status="failed"] .running-tool-summary {
+  color: var(--danger);
+}
+
+/* Channel names are arbitrary payload data, not uppercase section labels. */
+.execution-record-body .payload-label {
+  min-width: 0;
+  font-size: var(--fs-xs);
+  letter-spacing: normal;
+  text-transform: none;
+  overflow-wrap: anywhere;
+}
+
+.execution-record-body .payload-head {
+  height: auto;
+  min-height: var(--sp-5);
+}
+
+@media (max-width: 480px) {
+  .execution-metadata {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--sp-1);
+  }
+
+  .execution-metadata > dd:not(:last-child) {
+    margin-bottom: var(--sp-2);
+  }
+}

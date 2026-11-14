@@ -1,0 +1,103 @@
+{
+  "schema": 1,
+  "repository": "https://github.com/Ky1eYang/microcrab-core",
+  "sourceDirectory": "crates/host/frontend/browser",
+  "upstreamCommit": "a6d991b10caacb0d3fb10cf0ff9fbe4e5e6fbe64",
+  "files": [
+    {
+      "path": "capture.mjs",
+      "sha256": "8cf41d045b9b86e243095c7f41a3fcf639db7da3d1ba211bc040c697bd2b5ba7",
+      "size": 2823
+    },
+    {
+      "path": "capture.test.mjs",
+      "sha256": "6af7b2e0e48120ffe77a342044a004169da950a0c83392392d9b098f10d2132b",
+      "size": 1580
+    },
+    {
+      "path": "descriptor.test.mjs",
+      "sha256": "065ad6d760d0313357b829f28bd882f667a883ee36040fccb5e77f3c85a01ac6",
+      "size": 3203
+    },
+    {
+      "path": "execution-worker.mjs",
+      "sha256": "ddd117453fc61b4e3427ac2a4efa19a83c73e8b73a638995b2418984ecc6c280",
+      "size": 17062
+    },
+    {
+      "path": "lifecycle.test.mjs",
+      "sha256": "2b5c925d715de549beccc6c7d4d55870bedf370db24d91183da74b1bdbccb4e3",
+      "size": 9984
+    },
+    {
+      "path": "mutation-receipts.test.mjs",
+      "sha256": "f68e93ac521211410a48f1c41ae5b1eb81cb32b4c13e67ff0a840b5db6e3325a",
+      "size": 14286
+    },
+    {
+      "path": "mutations.mjs",
+      "sha256": "5be62cd06ff6b2a4212112271c7a9563ce1b31aef56cd5bf2a02c8d86d494803",
+      "size": 8797
+    },
+    {
+      "path": "mutations.test.mjs",
+      "sha256": "c63a9af5ae1788dbefd807043840ea3b0413d9ad0e579f823bd6cda997314159",
+      "size": 4011
+    },
+    {
+      "path": "network-diagnostics.mjs",
+      "sha256": "a4a555755a475d2e82654b289d3834fcec86273ab95f1d4db98cfcd19298d938",
+      "size": 1487
+    },
+    {
+      "path": "network-diagnostics.test.mjs",
+      "sha256": "24874d3b3ac1ddf8cae8af5e198f236a3860a7f389f9fbc775f716cf9fd69d2d",
+      "size": 3194
+    },
+    {
+      "path": "network.mjs",
+      "sha256": "d8889b48118eb88c20ef8b495944010b5afd327c3b76f7d921e44fe3a22c3185",
+      "size": 4747
+    },
+    {
+      "path": "network.test.mjs",
+      "sha256": "f744ce56ed700ce62366ede3920d1107a693f6f19491191d74fe6ad2969a1f5d",
+      "size": 3551
+    },
+    {
+      "path": "realm.html",
+      "sha256": "f1ff8b75ca6a9518e676888a81eefa45c68d408008ed603a2ab3719e49ba48f4",
+      "size": 2319
+    },
+    {
+      "path": "receipts.mjs",
+      "sha256": "a7fca89704247436a79956eb8610fb298a6f72320fdef2fffa31dc22b19750d7",
+      "size": 1913
+    },
+    {
+      "path": "receipts.test.mjs",
+      "sha256": "269754ac3e4697168cc20ee2829fdb5db607589e69f78e3138698da31f5efc85",
+      "size": 1672
+    },
+    {
+      "path": "shell.test.mjs",
+      "sha256": "bd4fd9d4c8c7afd9ec372f34455661ab0d19f8e02b3fcc2291b142a5ce21c4dd",
+      "size": 802
+    },
+    {
+      "path": "supervisor.mjs",
+      "sha256": "73bd27473eb79241a8edef300bf20e878cfe72d56849b8eccb4954cfa43377aa",
+      "size": 39049
+    },
+    {
+      "path": "worker.test.mjs",
+      "sha256": "6d87ea766ef920691e3b1ab07f3f765c1fde94e7e870abaceade6efde5ec60a6",
+      "size": 4599
+    },
+    {
+      "path": "workspace.mjs",
+      "sha256": "4e38eb395d65f6ac8814d7f96d70dac441538e976df1fbbcaf521a5b3d31cb8b",
+      "size": 11724
+    }
+  ]
+}

@@ -1,0 +1,197 @@
+/* Host connection dialog: isolated layout over the shared neutral tokens. */
+.host-connect-overlay {
+  padding: var(--sp-3);
+}
+
+.dialog.host-connect-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(760px, 100%);
+  min-width: 0;
+  max-height: calc(100dvh - var(--sp-5));
+  overflow: hidden;
+  padding: 0;
+}
+
+.host-connect-dialog > .dialog-header {
+  flex: 0 0 auto;
+  padding: var(--sp-4);
+  border-bottom: 1px solid var(--border);
+}
+
+.host-connect-dialog .dialog-header h2 {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--fs-lg);
+}
+
+.host-connect-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-height: 0;
+  padding: var(--sp-4);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.host-connect-dialog .auth-type-tabs,
+.host-connect-field-heading,
+.host-connect-create-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.host-connect-field-heading {
+  justify-content: space-between;
+}
+
+.host-connect-fields,
+.host-connect-field,
+.host-connect-create {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: var(--sp-2);
+}
+
+.host-connect-fields {
+  gap: var(--sp-3);
+}
+
+.host-connect-field label,
+.host-connect-label {
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+}
+
+.host-connect-create,
+.host-connect-workspace,
+.host-connect-note {
+  padding: var(--sp-3) 0 0;
+  margin-top: var(--sp-3);
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.host-connect-body > .host-connect-create:first-child,
+.host-connect-body > .host-connect-workspace:first-child,
+.host-connect-body > .host-connect-note:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.host-connect-create h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.host-connect-create > div:not(.host-connect-create-actions) {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+.host-connect-dialog .settings-input {
+  min-width: 0;
+  max-width: 100%;
+  width: 100%;
+}
+
+.host-connect-hint {
+  display: block;
+  margin-top: var(--sp-1);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  overflow-wrap: anywhere;
+}
+
+.host-connect-create-actions {
+  justify-content: flex-end;
+  margin-top: var(--sp-1);
+}
+
+.host-connect-note {
+  font-size: var(--fs-sm);
+}
+
+.host-connect-note[data-ready="true"] {
+  border-top: 0;
+  border-inline-start: 2px solid var(--success);
+  padding-inline-start: var(--sp-3);
+  margin-top: var(--sp-3);
+}
+
+.host-connect-status-heading {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--success);
+  font-weight: 600;
+}
+
+.host-connect-status-detail {
+  margin-top: var(--sp-1);
+  font-size: var(--fs-xs);
+}
+
+.host-connect-error {
+  margin-top: var(--sp-1);
+  color: var(--danger);
+  font-size: var(--fs-sm);
+  overflow-wrap: anywhere;
+}
+
+.host-connect-dialog code {
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+.host-connect-dialog .host-connect-actions {
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: var(--sp-3) var(--sp-4);
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+@media (max-width: 480px) {
+  .host-connect-overlay {
+    padding: var(--sp-2);
+  }
+
+  .dialog.host-connect-dialog {
+    max-height: calc(100dvh - var(--sp-4));
+  }
+
+  .host-connect-dialog > .dialog-header,
+  .host-connect-body,
+  .host-connect-dialog .host-connect-actions {
+    padding: var(--sp-3);
+  }
+
+  .host-connect-dialog .auth-tab-btn {
+    min-width: 0;
+    white-space: normal;
+  }
+
+  .host-connect-actions > button {
+    flex: 1 1 auto;
+    white-space: normal;
+    min-height: 36px;
+  }
+}
