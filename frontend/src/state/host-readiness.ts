@@ -38,15 +38,22 @@ export function hostReadiness(
   projectId = selectedProjectId(state),
 ) {
   const connection = state.hostConnection;
+  const hostFlavor = state.sessionId
+    ? state.sessions.find((session) => session.id === state.sessionId)
+        ?.hostFlavor
+    : state.draftWorkspace.kind === "chat_only" ||
+        state.draftWorkspace.kind === "browser_sandbox"
+      ? state.draftWorkspace.kind
+      : undefined;
   const conversationId =
     !projectId &&
-    (state.sessionId ||
-      (state.draftWorkspace.kind === "none"
-        ? connection?.conversationId
-        : undefined));
+    (state.sessionId || (hostFlavor ? connection?.conversationId : undefined));
   const matched = projectId
     ? connection?.projectId === projectId
-    : !!conversationId && connection?.conversationId === conversationId;
+    : !!hostFlavor &&
+      !!conversationId &&
+      connection?.conversationId === conversationId &&
+      connection?.hostFlavor === hostFlavor;
   const status =
     !connection || !matched
       ? projectId && connection?.projectId && connection.state !== "detached"
@@ -63,5 +70,5 @@ export function hostReadiness(
               : connection.catalogError
                 ? "catalog_error"
                 : "loading_catalog";
-  return { projectId, matched, status, ready: status === "ready" };
+  return { projectId, hostFlavor, matched, status, ready: status === "ready" };
 }

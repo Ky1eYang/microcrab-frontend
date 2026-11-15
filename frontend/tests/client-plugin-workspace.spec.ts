@@ -98,7 +98,8 @@ for (const width of [1440, 390]) {
     );
     const viewer = manager.locator('[data-plugin-id="microcrab.state-viewer"]');
     const bytes = await readFile(
-      "../target/wasm32-unknown-unknown/release/microcrab_client_plugin_state_viewer.wasm",
+      process.env.MICROCRAB_TEST_VIEWER_CORE_WASM ??
+        "../target/wasm32-unknown-unknown/release/microcrab_client_plugin_state_viewer.wasm",
     );
     const upload = {
       name: "microcrab_client_plugin_state_viewer.wasm",

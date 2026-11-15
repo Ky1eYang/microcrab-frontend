@@ -35,6 +35,10 @@ ${source}`,
     manager.locator('[data-plugin-id="microcrab.fixture"]'),
   ).toBeVisible();
   await manager
+    .locator('[data-plugin-id="microcrab.mcp-bridge"]')
+    .getByLabel("在当前会话启用")
+    .uncheck();
+  await manager
     .locator('[data-plugin-id="microcrab.fixture"]')
     .getByLabel("在当前会话启用")
     .check();
@@ -98,7 +102,20 @@ ${source}`,
       visibility: "invisible",
       persistence: "ephemeral",
     },
+    {
+      name: "plugins",
+      value: [],
+      visibility: "visible",
+      persistence: "persisted",
+      editors: ["client"],
+    },
   ]);
+  expect(JSON.stringify(admitted[0].params.input.variables)).not.toContain(
+    "authorization",
+  );
+  expect(JSON.stringify(admitted[0].params.input.variables)).not.toContain(
+    "endpoint",
+  );
   expect(await page.evaluate(() => (window as any).pluginSendCalls)).toEqual({
     queue: 1,
     observe: 1,
@@ -125,6 +142,19 @@ ${source}`,
   expect(queues).toHaveLength(2);
   expect(queues[1].params.input).toEqual({
     parts: [{ type: "text", text: "keep this original draft" }],
+    variables: {
+      set: {},
+      remove: [],
+      scoped_set: [
+        {
+          name: "plugins",
+          value: [],
+          visibility: "visible",
+          persistence: "persisted",
+          editors: ["client"],
+        },
+      ],
+    },
   });
 });
 
@@ -143,6 +173,7 @@ async function realAssets(page: Page) {
     expect(
       (await page.request.get(`/plugins/${plugin.file}`)).ok(),
     ).toBeTruthy();
+  return index;
 }
 
 test("real Viewer renders pure values, reveals invisible values locally and preserves Session navigation", async ({
@@ -178,6 +209,26 @@ test("real Viewer renders pure values, reveals invisible values locally and pres
   await expect(
     manager.locator('[data-plugin-id="microcrab.state-viewer"]'),
   ).toBeVisible();
+  const sidebar = page.getByTestId("client-plugin-sidebar");
+  const viewerTab = sidebar.getByRole("tab", {
+    name: "State Viewer",
+    exact: true,
+  });
+  const mcpTab = sidebar.getByRole("tab", { name: "MCP bridge", exact: true });
+  // Both real bundled capabilities are enabled: the visual provider remains the
+  // default, while explicit tool-provider configuration selection stays stable.
+  await expect(mcpTab).toBeVisible();
+  await expect(viewerTab).toHaveAttribute("aria-selected", "true");
+  await mcpTab.click();
+  const serverId = sidebar.getByLabel("服务器 ID", { exact: true });
+  await serverId.fill("explicit-selection");
+  await expect(mcpTab).toHaveAttribute("aria-selected", "true");
+  await expect(serverId).toHaveValue("explicit-selection");
+  await expect(sidebar.getByTestId("plugin-expand")).toHaveCount(0);
+  await expect(
+    page.locator('[role="tab"]').filter({ hasText: "MCP bridge" }),
+  ).toHaveCount(1);
+  await viewerTab.click();
   const viewer = page.locator(
     '[data-testid="client-plugin-sidebar"] .plugin-renderer[data-plugin-id="microcrab.state-viewer"]',
   );
@@ -234,7 +285,7 @@ test("real Component preprocessing caches exact operations and fences Session ch
   page,
 }) => {
   await nativeBackend(page);
-  await realAssets(page);
+  const assets = await realAssets(page);
   await page.goto("/");
   const result = await page.evaluate(async () => {
     // @ts-expect-error Browser source imports are resolved by the existing Vite test server.
@@ -253,8 +304,13 @@ test("real Component preprocessing caches exact operations and fences Session ch
     bridge.sync(state);
     await bridge.ready;
     const registry = bridge.registry;
+    const mcpTargets = registry
+      .getSnapshot()
+      .find((p: any) => p.manifest.id === "microcrab.mcp-bridge")!.manifest
+      .targets;
     await registry.setEnabled("microcrab.state-viewer", "s1", false);
     await registry.setEnabled("microcrab.fixture", "s1", true);
+    await registry.setEnabled("microcrab.mcp-bridge", "s1", true);
     await registry.action("microcrab.fixture", "prefix", {
       value: "checked: ",
     });
@@ -316,13 +372,34 @@ test("real Component preprocessing caches exact operations and fences Session ch
       bypassed,
       bypassConsumed,
       original,
+      mcpTargets,
     };
   });
+  expect(result.mcpTargets).toEqual(["sidebar"]);
   expect(result.first).toEqual(result.cached);
   expect(result.first.parts).toEqual([
     { type: "text", text: "checked: first\nsecond" },
     result.original.parts[1],
   ]);
+  const mcpArtifact = assets.plugins.find(
+    (entry: { id: string }) => entry.id === "microcrab.mcp-bridge",
+  ).sha256;
+  const inventory = {
+    name: "plugins",
+    value: [
+      {
+        id: "microcrab.mcp-bridge",
+        name: "MCP bridge",
+        version: "0.1.17",
+        artifact: mcpArtifact,
+        description:
+          "Multi-server MCP tools. List servers, describe exact tools, then call with schema/configuration pins.",
+      },
+    ],
+    visibility: "visible",
+    persistence: "persisted",
+    editors: ["client"],
+  };
   expect(result.first.variables.scoped_set).toEqual([
     {
       name: "fixture_value",
@@ -330,9 +407,15 @@ test("real Component preprocessing caches exact operations and fences Session ch
       visibility: "invisible",
       persistence: "ephemeral",
     },
+    inventory,
   ]);
+  expect(JSON.stringify(result.first.variables)).not.toContain("authorization");
+  expect(JSON.stringify(result.first.variables)).not.toContain("endpoint");
   expect(result.fenced).toBeNull();
   expect(result.rejected).toBeTruthy();
-  expect(result.bypassed).toEqual(result.original);
+  expect(result.bypassed).toEqual({
+    ...result.original,
+    variables: { set: {}, remove: [], scoped_set: [inventory] },
+  });
   expect(result.bypassConsumed).toBeTruthy();
 });

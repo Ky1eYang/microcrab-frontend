@@ -75,6 +75,7 @@ export class ClientToolController {
       name: string,
       args: unknown,
       signal: AbortSignal,
+      invocation: Readonly<ClientInvocation>,
     ) => Promise<unknown>,
   ) {}
   reset() {
@@ -325,7 +326,12 @@ export class ClientToolController {
           )
         : undefined;
     try {
-      return await this.external(call.tool, call.arguments, controller.signal);
+      return await this.external(
+        call.tool,
+        call.arguments,
+        controller.signal,
+        Object.freeze(structuredClone(call)),
+      );
     } finally {
       clearTimeout(timer);
       this.active.delete(call.invocation_id);

@@ -4,10 +4,11 @@ members = [
     "crates/xtask",
     "crates/client/plugins/state-viewer",
     "crates/client/plugins/fixture",
+    "crates/client/plugins/mcp-bridge",
 ]
 
 [workspace.package]
-version = "0.1.16"
+version = "0.1.17"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/Ky1eYang/microcrab-frontend"

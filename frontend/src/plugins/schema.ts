@@ -460,6 +460,24 @@ export function result(text: string): PluginResult {
       );
     throw new Error(r.error);
   }
+  if (r.tool_completion !== undefined) {
+    const c = r.tool_completion;
+    if (
+      !c ||
+      !c.identity ||
+      typeof c.identity.invocation_id !== "string" ||
+      !["pending", "completed", "failed"].includes(c.status) ||
+      (c.error !== undefined &&
+        (typeof c.error !== "string" || c.error.length > 4000)) ||
+      (c.outcome_unknown !== undefined &&
+        typeof c.outcome_unknown !== "boolean") ||
+      (c.status === "completed" && c.output === undefined) ||
+      new TextEncoder().encode(JSON.stringify(c)).length > 64 * 1024
+    )
+      throw Error(
+        "Invalid plugin tool completion or durable result budget exceeded",
+      );
+  }
   if (r.tree) validateTree(r.tree);
   if (
     r.vars_patch &&

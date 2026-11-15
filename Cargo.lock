@@ -158,15 +158,24 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
 name = "microcrab-client-plugin-fixture"
-version = "0.1.16"
+version = "0.1.17"
 dependencies = [
  "serde_json",
  "wit-bindgen",
 ]
 
 [[package]]
+name = "microcrab-client-plugin-mcp-bridge"
+version = "0.1.17"
+dependencies = [
+ "serde_json",
+ "sha2",
+ "wit-bindgen",
+]
+
+[[package]]
 name = "microcrab-client-plugin-state-viewer"
-version = "0.1.16"
+version = "0.1.17"
 dependencies = [
  "serde",
  "serde_json",
@@ -175,7 +184,7 @@ dependencies = [
 
 [[package]]
 name = "microcrab-xtask"
-version = "0.1.16"
+version = "0.1.17"
 dependencies = [
  "serde_json",
  "sha2",

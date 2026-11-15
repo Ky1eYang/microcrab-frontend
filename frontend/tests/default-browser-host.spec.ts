@@ -29,14 +29,21 @@ const {Header} = await import('/src/shell/Header.tsx');
 const {HomePage} = await import('/src/shell/HomePage.tsx');
 const {SessionRail} = await import('/src/shell/SessionRail.tsx');
 const {nativeSnapshot} = await import('/tests/native-fixture.ts');
+const {LIMIT_FIELDS} = await import('/src/client/settings.ts');
 const options = ${JSON.stringify(options)};
 AppStore.prototype.start = function() {
-  const store = this, calls = [], browserCalls = [];
+  const store = this, calls = [], browserCalls = [], disconnects = [];
   const auth = {authenticated:true,principal:{owner:'default-owner'}};
   const project = {id:'native-project',name:'Native project',root:'/native'};
-  const session = {...nativeSnapshot.session,id:'restored-browser',project_id:options.restoreNative ? project.id : null};
+  const session = {...nativeSnapshot.session,id:'restored-browser',project_id:options.restoreNative ? project.id : null,host_flavor:options.restoreNative ? undefined : 'browser_sandbox'};
   const snapshot = {...nativeSnapshot,session,messages:[],operations:[]};
   const agents = [{name:'coding',component:'browser-component',modes:[{name:'plan',role:'main_agent'}]}];
+  // Agent selection inherits authoritative settings, independently of catalog order.
+  const limits = Object.fromEntries(LIMIT_FIELDS.map(field => [field, 1048576]));
+  const effective = {limits,agent:'coding',mode:'plan',model_selection:{provider_id:'provider',model:'model'}};
+  const settings = {revision:0,overrides:{},effective,desired_effective:effective,
+    sources:{agent:'admin',mode:'admin',model_selection:'admin'},constraints:{limits},
+    applied_revision:0,application:'defaults_saved',reason:null};
   let fail = options.fail, release;
   const gate = options.hold ? new Promise(resolve => {release = resolve;}) : Promise.resolve();
   store.update({authSession:auth, railCollapsed:false});
@@ -46,14 +53,16 @@ AppStore.prototype.start = function() {
   store.refreshPermissions = async () => {};
   store.roundLimits.refresh = () => {};
   store.api.disconnectHost = async () => {};
-  store.api.connectBrowserConversation = async (id,owner) => {
-    browserCalls.push({id,owner});
+   store.api.disconnectBrowserConversation = async id => { disconnects.push(id); };
+  store.api.connectBrowserConversation = async (id,owner,flavor) => {
+    browserCalls.push({id,owner,flavor});
     await gate;
     if (fail) throw Error('fixture browser runtime unavailable');
   };
   store.api.request = async (method,params={},sessionId) => {
     calls.push({method,params,sessionId});
     if (method === 'server.capabilities') return {protocol:1,methods:['project.list','model.list','session.list','agent.catalog','session.open'],features:{},limits:{}};
+    if (method === 'settings.get' || method === 'project.settings.get') return settings;
     if (method === 'project.list') return {items:[project]};
     if (method === 'model.list') return {items:[{id:'model',provider_id:'provider',name:'Model',variants:[]}]};
     if (method === 'session.list') return {items: options.restore ? [session] : [], unavailable: [], complete: true};
@@ -63,16 +72,17 @@ AppStore.prototype.start = function() {
   };
   const read = () => ({project:store.state.draftWorkspace.projectId,kind:store.state.draftWorkspace.kind,
     sessionId:store.state.sessionId,host:store.state.hostConnection,agent:store.state.draftAgent,
-    draftId:store.draftConversationId,preference:localStorage.getItem(preference),browserCalls:[...browserCalls],calls:[...calls]});
+    draftId:store.draftConversationId,preference:localStorage.getItem(preference),browserCalls:[...browserCalls],disconnects:[...disconnects],calls:[...calls]});
   window.defaultBrowserFixture = {
     ready:store.bootstrap(store.lifecycle), read,
     release:() => release?.(),
     newChat:() => store.dispatch({type:'NewChat'}),
-    selectBrowser:() => store.dispatch({type:'SelectDraftWorkspace',value:{kind:'none'}}),
+    selectBrowser:(kind = 'chat_only') => store.dispatch({type:'SelectDraftWorkspace',value:{kind}}),
     selectProject:() => store.dispatch({type:'SelectKnownProject',value:project.id}),
     bootstrap:() => store.bootstrap(store.lifecycle),
     nextLifecycle:() => {store.lifecycle++; return store.bootstrap(store.lifecycle);},
     changeOwner:() => {store.update({authSession:{authenticated:true,principal:{owner:'replacement-owner'}}}); return store.bootstrap(store.lifecycle);},
+    chooseUniversal:() => store.update({draftAgent:'universal'}),
     retry:() => {fail = false; return store.dispatch({type:'ReconnectBrowserHost'});},
   };
 };
@@ -95,6 +105,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(
           ...nativeSnapshot.session,
           id,
           project_id: options.restoreNative ? "native-project" : null,
+          host_flavor: options.restoreNative ? undefined : "browser_sandbox",
         },
         messages: [],
         operations: [],
@@ -137,22 +148,22 @@ const read = (page: Page) =>
 const ready = (page: Page) =>
   page.evaluate(() => (window as any).defaultBrowserFixture.ready);
 
-test("fresh startup defaults to browser workspace with nonempty Project catalog and prepares only once", async ({
+test("fresh startup defaults to Chat Only with nonempty Project catalog and prepares only once", async ({
   page,
 }) => {
   await mount(page);
   await ready(page);
   await expect(page.getByTestId("header-host-connection")).toHaveCount(0);
-  await expect(page.getByTitle("选择项目工作区")).toContainText("无项目");
+  await expect(page.getByTitle("选择项目工作区")).toContainText("仅聊天");
   await expect(
     page.getByRole("textbox", { name: "消息", exact: true }),
   ).toBeEnabled();
   const before = await read(page);
-  expect(before.kind).toBe("none");
+  expect(before.kind).toBe("chat_only");
   expect(before.project).toBeUndefined();
   expect(before.agent).toBe("coding");
   expect(before.browserCalls).toEqual([
-    { id: before.draftId, owner: "default-owner" },
+    { id: before.draftId, owner: "default-owner", flavor: "chat_only" },
   ]);
   await page.evaluate(async () => {
     await (window as any).defaultBrowserFixture.selectBrowser();
@@ -176,7 +187,7 @@ test("pending browser startup shows preparation without Project connection contr
 }) => {
   await mount(page, { hold: true });
   await expect(page.locator(".composer-offline-banner")).toContainText(
-    "正在准备浏览器工作区",
+    "正在准备仅聊天",
   );
   await expect(page.getByTestId("header-host-connection")).toHaveCount(0);
   await expect(
@@ -200,7 +211,7 @@ test("failed default browser startup stays projectless and retries the same work
   await mount(page, { fail: true });
   await ready(page);
   await expect(page.locator(".composer-offline-banner")).toContainText(
-    "浏览器工作区暂不可用",
+    "仅聊天暂不可用",
   );
   await expect(page.locator(".composer-offline-banner")).toContainText(
     "fixture browser runtime unavailable",
@@ -229,7 +240,11 @@ test("NewChat allocates a fresh browser workspace while a restored projectless S
   await ready(page);
   const restored = await read(page);
   expect(restored.browserCalls).toEqual([
-    { id: "restored-browser", owner: "default-owner" },
+    {
+      id: "restored-browser",
+      owner: "default-owner",
+      flavor: "browser_sandbox",
+    },
   ]);
   expect(
     restored.calls
@@ -251,7 +266,7 @@ test("NewChat allocates a fresh browser workspace while a restored projectless S
 });
 
 for (const locale of ["zh-CN", "en"] as const) {
-  test(`Sessions (+) leaves an active native Project for No Project, while Project (+) remains explicit (${locale})`, async ({
+  test(`Sessions (+) leaves an active native Project for Chat Only, while Project (+) remains explicit (${locale})`, async ({
     page,
   }) => {
     await mount(page, {
@@ -271,17 +286,17 @@ for (const locale of ["zh-CN", "en"] as const) {
     await page.getByTestId("sessions-new-chat").click();
     const pending = await read(page);
     expect(pending.sessionId).toBeNull();
-    expect(pending.kind).toBe("none");
+    expect(pending.kind).toBe("chat_only");
     expect(pending.project).toBeUndefined();
     expect(pending.preference).toBe("");
     expect(pending.host.state).toBe("connecting");
     expect(pending.browserCalls).toEqual([
-      { id: pending.draftId, owner: "default-owner" },
+      { id: pending.draftId, owner: "default-owner", flavor: "chat_only" },
     ]);
     await expect(page.getByTestId("header-host-connection")).toHaveCount(0);
     await expect(page.locator(".home-composer-textarea")).toBeDisabled();
     const picker = page.locator(".home-workspace-badge-btn");
-    const noProject = locale === "en" ? "No Project" : "无项目";
+    const noProject = locale === "en" ? "Chat Only" : "仅聊天";
     await expect(picker).toHaveText(noProject);
     await picker.click();
     const option = page.getByTestId("home-project-picker").getByRole("button", {
@@ -350,7 +365,7 @@ test("a late browser preparation cannot overwrite an explicit Project switch", a
 }) => {
   await mount(page, { hold: true });
   await expect(page.locator(".composer-offline-banner")).toContainText(
-    "正在准备浏览器工作区",
+    "正在准备仅聊天",
   );
   await page.evaluate(() =>
     (window as any).defaultBrowserFixture.selectProject(),
@@ -386,10 +401,11 @@ for (const action of ["nextLifecycle", "changeOwner"]) {
       expect(after.draftId).not.toBe(before.draftId);
     else expect(after.draftId).toBe(before.draftId);
     expect(after.browserCalls).toEqual([
-      { id: before.draftId, owner: "default-owner" },
+      { id: before.draftId, owner: "default-owner", flavor: "chat_only" },
       {
         id: after.draftId,
         owner: action === "changeOwner" ? "replacement-owner" : "default-owner",
+        flavor: "chat_only",
       },
     ]);
     expect(
@@ -399,3 +415,97 @@ for (const action of ["nextLifecycle", "changeOwner"]) {
     ).toBe(false);
   });
 }
+
+test("switching a prepared draft mode disposes old identity and persists the selected flavor", async ({
+  page,
+}) => {
+  await mount(page);
+  await ready(page);
+  const first = await read(page);
+  await page.locator(".home-workspace-badge-btn").click();
+  await page.locator('[data-host-flavor="browser_sandbox"]').click();
+  await expect.poll(async () => (await read(page)).host.state).toBe("ready");
+  const sandbox = await read(page);
+  expect(sandbox.kind).toBe("browser_sandbox");
+  expect(sandbox.draftId).not.toBe(first.draftId);
+  expect(sandbox.disconnects).toEqual([first.draftId]);
+  expect(sandbox.browserCalls.at(-1)).toMatchObject({
+    id: sandbox.draftId,
+    flavor: "browser_sandbox",
+  });
+  await page.evaluate(() => (window as any).defaultBrowserFixture.bootstrap());
+  expect((await read(page)).kind).toBe("browser_sandbox");
+  expect((await read(page)).browserCalls).toHaveLength(2);
+  await page.evaluate(() =>
+    (window as any).defaultBrowserFixture.selectBrowser("chat_only"),
+  );
+  const chat = await read(page);
+  expect(chat.draftId).not.toBe(sandbox.draftId);
+  expect(chat.disconnects).toEqual([first.draftId, sandbox.draftId]);
+  expect(chat.host.hostFlavor).toBe("chat_only");
+});
+
+test("switching flavor during preparation rejects stale catalog publication", async ({
+  page,
+}) => {
+  await mount(page, { hold: true });
+  await page.evaluate(() => {
+    void (window as any).defaultBrowserFixture.selectBrowser("browser_sandbox");
+  });
+  const pending = await read(page);
+  expect(pending.browserCalls.map((call: any) => call.flavor)).toEqual([
+    "chat_only",
+    "browser_sandbox",
+  ]);
+  expect(pending.browserCalls[0].id).not.toBe(pending.browserCalls[1].id);
+  await page.evaluate(() => (window as any).defaultBrowserFixture.release());
+  await ready(page);
+  await expect.poll(async () => (await read(page)).host.state).toBe("ready");
+  const final = await read(page);
+  expect(final.host.hostFlavor).toBe("browser_sandbox");
+  expect(
+    final.calls.filter((call: any) => call.method === "agent.catalog"),
+  ).toHaveLength(1);
+  expect(
+    final.calls.find((call: any) => call.method === "agent.catalog").params
+      .conversation_id,
+  ).toBe(final.draftId);
+});
+
+test("Chat Only refresh selects compatible Coding when previous Universal is absent", async ({
+  page,
+}) => {
+  await mount(page);
+  await ready(page);
+  await page.evaluate(() =>
+    (window as any).defaultBrowserFixture.chooseUniversal(),
+  );
+  await page.evaluate(() =>
+    (window as any).defaultBrowserFixture.selectBrowser("browser_sandbox"),
+  );
+  await page.evaluate(() =>
+    (window as any).defaultBrowserFixture.chooseUniversal(),
+  );
+  await page.evaluate(() =>
+    (window as any).defaultBrowserFixture.selectBrowser("chat_only"),
+  );
+  const state = await read(page);
+  expect(state.agent).toBe("coding");
+  expect(state.host.hostFlavor).toBe("chat_only");
+  expect(state.host.catalogReady).toBe(true);
+});
+
+
+test("an existing Sandbox session mode choice creates a new Chat Only conversation without detaching its pinned Host", async ({ page }) => {
+  await mount(page, { restore: true });
+  await ready(page);
+  await page.evaluate(() => (window as any).defaultBrowserFixture.selectBrowser("chat_only"));
+  const state = await read(page);
+  expect(state.sessionId).toBeNull();
+  expect(state.draftId).not.toBe("restored-browser");
+  expect(state.browserCalls).toEqual([
+    { id: "restored-browser", owner: "default-owner", flavor: "browser_sandbox" },
+    { id: state.draftId, owner: "default-owner", flavor: "chat_only" },
+  ]);
+  expect(state.disconnects).toEqual([]);
+});

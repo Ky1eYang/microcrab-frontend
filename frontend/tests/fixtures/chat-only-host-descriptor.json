@@ -1,0 +1,25 @@
+{
+  "canonical": "{\"protocol_version\":2,\"host_id\":\"00000000-0000-4000-8000-000000000001\",\"workspace_id\":\"00000000-0000-4000-8000-000000000002\",\"bridge_instance_id\":\"\",\"workspace_root\":\"/chat\",\"platform\":\"browser\",\"info\":{\"os_family\":\"other\",\"os\":\"browser\",\"arch\":\"wasm32\",\"shell\":\"none\",\"path_separator\":\"/\",\"newline\":\"\\n\",\"capabilities\":[],\"description\":\"Chat Only has no filesystem, shell, process or Host network execution. Authorized client tools and plugins remain available.\"},\"tool_capabilities\":[],\"supported_primitives\":[],\"descriptor_digest\":\"\"}",
+  "digest": "58a7ec077c0fc91af79fc50493b014f4bac319473e34152b8a5f2c6a828262b3",
+  "descriptor": {
+    "protocol_version": 2,
+    "host_id": "00000000-0000-4000-8000-000000000001",
+    "workspace_id": "00000000-0000-4000-8000-000000000002",
+    "bridge_instance_id": "00000000-0000-4000-8000-000000000003",
+    "workspace_root": "/chat",
+    "platform": "browser",
+    "info": {
+      "os_family": "other",
+      "os": "browser",
+      "arch": "wasm32",
+      "shell": "none",
+      "path_separator": "/",
+      "newline": "\n",
+      "capabilities": [],
+      "description": "Chat Only has no filesystem, shell, process or Host network execution. Authorized client tools and plugins remain available."
+    },
+    "tool_capabilities": [],
+    "supported_primitives": [],
+    "descriptor_digest": "58a7ec077c0fc91af79fc50493b014f4bac319473e34152b8a5f2c6a828262b3"
+  }
+}

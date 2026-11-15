@@ -58,6 +58,36 @@ export function normalizePreferences(value: unknown): Preferences {
   }
   return { sessions, tombstones: [...input.tombstones] };
 }
+const ARTIFACT_REFERENCES_KEY = "artifact-references.v1";
+const ARTIFACT_REFERENCES_LIMIT = 8192;
+
+// Host settings, never guest KV: entries and ambiguity tombstones outlive plugin
+// removal/reset so a historical short reference cannot select replacement bytes.
+function artifactReferences(value: unknown): Record<string, string | null> {
+  if (value === undefined) return {};
+  if (
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    Object.getPrototypeOf(value) !== Object.prototype
+  )
+    throw Error("Invalid plugin artifact reference storage");
+  const entries = Object.entries(value);
+  if (entries.length > ARTIFACT_REFERENCES_LIMIT)
+    throw Error("Plugin artifact reference storage exceeds 8192 entries");
+  for (const [key, artifact] of entries) {
+    if (
+      !/^[a-z0-9][a-z0-9._-]{0,127}:[a-f0-9]{16}$/.test(key) ||
+      (artifact !== null &&
+        (typeof artifact !== "string" ||
+          !/^[a-f0-9]{64}$/.test(artifact) ||
+          !artifact.startsWith(key.slice(-16))))
+    )
+      throw Error("Invalid plugin artifact reference storage entry");
+  }
+  return value as Record<string, string | null>;
+}
+
 export class PluginStore {
   private db?: Promise<IDBDatabase>;
   constructor(private readonly namespace: string) {}
@@ -104,6 +134,90 @@ export class PluginStore {
           new Error(
             `plugin IndexedDB ${store} aborted: ${tx.error?.message ?? req.error?.message}`,
           ),
+        );
+    });
+  }
+  async registerArtifactReference(
+    id: string,
+    artifact: string,
+  ): Promise<boolean> {
+    if (!/^[a-f0-9]{64}$/.test(artifact))
+      throw Error("Plugin artifact must be a full SHA-256");
+    return (
+      (await this.artifactReference(id, artifact.slice(0, 16), artifact)) !==
+      null
+    );
+  }
+  async resolveArtifactReference(
+    id: string,
+    reference: string,
+  ): Promise<string> {
+    const artifact = await this.artifactReference(id, reference);
+    if (artifact === null)
+      throw Error(
+        "Plugin artifact reference is ambiguous; use the full SHA-256",
+      );
+    if (artifact === undefined)
+      throw Error("Plugin artifact reference is unknown; discover again");
+    return artifact;
+  }
+  private async artifactReference(
+    id: string,
+    reference: string,
+    artifact?: string,
+  ): Promise<string | null | undefined> {
+    if (
+      !/^[a-z0-9][a-z0-9._-]{0,127}$/.test(id) ||
+      !/^[a-f0-9]{16}$/.test(reference)
+    )
+      throw Error("Invalid plugin artifact reference");
+    const db = await this.open();
+    return new Promise((resolve, reject) => {
+      // A single settings read/write transaction serializes registration across
+      // tabs. A collision is committed as null, never overwritten with a winner.
+      const tx = db.transaction(
+          "settings",
+          artifact ? "readwrite" : "readonly",
+        ),
+        store = tx.objectStore("settings"),
+        request = store.get(ARTIFACT_REFERENCES_KEY);
+      let result: string | null | undefined;
+      let cause: unknown;
+      request.onsuccess = () => {
+        try {
+          const entries = artifactReferences(request.result),
+            key = `${id}:${reference}`;
+          result = ownRecordValue(entries, key);
+          if (artifact !== undefined) {
+            if (result === undefined) {
+              if (Object.keys(entries).length >= ARTIFACT_REFERENCES_LIMIT)
+                throw Error(
+                  "Plugin artifact reference storage exceeds 8192 entries",
+                );
+              result = artifact;
+            } else if (result !== artifact) result = null;
+            setRecordValue(entries, key, result);
+            store.put(entries, ARTIFACT_REFERENCES_KEY);
+          }
+        } catch (error) {
+          cause = error;
+          tx.abort();
+        }
+      };
+      tx.oncomplete = () => resolve(result);
+      tx.onabort = () =>
+        reject(
+          cause ??
+            Error(
+              `Plugin artifact reference storage aborted: ${tx.error?.message ?? request.error?.message}`,
+            ),
+        );
+      tx.onerror = () =>
+        reject(
+          cause ??
+            Error(
+              `Plugin artifact reference storage failed: ${tx.error?.message ?? request.error?.message}`,
+            ),
         );
     });
   }

@@ -168,7 +168,10 @@ test("Provider credential writes never read back and discovery is distinct from 
   );
   await page.goto("/#session/s1");
   await openSettings(page, "模型服务商");
-  await page.getByLabel("服务商", { exact: true }).selectOption("user:mine");
+  await expect(page.locator('[data-provider-id="user:mine"]')).toHaveAttribute(
+    "aria-expanded",
+    "true",
+  );
   await expect(page.getByTestId("provider-secret")).toHaveCount(0);
   await page.getByTestId("provider-save").click();
   await expect.poll(() => writes.length).toBe(1);

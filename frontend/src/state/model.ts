@@ -5,6 +5,7 @@ import type {
   DraftWorkspace,
   SessionView,
 } from "../client/types";
+import { t } from "../i18n";
 import { createTranscript } from "../client/projector";
 import { resolveApiBase } from "../client/api";
 import * as storage from "../client/storage";
@@ -59,8 +60,10 @@ export function initialState(): AppState {
     apiBase: resolveApiBase(),
     sandboxSession: null,
     currentWorkspace: "",
-    draftWorkspace: { kind: "none" },
+    draftWorkspace: { kind: "chat_only" },
     draftModel: null,
+    userSessionDefaults: null,
+    projectSessionDefaults: null,
     modelSelectionPending: false,
     availableModels: [],
     board: {
@@ -110,9 +113,42 @@ export function modelChoices(catalog: NativeModelCatalog): ModelChoice[] {
   }));
 }
 
+export function effectiveDraftDefaults(state: AppState) {
+  const project = state.draftWorkspace.projectId;
+  return project
+    ? state.projectSessionDefaults?.projectId === project
+      ? state.projectSessionDefaults.effective
+      : null
+    : state.userSessionDefaults;
+}
+
 export function selectedModel(state: AppState): ModelChoice | null {
-  if (!state.sessionId)
-    return state.draftModel ?? state.availableModels[0] ?? null;
+  if (!state.sessionId) {
+    const inherited = effectiveDraftDefaults(state)?.model_selection;
+    const selection =
+      state.draftModel ??
+      (inherited
+        ? {
+            id: inherited.model,
+            providerId: inherited.provider_id,
+            variant: inherited.variant,
+          }
+        : null);
+    if (!selection) return null;
+    const catalog = state.availableModels.find(
+      (model) =>
+        model.id === selection.id && model.providerId === selection.providerId,
+    );
+    return {
+      id: selection.id,
+      providerId: selection.providerId,
+      name: catalog?.name ?? selection.id,
+      protocol: catalog?.protocol,
+      contextWindowTokens: catalog?.contextWindowTokens ?? null,
+      variants: catalog?.variants ?? [],
+      variant: selection.variant ?? null,
+    };
+  }
   const selected =
     state.sessions.find((s) => s.id === state.sessionId)?.model ??
     state.transcript.model;
@@ -133,9 +169,11 @@ export function selectedModel(state: AppState): ModelChoice | null {
   };
 }
 export function workspaceLabel(w: DraftWorkspace) {
-  return w.kind === "none"
-    ? "No Project"
-    : w.label?.trim() ||
+  return w.kind === "chat_only"
+    ? t("home.picker.chatOnly")
+    : w.kind === "browser_sandbox"
+      ? t("home.picker.browserSandbox")
+      : w.label?.trim() ||
         w.path?.split(/[\\/]/).filter(Boolean).at(-1) ||
         w.host ||
         "Project";

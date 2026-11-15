@@ -1,0 +1,31 @@
+[package]
+name = "microcrab-client-plugin-mcp-bridge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[package.metadata.microcrab]
+artifact-kind = "client-plugin"
+component-name = "mcp-bridge"
+plugin-id = "microcrab.mcp-bridge"
+default-enabled = true
+# Exact maintained artifacts only; release versions never authorize replacement.
+supersedes = [
+    "6b56abae400bcc091aeba05944d7ef41d980579058b4587a401ffcd7b853d369",
+    "036744cc7b63ff0bb431e5ab81a8e9fd562e06b2b70073f68e05d51d55d575f7",
+    "71645aa1670d6ae3166d709085fdccb34a23e8d6e6aaeb1fed5717723fb51edf",
+    "147f9cca848c112b056a44acdaac459593ee29e3a29c4f3d6ff10bc20cf8e2b0",
+    "c9d9c401dbebbb9b51931a9411d755edaee3f37a46d0ad3ef9d04a41b4796960",
+]
+
+[dependencies]
+serde_json.workspace = true
+sha2 = "0.10.9"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wit-bindgen = "=0.57.1"

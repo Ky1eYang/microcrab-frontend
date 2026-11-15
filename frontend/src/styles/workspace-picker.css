@@ -1,9 +1,52 @@
-/* Workspace picker dropdown host group styles */
+/* Workspace picker cascading dropdown & flyout styles. This file owns picker
+   geometry; shared .home-dropdown-menu chrome is deliberately excluded here. */
+.home-dropdown-menu.workspace-cascading-menu {
+  top: 36px;
+  left: 0;
+  transform: none;
+  width: auto;
+  max-width: calc(100vw - 32px);
+  padding: 0;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.workspace-primary-pane,
+.workspace-flyout-pane {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-pop);
+  padding: 6px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: var(--picker-available-height, 60vh);
+}
+
+.workspace-primary-pane {
+  width: 244px;
+  flex: 0 0 auto;
+  overflow-y: auto;
+}
+
+.workspace-flyout-pane {
+  width: 288px;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
 .workspace-menu-section {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
+  flex-shrink: 0;
 }
 
 .workspace-host-group {
@@ -17,21 +60,24 @@
   align-items: center;
   gap: 8px;
   width: 100%;
-  padding: 8px 10px;
+  padding: 7px 8px;
   border: 0;
   background: transparent;
-  border-radius: var(--r-md);
+  border-radius: 6px;
   cursor: pointer;
   text-align: left;
   color: var(--text);
-  transition: background 0.12s ease;
+  font-size: var(--fs-sm);
+  transition: background 0.1s ease;
 }
 
-.workspace-host-toggle:hover {
+.workspace-host-toggle:hover,
+.workspace-host-toggle[data-active="true"] {
   background: var(--bg-muted);
 }
 
-.ws-host-folder-icon {
+.ws-host-folder-icon,
+.ws-project-folder-icon {
   flex-shrink: 0;
   color: var(--text-2);
 }
@@ -45,15 +91,49 @@
 }
 
 .ws-host-chevron.expanded {
-  transform: rotate(90deg);
+  color: var(--text);
 }
 
-.workspace-host-projects {
+.workspace-flyout-search .settings-input {
+  width: 100%;
+  box-sizing: border-box;
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: var(--fs-sm);
+}
+
+.workspace-project-list {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding-left: 24px;
-  margin-top: 2px;
+  min-height: 0;
+  max-height: 204px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.workspace-flyout-search,
+.workspace-flyout-foot {
+  flex-shrink: 0;
+}
+
+.workspace-flyout-empty {
+  margin: 0;
+  padding: 12px 8px;
+  text-align: center;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+
+.workspace-flyout-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 8px 2px;
+  border-top: 1px solid var(--border);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
 }
 
 .workspace-menu-item {
@@ -62,15 +142,16 @@
   justify-content: space-between;
   gap: 8px;
   width: 100%;
-  padding: 8px 10px;
+  padding: 7px 8px;
   border: 0;
   background: transparent;
-  border-radius: var(--r-md);
+  border-radius: 6px;
   cursor: pointer;
   text-align: left;
   color: var(--text);
   font-size: var(--fs-sm);
-  transition: background 0.12s ease;
+  transition: background 0.1s ease;
+  flex-shrink: 0;
 }
 
 .workspace-menu-item:hover {
@@ -107,4 +188,27 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
+}
+
+@media (max-width: 640px) {
+  .workspace-cascading-menu {
+    flex-direction: column;
+    max-height: var(--picker-available-height, 60vh);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .workspace-primary-pane,
+  .workspace-flyout-pane {
+    width: min(300px, calc(100vw - 32px));
+    max-height: none;
+    overflow: visible;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-host-toggle,
+  .workspace-menu-item,
+  .ws-host-chevron {
+    transition: none;
+  }
 }

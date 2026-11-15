@@ -9,6 +9,8 @@ export default defineConfig({
     "client-plugin-production.spec.ts",
     "client-plugin-editor.spec.ts",
     "settings-ergonomics.spec.ts",
+    "settings-redesign.spec.ts",
+    "v0116-settings-policy-browser.spec.ts",
     "client-plugin-production-html.spec.ts",
     "client-plugin-workspace.spec.ts",
     "client-plugin-restoration-ui.spec.ts",

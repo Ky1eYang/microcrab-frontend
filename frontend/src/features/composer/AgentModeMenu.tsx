@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
+import type { KeyboardEvent } from "react";
 import type { AgentInfo } from "../../client/types";
 import { t } from "../../i18n";
 import { GlyphIcon } from "../shared";
@@ -10,7 +11,6 @@ export function AgentModeMenu({
   pinned,
   pending,
   onSelect,
-  onManage,
 }: {
   agents: AgentInfo[];
   agent: string;
@@ -18,17 +18,87 @@ export function AgentModeMenu({
   pinned: boolean;
   pending: boolean;
   onSelect: (agent: string, mode: string) => void;
-  onManage: () => void;
 }) {
   const [hovered, setHovered] = useState(agent);
-  const candidates = agents.filter((item) =>
+  const [agentFilter, setAgentFilter] = useState("");
+  const primaryPaneRef = useRef<HTMLDivElement>(null);
+  const secondaryListRef = useRef<HTMLDivElement>(null);
+
+  const allCandidates = agents.filter((item) =>
     item.modes.some((entry) => entry.role !== "sub_agent"),
+  );
+  const query = agentFilter.trim().toLowerCase();
+  const candidates = allCandidates.filter((item) =>
+    item.name.toLowerCase().includes(query),
   );
   const selected = pinned
     ? agents.find((item) => item.name === agent)
     : (candidates.find((item) => item.name === hovered) ??
       candidates.find((item) => item.name === agent) ??
       candidates[0]);
+  const visibleModes =
+    selected?.modes.filter((entry) => entry.role !== "sub_agent") ?? [];
+
+  const moveFocusInPane = (container: HTMLElement | null, delta: number) => {
+    if (!container) return;
+    const items = [
+      ...container.querySelectorAll<HTMLButtonElement>("button:not(:disabled)"),
+    ];
+    if (!items.length) return;
+    const currentIndex = items.findIndex((el) => el === document.activeElement);
+    const nextIndex =
+      currentIndex < 0
+        ? delta > 0
+          ? 0
+          : items.length - 1
+        : (currentIndex + delta + items.length) % items.length;
+    items[nextIndex]?.focus();
+  };
+
+  const onPrimaryKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.nativeEvent.isComposing) return;
+    if (
+      event.target instanceof HTMLInputElement &&
+      (event.key === "ArrowLeft" || event.key === "ArrowRight")
+    ) {
+      return;
+    }
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      moveFocusInPane(primaryPaneRef.current, 1);
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      moveFocusInPane(primaryPaneRef.current, -1);
+    } else if (event.key === "ArrowRight") {
+      event.preventDefault();
+      const firstMode =
+        secondaryListRef.current?.querySelector<HTMLButtonElement>(
+          "button:not(:disabled)",
+        );
+      firstMode?.focus();
+    }
+  };
+
+  const onSecondaryKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      moveFocusInPane(secondaryListRef.current, 1);
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      moveFocusInPane(secondaryListRef.current, -1);
+    } else if (event.key === "ArrowLeft" && !pinned) {
+      event.preventDefault();
+      const activeAgentBtn =
+        primaryPaneRef.current?.querySelector<HTMLButtonElement>(
+          "button.active:not(:disabled)",
+        ) ??
+        primaryPaneRef.current?.querySelector<HTMLButtonElement>(
+          "button:not(:disabled)",
+        );
+      activeAgentBtn?.focus();
+    }
+  };
+
   return (
     <div
       className="composer-agent-mode-menu"
@@ -36,12 +106,30 @@ export function AgentModeMenu({
       aria-label={t("composer.mode.menu")}
       onClick={(event) => event.stopPropagation()}
     >
-      <div className="composer-agent-mode-columns">
+      <div className="composer-agent-mode-panes">
         {!pinned && (
           <div
-            className="composer-agent-mode-list"
+            ref={primaryPaneRef}
+            className="composer-agent-primary-pane"
+            role="menu"
             aria-label={t("composer.agent.pick")}
+            onKeyDown={onPrimaryKeyDown}
           >
+            {(allCandidates.length > 5 || agentFilter.length > 0) && (
+              <input
+                type="search"
+                className="settings-input composer-agent-search"
+                placeholder={t("uiPolish.searchAgents")}
+                aria-label={t("uiPolish.searchAgents")}
+                value={agentFilter}
+                onChange={(event) => setAgentFilter(event.target.value)}
+              />
+            )}
+            {candidates.length === 0 && (
+              <span className="composer-mode-heading">
+                {t("uiPolish.noMatches")}
+              </span>
+            )}
             {candidates.map((item) => (
               <button
                 key={item.name}
@@ -56,38 +144,38 @@ export function AgentModeMenu({
                 onFocus={() => setHovered(item.name)}
                 onClick={() => setHovered(item.name)}
               >
-                {item.name}
+                <span className="composer-agent-item-label">{item.name}</span>
                 <GlyphIcon name="chevron" />
               </button>
             ))}
           </div>
         )}
         <div
-          className="composer-agent-mode-list"
+          className="composer-mode-secondary-pane"
           role="group"
           aria-label={selected?.name ?? t("composer.mode.menu")}
+          onKeyDown={onSecondaryKeyDown}
         >
           {pinned && (
             <div className="composer-mode-heading">
               {agent} · {t("composer.mode.pinned")}
             </div>
           )}
-          {selected?.modes
-            .filter((entry) => entry.role !== "sub_agent")
-            .map((entry) => (
+          <div className="composer-mode-list" ref={secondaryListRef}>
+            {visibleModes.map((entry) => (
               <button
                 key={entry.name}
                 type="button"
                 role="menuitemradio"
-                aria-checked={selected.name === agent && entry.name === mode}
+                aria-checked={selected?.name === agent && entry.name === mode}
                 data-testid="composer-mode-item"
                 title={entry.description || undefined}
-                className={`model-picker-item${selected.name === agent && entry.name === mode ? " active" : ""}`}
+                className={`model-picker-item${selected?.name === agent && entry.name === mode ? " active" : ""}`}
                 disabled={pending}
-                onClick={() => onSelect(selected.name, entry.name)}
+                onClick={() => selected && onSelect(selected.name, entry.name)}
               >
-                <span>
-                  {entry.name}
+                <span className="composer-mode-item-text">
+                  <span>{entry.name}</span>
                   {entry.description && (
                     <small className="settings-row-sub">
                       {" "}
@@ -95,27 +183,19 @@ export function AgentModeMenu({
                     </small>
                   )}
                 </span>
-                {selected.name === agent && entry.name === mode && (
+                {selected?.name === agent && entry.name === mode && (
                   <GlyphIcon name="check" size={14} />
                 )}
               </button>
             ))}
-          {!selected && (
-            <span className="composer-mode-heading">
-              {t("composer.mode.empty")}
-            </span>
-          )}
+            {!selected && (
+              <span className="composer-mode-heading">
+                {t("composer.mode.empty")}
+              </span>
+            )}
+          </div>
         </div>
       </div>
-      <div className="model-picker-divider" />
-      <button
-        className="model-picker-item"
-        type="button"
-        role="menuitem"
-        onClick={onManage}
-      >
-        {t("composer.agent.manage")}
-      </button>
     </div>
   );
 }

@@ -6,6 +6,7 @@ import type {
   RoundLimitRequest,
 } from "../src/client/types";
 import type { ClientBinding } from "../src/client/client-tool-controller";
+import { LIMIT_FIELDS } from "../src/client/settings";
 export const nativeSnapshot: NativeSnapshot = {
   session: {
     id: "s1",
@@ -702,6 +703,36 @@ export async function nativeBackend(
           },
         ],
       });
+    if (
+      (path === "/api/v1/settings" ||
+        /^\/api\/v1\/projects\/[^/]+\/settings$/.test(path)) &&
+      verb === "GET"
+    ) {
+      const limits = Object.fromEntries(
+        LIMIT_FIELDS.map((field) => [field, 1048576]),
+      );
+      const effective = {
+        limits,
+        agent: "coding",
+        mode: "plan",
+        model_selection: {
+          provider_id: "provider",
+          model: "model-1",
+          variant: null,
+        },
+      };
+      return reply({
+        revision: 0,
+        overrides: {},
+        effective,
+        desired_effective: effective,
+        sources: {},
+        constraints: { limits },
+        applied_revision: 0,
+        application: "defaults_saved",
+        reason: null,
+      });
+    }
     if (path === "/api/v1/models" && verb === "GET")
       return reply({
         items: [

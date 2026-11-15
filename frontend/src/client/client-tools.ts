@@ -1,4 +1,5 @@
 import type { Block } from "./types";
+import { PLUGIN_META_TOOL_DEFINITION } from "../plugins/tool-hub";
 
 export function todosFromHistory(
   blocks: Block[],
@@ -240,6 +241,7 @@ export const CLIENT_TOOL_DEFINITIONS: ClientToolDefinition[] = [
       },
     },
   },
+  PLUGIN_META_TOOL_DEFINITION,
 ];
 function object(value: unknown): Record<string, any> {
   if (!value || typeof value !== "object" || Array.isArray(value))

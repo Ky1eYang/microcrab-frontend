@@ -36,6 +36,7 @@ for (const colorScheme of ["light", "dark"] as const) {
         for (const tab of ["references", "permissions", "agents"] as const) {
           await page.getByTestId(`project-settings-tab-${tab}`).click();
           await expect(page.getByTestId("project-settings-pane")).toBeVisible();
+          expect(await page.getByTestId("project-settings-pane").evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
           await page.screenshot({
             path: testInfo.outputPath(
               `project-settings-${tab}-${colorScheme}-${width}.png`,
@@ -77,8 +78,9 @@ for (const colorScheme of ["light", "dark"] as const) {
         await page.getByTitle("选择项目工作区").click();
         await expect(page.getByTestId("home-project-picker")).toBeVisible();
         await expect(
-          page.getByRole("button", { name: "无项目", exact: true }),
+          page.getByRole("button", { name: "仅聊天", exact: true }),
         ).toBeVisible();
+        await expect(page.locator('[data-host-flavor="browser_sandbox"]')).toBeVisible();
         await page.screenshot({
           path: testInfo.outputPath(`home-picker-${colorScheme}-${width}.png`),
         });

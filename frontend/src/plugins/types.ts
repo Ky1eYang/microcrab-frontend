@@ -48,6 +48,10 @@ export interface PluginContext {
   surface_generation?: number;
   history_generation?: number;
   invocation_id?: string;
+  tool_invocation?: PluginToolIdentity;
+  /** Host-only bounded cancellation cleanup authority. */
+  tool_cleanup?: boolean;
+  user_action?: boolean;
 }
 export interface PluginManifest {
   schema_version: 1;
@@ -137,9 +141,47 @@ export interface BlockSlot {
   view_state?: Json;
   tree?: PluginNode;
 }
+export interface PluginToolIdentity {
+  invocation_id: string;
+  session_id: string;
+  parent_session_id: string;
+  call_id: string;
+  catalog_digest: string;
+  epoch: number;
+  turn_id: number | null;
+  round_id: number | null;
+  history_anchor?: string | null;
+  deadline_ms: number;
+  /** Exact full SHA-256, never a model-facing artifact reference. */
+  artifact: string;
+  generation: number;
+  history_generation: number;
+}
+export interface PluginToolRequest {
+  plugin: string;
+  action: "list" | "describe" | "call";
+  /** Required model-facing 16-hex reference or legacy full SHA-256 input. */
+  artifact: string;
+  server?: string;
+  tool?: string;
+  cursor?: string;
+  limit?: number;
+  pin?: string;
+  schema_pin?: string;
+  config_pin?: string;
+  arguments?: Record<string, Json>;
+}
+export interface PluginToolCompletion {
+  identity: PluginToolIdentity;
+  status: "pending" | "completed" | "failed";
+  output?: Json;
+  error?: string;
+  outcome_unknown?: boolean;
+}
 export interface PluginResult {
   schema_version: 1;
   error?: string;
+  tool_completion?: PluginToolCompletion;
   vars_patch?: Vars;
   effects?: PluginEffect[];
   rerender?: boolean;
@@ -163,6 +205,8 @@ export interface InstalledPlugin {
   imports: string[];
   bytes: Uint8Array;
   importFormat?: "core" | "component";
+  providesTools?: boolean;
+  artifact?: string;
   enabledByDefault: boolean;
   priority: number;
   status: "disabled" | "loading" | "ready" | "faulted";
@@ -257,6 +301,15 @@ export interface PluginRegistryAPI {
     value: Json,
     surface?: PluginSurfaceDescriptor,
   ): void;
+  toolInventory(): Json[];
+  executeTool(
+    request: PluginToolRequest,
+    identity: Omit<
+      PluginToolIdentity,
+      "artifact" | "generation" | "history_generation"
+    >,
+    signal: AbortSignal,
+  ): Promise<Json>;
   beforeSubmit(
     input: string,
     options?: { sessionId?: string; deadlineMs?: number },

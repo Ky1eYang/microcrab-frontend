@@ -48,6 +48,8 @@ export function SessionPermissionsDialog() {
   const [draft, setDraft] = useState<SessionPermissionConfig | null>(null);
   const [mode, setMode] = useState("");
   const [tab, setTab] = useState<Tab>("tools");
+  const [toolQuery, setToolQuery] = useState("");
+  const [reviewQuery, setReviewQuery] = useState("");
   const [advanced, setAdvanced] = useState(false);
   const [json, setJson] = useState("");
   const [pending, setPending] = useState<"load" | "save" | null>(null);
@@ -217,8 +219,20 @@ export function SessionPermissionsDialog() {
     }
   };
   const inventory = policy?.tool_inventory;
+  useEffect(() => {
+    setToolQuery("");
+  }, [mode, inventory]);
   const modeNames = inventory?.modes.map((item) => item.name) ?? [];
   const currentMode = inventory?.modes.find((item) => item.name === mode);
+  const toolSearch = toolQuery.trim().toLowerCase();
+  const filteredTools =
+    currentMode?.tools.filter(
+      (tool) =>
+        !toolSearch ||
+        `${tool.name} ${tool.description ?? ""}`
+          .toLowerCase()
+          .includes(toolSearch),
+    ) ?? [];
   // API admission validates selector uniqueness and compiled facts. Keep the
   // exact Server rows independent of the editable draft.
   const policyFacts = useMemo(
@@ -420,6 +434,17 @@ export function SessionPermissionsDialog() {
                             : "sessionPermissions.savedConfig",
                         )}
                       </p>
+                      {((currentMode?.tools.length ?? 0) > 4 ||
+                        toolQuery.length > 0) && (
+                        <input
+                          type="search"
+                          className="settings-input perm-tool-search"
+                          placeholder={t("sessionPermissions.searchTools")}
+                          aria-label={t("sessionPermissions.searchTools")}
+                          value={toolQuery}
+                          onChange={(e) => setToolQuery(e.target.value)}
+                        />
+                      )}
                       <div
                         id="session-permission-tool-list"
                         role="tabpanel"
@@ -435,7 +460,14 @@ export function SessionPermissionsDialog() {
                             {t("sessionPermissions.noTools")}
                           </p>
                         )}
-                        {currentMode?.tools.map((tool) => {
+                        {!!toolSearch &&
+                          !!currentMode?.tools.length &&
+                          !filteredTools.length && (
+                            <p className="perm-help" role="status">
+                              {t("uiPolish.noMatches")}
+                            </p>
+                          )}
+                        {filteredTools.map((tool) => {
                           const action = simpleAction(
                             draft,
                             inventory.agent,
@@ -472,7 +504,7 @@ export function SessionPermissionsDialog() {
                                   {fact && (
                                     <li data-testid="session-permission-policy-fact">
                                       {t(
-                                        currentMode.current
+                                        currentMode?.current
                                           ? "sessionPermissions.compiledCurrent"
                                           : "sessionPermissions.compiledPreview",
                                       )}
@@ -666,6 +698,26 @@ export function SessionPermissionsDialog() {
                     >
                       {t("sessionPermissions.reviewModel")}
                     </label>
+                    {(choices.length > 5 || reviewQuery.length > 0) && (
+                      <input
+                        type="search"
+                        className="settings-input"
+                        placeholder={t("settingsUX.searchModels")}
+                        aria-label={t("settingsUX.searchModels")}
+                        value={reviewQuery}
+                        onChange={(event) => setReviewQuery(event.target.value)}
+                      />
+                    )}
+                    {!!reviewQuery.trim() &&
+                      !choices.some((item) =>
+                        item.label
+                          .toLowerCase()
+                          .includes(reviewQuery.trim().toLowerCase()),
+                      ) && (
+                        <p className="perm-help" role="status">
+                          {t("uiPolish.noMatches")}
+                        </p>
+                      )}
                     <select
                       id="session-permission-review-model"
                       className="settings-input"
@@ -691,11 +743,20 @@ export function SessionPermissionsDialog() {
                           })}
                         </option>
                       )}
-                      {choices.map((item) => (
-                        <option key={item.key} value={item.key}>
-                          {item.label}
-                        </option>
-                      ))}
+                      {choices
+                        .filter(
+                          (item) =>
+                            item.key === selectedModel ||
+                            !reviewQuery.trim() ||
+                            item.label
+                              .toLowerCase()
+                              .includes(reviewQuery.trim().toLowerCase()),
+                        )
+                        .map((item) => (
+                          <option key={item.key} value={item.key}>
+                            {item.label}
+                          </option>
+                        ))}
                     </select>
                     <p
                       className="perm-help"

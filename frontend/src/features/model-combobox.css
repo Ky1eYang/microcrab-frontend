@@ -9,26 +9,28 @@
 .model-combobox-menu {
   position: absolute;
   inset-inline: 0;
-  top: 100%;
+  top: calc(100% + 4px);
   z-index: var(--z-dropdown);
   max-height: min(40vh, calc(var(--sp-6) * 10));
   overflow-y: auto;
   background: var(--surface);
-  border: 1px solid var(--control-border);
-  border-radius: var(--r-sm);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
   box-shadow: var(--shadow-pop);
-  padding: var(--sp-1);
+  padding: 4px;
 }
 .model-combobox-option {
-  padding: var(--sp-2) var(--sp-3);
+  padding: 7px 10px;
+  border-radius: 6px;
   cursor: pointer;
   overflow-wrap: anywhere;
   font-size: var(--fs-sm);
+  transition: background 0.12s ease;
 }
+.model-combobox-option:hover,
 .model-combobox-option[data-active="true"] {
   background: var(--bg-muted);
   color: var(--text);
-  outline: 1px solid var(--border-strong);
 }
 .model-combobox-option[aria-selected="true"] {
   font-weight: 600;
@@ -88,17 +90,6 @@
 }
 .settings-ergonomics [aria-invalid="true"] {
   border-color: var(--danger);
-}
-.settings-dialog .settings-card {
-  border: none;
-  background: none;
-  border-radius: 0;
-  padding: 0;
-  margin-bottom: var(--sp-5);
-}
-.settings-dialog .settings-card .settings-row {
-  border-bottom: none;
-  padding-block: var(--sp-3);
 }
 .settings-dialog .settings-tip-box {
   border: none;

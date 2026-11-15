@@ -92,9 +92,9 @@ const {default:React}=await import('/node_modules/.vite/deps/react.js');
 const {default:ReactDOM}=await import('/node_modules/.vite/deps/react-dom_client.js');
 const {AppStore}=await import('/src/state/store.ts'); const {AppProvider}=await import('/src/state/context.tsx');
 const {WorkspacePicker}=await import('/src/features/home/WorkspacePicker/index.tsx'); const {PopupView}=await import('/src/features/popups.tsx');
-await import('/src/styles/tokens.css'); await import('/src/styles/components.css');
+for (const style of ['client-plugins','plugins','tokens','chrome','components','interaction-polish','dashboard']) await import('/src/styles/' + style + '.css');
 const projects=${JSON.stringify(projects)}.map((project,index)=>index>=2?{...project,host_id:'host-2'}:project);
-AppStore.prototype.start=function(){ this.update({authSession:{authenticated:true,principal:{owner:'picker-owner'}},projects,connection:'ws',draftWorkspace:{kind:'none'},hostConnection:{projectId:'p0',state:'ready',connected:true,catalogReady:true}}); const store=this; const calls=[]; this.api.disconnectHost=async()=>calls.push('disconnect'); this.api.request=async(method)=>{calls.push(method);throw Error('unexpected API '+method)}; window.pickerFixture={store,calls}; };
+AppStore.prototype.start=function(){ this.update({authSession:{authenticated:true,principal:{owner:'picker-owner'}},projects,connection:'ws',draftWorkspace:{kind:'chat_only'},hostConnection:{projectId:'p0',state:'ready',connected:true,catalogReady:true}}); const store=this; const calls=[]; this.api.disconnectHost=async()=>calls.push('disconnect'); this.api.request=async(method)=>{calls.push(method);throw Error('unexpected API '+method)}; window.pickerFixture={store,calls}; };
 ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(AppProvider,null,React.createElement(WorkspacePicker),React.createElement(PopupView)));
 </script></body></html>`,
       }),

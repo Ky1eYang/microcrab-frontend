@@ -26,39 +26,87 @@ export function WorkspacePicker() {
     "resolvedLocale",
   ]);
   const ws = state.draftWorkspace;
-  const [expandedHosts, setExpandedHosts] = useState<Set<string>>(new Set());
+  // Empty string is a valid unassigned Host identity; only null closes the pane.
+  const [activeHostId, setActiveHostId] = useState<string | null>(null);
   const [queries, setQueries] = useState<Record<string, string>>({});
   const hostTriggers = useRef(new Map<string, HTMLButtonElement>());
-  const lastHost = useRef<string | null>(null);
+  const search = useRef<HTMLInputElement>(null);
+  const pendingFocus = useRef<string | null>(null);
   const hostIdPrefix = useId();
   const trigger = useRef<HTMLButtonElement>(null);
+  const menu = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!state.showWorkspaceDropdown) return;
+    const resize = () => {
+      const element = menu.current;
+      if (!element) return;
+      const viewportBottom = window.visualViewport
+        ? window.visualViewport.offsetTop + window.visualViewport.height
+        : window.innerHeight;
+      element.style.setProperty(
+        "--picker-available-height",
+        `${Math.max(80, viewportBottom - element.getBoundingClientRect().top - 16)}px`,
+      );
+    };
+    resize();
+    window.addEventListener("resize", resize);
+    window.visualViewport?.addEventListener("resize", resize);
+    return () => {
+      window.removeEventListener("resize", resize);
+      window.visualViewport?.removeEventListener("resize", resize);
+    };
+  }, [state.showWorkspaceDropdown, activeHostId]);
   const scope = hostPreferenceScope(state.apiBase, state.authSession);
   const groups = hostGroups(state.projects, (p) => hostLocator(scope, p));
   const recent = recentProjects(state.projects, state.sessions);
+  const activeGroup =
+    activeHostId !== null
+      ? (groups.find((group) => group.id === activeHostId) ?? null)
+      : null;
+  const queryFor = (id: string) =>
+    Object.prototype.hasOwnProperty.call(queries, id)
+      ? (queries[id] ?? "")
+      : "";
+  const flyoutQuery = activeGroup ? queryFor(activeGroup.id) : "";
+  const filteredProjects = activeGroup
+    ? filterProjects(activeGroup.projects, flyoutQuery)
+    : [];
 
   useEffect(() => {
-    if (!state.showWorkspaceDropdown) {
-      setExpandedHosts(new Set());
-      setQueries({});
-      lastHost.current = null;
+    setActiveHostId(null);
+    setQueries({});
+    pendingFocus.current = null;
+  }, [state.showWorkspaceDropdown, scope]);
+
+  useEffect(() => {
+    if (activeGroup && pendingFocus.current === activeGroup.id) {
+      pendingFocus.current = null;
+      search.current?.focus({ preventScroll: true });
+      search.current?.scrollIntoView({ block: "nearest" });
     }
-  }, [state.showWorkspaceDropdown]);
+  }, [activeGroup?.id]);
 
   const close = () => {
     void dispatch({ type: "CloseDropdowns" });
   };
-
-  const toggleHost = (hostId: string) => {
-    lastHost.current = hostId;
-    setExpandedHosts((prev) => {
-      const next = new Set(prev);
-      if (next.has(hostId)) {
-        next.delete(hostId);
-      } else {
-        next.add(hostId);
-      }
-      return next;
-    });
+  const activateHost = (id: string) => {
+    // Hover previews never move focus. Click, tap and keyboard deliberately enter
+    // the search pane, including a click on an already-hovered Host.
+    if (activeHostId === id) {
+      search.current?.focus({ preventScroll: true });
+      search.current?.scrollIntoView({ block: "nearest" });
+    } else {
+      pendingFocus.current = id;
+      setActiveHostId(id);
+    }
+  };
+  const closePane = () => {
+    if (activeHostId === null) return;
+    pendingFocus.current = null;
+    const host = hostTriggers.current.get(activeHostId);
+    setActiveHostId(null);
+    host?.focus({ preventScroll: true });
+    host?.scrollIntoView({ block: "nearest" });
   };
 
   const renderProject = (project: NativeProject) => {
@@ -78,20 +126,22 @@ export function WorkspacePicker() {
           close();
         }}
       >
+        <Icon
+          name="folder"
+          size={14}
+          className="ws-project-folder-icon"
+          aria-hidden="true"
+        />
         <span className="ws-item-name">{project.name}</span>
-        <span className="picker-project-status" data-status={availability}>
-          <Icon
-            name={
-              availability === "online"
-                ? "dot"
-                : availability === "offline"
-                  ? "warning"
-                  : "info"
-            }
-            aria-hidden="true"
-          />
-          {t(`home.picker.${availability}`)}
-        </span>
+        {availability !== "online" && (
+          <span className="picker-project-status" data-status={availability}>
+            <Icon
+              name={availability === "offline" ? "warning" : "info"}
+              aria-hidden="true"
+            />
+            {t(`home.picker.${availability}`)}
+          </span>
+        )}
         {selected && (
           <span className="ws-item-check">
             <GlyphIcon name="check" size={14} />
@@ -114,9 +164,7 @@ export function WorkspacePicker() {
         aria-expanded={state.showWorkspaceDropdown}
         onClick={() => void dispatch({ type: "ToggleWorkspaceDropdown" })}
       >
-        <span className="workspace-badge-text">
-          {ws.kind === "none" ? t("home.picker.noProject") : workspaceLabel(ws)}
-        </span>
+        <span className="workspace-badge-text">{workspaceLabel(ws)}</span>
         <GlyphIcon
           name="chevron"
           dir="down"
@@ -125,7 +173,8 @@ export function WorkspacePicker() {
       </button>
       {state.showWorkspaceDropdown && (
         <div
-          className="home-dropdown-menu workspace-dropdown-menu"
+          ref={menu}
+          className="home-dropdown-menu workspace-dropdown-menu workspace-cascading-menu"
           data-testid="home-project-picker"
           role="dialog"
           aria-label={t("home.pickWorkspace")}
@@ -137,220 +186,254 @@ export function WorkspacePicker() {
               close();
           }}
           onKeyDown={(e) => {
+            if (
+              e.nativeEvent.isComposing ||
+              e.altKey ||
+              e.ctrlKey ||
+              e.metaKey ||
+              e.shiftKey
+            )
+              return;
+            const target = e.target as HTMLElement;
+            const pane = target.closest<HTMLElement>("[data-picker-pane]");
             if (e.key === "Escape") {
               e.preventDefault();
               e.stopPropagation();
-              if (expandedHosts.size) {
-                const focused = (e.target as HTMLElement).closest<HTMLElement>(
-                  "[data-picker-host]",
-                )?.dataset.pickerHost;
-                const host =
-                  focused != null && expandedHosts.has(focused)
-                    ? focused
-                    : lastHost.current != null &&
-                        expandedHosts.has(lastHost.current)
-                      ? lastHost.current
-                      : [...expandedHosts].at(-1)!;
-                setExpandedHosts((previous) => {
-                  const next = new Set(previous);
-                  next.delete(host);
-                  return next;
-                });
-                hostTriggers.current.get(host)?.focus({ preventScroll: true });
-              } else {
+              if (activeHostId !== null) closePane();
+              else {
                 close();
                 trigger.current?.focus({ preventScroll: true });
               }
+              return;
             }
-            if (["ArrowDown", "ArrowUp"].includes(e.key)) {
-              if (
-                e.nativeEvent.isComposing ||
-                e.altKey ||
-                e.ctrlKey ||
-                e.metaKey ||
-                e.shiftKey
-              )
-                return;
-              const target = e.target as HTMLElement;
-              if (target instanceof HTMLInputElement) {
-                // Search enters its own filtered results, never another Host's
-                // buttons. An empty result keeps focus in the editable query.
-                const results = target
-                  .closest(".workspace-host-submenu")
-                  ?.querySelectorAll<HTMLButtonElement>(
-                    "button[data-project-id]:not(:disabled)",
-                  );
-                if (!results?.length) return;
-                e.preventDefault();
-                results[e.key === "ArrowDown" ? 0 : results.length - 1].focus();
-                return;
-              }
-              if (
-                target.isContentEditable ||
-                target instanceof HTMLTextAreaElement
-              )
-                return;
-              const buttons = [
-                ...e.currentTarget.querySelectorAll<HTMLButtonElement>(
-                  "button:not(:disabled)",
-                ),
-              ];
-              if (!buttons.length) return;
+            if (
+              e.key === "ArrowRight" &&
+              target instanceof HTMLButtonElement &&
+              target.dataset.hostId !== undefined
+            ) {
               e.preventDefault();
-              const index = buttons.indexOf(
-                document.activeElement as HTMLButtonElement,
-              );
-              const next =
-                index < 0
-                  ? e.key === "ArrowDown"
-                    ? 0
-                    : buttons.length - 1
-                  : (index +
-                      (e.key === "ArrowDown" ? 1 : -1) +
-                      buttons.length) %
-                    buttons.length;
-              buttons[next]?.focus();
+              activateHost(target.dataset.hostId);
+              return;
             }
+            if (
+              e.key === "ArrowLeft" &&
+              pane?.dataset.pickerPane === "projects" &&
+              !(target instanceof HTMLInputElement)
+            ) {
+              e.preventDefault();
+              closePane();
+              return;
+            }
+            if (!["ArrowDown", "ArrowUp"].includes(e.key)) return;
+            if (target instanceof HTMLInputElement) {
+              const results = pane?.querySelectorAll<HTMLButtonElement>(
+                "button[data-project-id]:not(:disabled)",
+              );
+              if (!results?.length) return;
+              e.preventDefault();
+              results[e.key === "ArrowDown" ? 0 : results.length - 1].focus();
+              return;
+            }
+            if (
+              target.isContentEditable ||
+              target instanceof HTMLTextAreaElement
+            )
+              return;
+            const buttons = [
+              ...(pane?.querySelectorAll<HTMLButtonElement>(
+                "button:not(:disabled)",
+              ) ?? []),
+            ];
+            if (!buttons.length) return;
+            e.preventDefault();
+            const index = buttons.indexOf(
+              document.activeElement as HTMLButtonElement,
+            );
+            const next =
+              index < 0
+                ? e.key === "ArrowDown"
+                  ? 0
+                  : buttons.length - 1
+                : (index + (e.key === "ArrowDown" ? 1 : -1) + buttons.length) %
+                  buttons.length;
+            buttons[next]?.focus();
           }}
         >
-          {/* Recent Projects Section */}
-          {recent.length > 0 && (
-            <div className="workspace-menu-section" data-testid="picker-recent">
-              <div className="dropdown-section-title">
-                {t("home.picker.recent")}
+          <div className="workspace-primary-pane" data-picker-pane="hosts">
+            {recent.length > 0 && (
+              <div
+                className="workspace-menu-section"
+                data-testid="picker-recent"
+              >
+                <div className="dropdown-section-title">
+                  {t("home.picker.recent")}
+                </div>
+                {recent.map(renderProject)}
               </div>
-              {recent.map(renderProject)}
-            </div>
-          )}
-
-          {/* Host Groups Section */}
-          {groups.length > 0 && (
-            <div className="workspace-menu-section" data-testid="picker-hosts">
-              <div className="dropdown-section-title">
-                {t("home.picker.hostSection")}
-              </div>
-              {groups.map((group) => {
-                const isExpanded = expandedHosts.has(group.id);
-                const displayLabel =
-                  group.label || t("home.picker.unassignedHost");
-                return (
-                  <div
-                    key={group.id}
-                    className="workspace-host-group"
-                    data-picker-host={group.id}
-                  >
-                    <button
-                      ref={(node) => {
-                        if (node) hostTriggers.current.set(group.id, node);
-                        else hostTriggers.current.delete(group.id);
+            )}
+            {recent.length > 0 && groups.length > 0 && (
+              <div className="dropdown-divider" />
+            )}
+            {groups.length > 0 && (
+              <div
+                className="workspace-menu-section"
+                data-testid="picker-hosts"
+              >
+                <div className="dropdown-section-title">
+                  {t("home.picker.hostSection")}
+                </div>
+                {groups.map((group) => {
+                  const isExpanded = activeHostId === group.id;
+                  return (
+                    <div
+                      key={group.id}
+                      className="workspace-host-group"
+                      data-picker-host={group.id}
+                      onPointerEnter={(e) => {
+                        if (e.pointerType !== "mouse") return;
+                        // Do not unmount a focused search/results pane during passive
+                        // pointer travel. Deliberate click/keyboard can always switch.
+                        if (
+                          document.activeElement?.closest(
+                            '[data-picker-pane="projects"]',
+                          )
+                        )
+                          return;
+                        pendingFocus.current = null;
+                        setActiveHostId(group.id);
                       }}
-                      type="button"
-                      className="workspace-host-toggle"
-                      data-host-id={group.id}
-                      aria-expanded={isExpanded}
-                      aria-controls={`${hostIdPrefix}-${encodeURIComponent(group.id)}`}
-                      onClick={() => toggleHost(group.id)}
                     >
-                      <Icon
-                        name="folder"
-                        size={14}
-                        className="ws-host-folder-icon"
-                      />
-                      <span className="ws-item-name">{displayLabel}</span>
-                      <GlyphIcon
-                        name="chevron"
-                        className={
-                          isExpanded
-                            ? "ws-host-chevron expanded"
-                            : "ws-host-chevron"
-                        }
-                      />
-                    </button>
-                    {isExpanded && (
-                      <div
-                        className="workspace-host-projects workspace-host-submenu"
-                        id={`${hostIdPrefix}-${encodeURIComponent(group.id)}`}
-                        data-testid="picker-host-submenu"
-                        role="group"
-                        aria-label={
-                          group.label || t("home.picker.unassignedHost")
-                        }
-                        onFocus={() => {
-                          lastHost.current = group.id;
+                      <button
+                        ref={(node) => {
+                          if (node) hostTriggers.current.set(group.id, node);
+                          else hostTriggers.current.delete(group.id);
                         }}
+                        type="button"
+                        className="workspace-host-toggle"
+                        data-host-id={group.id}
+                        data-active={isExpanded}
+                        aria-expanded={isExpanded}
+                        aria-controls={`${hostIdPrefix}-${encodeURIComponent(group.id)}`}
+                        onClick={() => activateHost(group.id)}
                       >
-                        <input
-                          type="search"
-                          className="settings-input"
-                          autoFocus
-                          aria-label={t("home.picker.searchProjects")}
-                          placeholder={t("home.picker.searchProjects")}
-                          value={queries[group.id] ?? ""}
-                          onChange={(event) =>
-                            setQueries((previous) => ({
-                              ...previous,
-                              [group.id]: event.target.value,
-                            }))
+                        <Icon
+                          name="folder"
+                          size={14}
+                          className="ws-host-folder-icon"
+                          aria-hidden="true"
+                        />
+                        <span className="ws-item-name">
+                          {group.label || t("home.picker.unassignedHost")}
+                        </span>
+                        <GlyphIcon
+                          name="chevron"
+                          className={
+                            isExpanded
+                              ? "ws-host-chevron expanded"
+                              : "ws-host-chevron"
                           }
                         />
-                        <div className="workspace-project-list">
-                          {filterProjects(
-                            group.projects,
-                            queries[group.id] ?? "",
-                          ).map(renderProject)}
-                          {!filterProjects(
-                            group.projects,
-                            queries[group.id] ?? "",
-                          ).length && (
-                            <p role="status">{t("home.picker.noMatch")}</p>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            <div className="dropdown-divider" />
+            <button
+              className="workspace-menu-item text-only"
+              type="button"
+              data-testid="picker-create-project"
+              onClick={() => {
+                void dispatch({ type: "OpenCreateProjectDialog" });
+                close();
+              }}
+            >
+              <span className="ws-item-name">
+                {t("home.picker.newProject")}
+              </span>
+            </button>
+            <div className="dropdown-divider" />
+            {(["chat_only", "browser_sandbox"] as const).map((flavor) => (
+              <button
+                className="workspace-menu-item text-only"
+                type="button"
+                data-testid="home-project-item"
+                key={flavor}
+                data-host-flavor={flavor}
+                title={t(
+                  flavor === "chat_only"
+                    ? "home.picker.chatOnlyDesc"
+                    : "home.picker.browserSandboxDesc",
+                )}
+                data-active={ws.kind === flavor}
+                onClick={() => {
+                  void dispatch({
+                    type: "SelectDraftWorkspace",
+                    value: { kind: flavor },
+                  });
+                  close();
+                }}
+              >
+                <span className="ws-item-name">
+                  {t(
+                    flavor === "chat_only"
+                      ? "home.picker.chatOnly"
+                      : "home.picker.browserSandbox",
+                  )}
+                </span>
+                {ws.kind === flavor && (
+                  <span className="ws-item-check">
+                    <GlyphIcon name="check" size={14} />
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+          {activeGroup && (
+            <div
+              className="workspace-host-projects workspace-host-submenu workspace-flyout-pane"
+              key={activeGroup.id}
+              id={`${hostIdPrefix}-${encodeURIComponent(activeGroup.id)}`}
+              data-testid="picker-host-submenu"
+              data-picker-pane="projects"
+              role="group"
+              aria-label={activeGroup.label || t("home.picker.unassignedHost")}
+            >
+              <div className="workspace-flyout-search">
+                <input
+                  ref={search}
+                  type="search"
+                  className="settings-input"
+                  aria-label={t("home.picker.searchProjects")}
+                  placeholder={t("home.picker.searchProjects")}
+                  value={flyoutQuery}
+                  onChange={(event) =>
+                    setQueries((previous) => ({
+                      ...previous,
+                      [activeGroup.id]: event.target.value,
+                    }))
+                  }
+                />
+              </div>
+              <div className="workspace-project-list">
+                {filteredProjects.map(renderProject)}
+                {!filteredProjects.length && (
+                  <p className="workspace-flyout-empty" role="status">
+                    {t("home.picker.noMatch")}
+                  </p>
+                )}
+              </div>
+              <div className="workspace-flyout-foot">
+                <span className="ws-item-name">
+                  {activeGroup.label || t("home.picker.unassignedHost")}
+                </span>
+                <span>
+                  {filteredProjects.length}/{activeGroup.projects.length}
+                </span>
+              </div>
             </div>
           )}
-
-          <div className="dropdown-divider" />
-
-          {/* New Project */}
-          <button
-            className="workspace-menu-item text-only"
-            type="button"
-            data-testid="picker-create-project"
-            onClick={() => {
-              void dispatch({ type: "OpenCreateProjectDialog" });
-              close();
-            }}
-          >
-            <span className="ws-item-name">{t("home.picker.newProject")}</span>
-          </button>
-
-          <div className="dropdown-divider" />
-
-          {/* No Project */}
-          <button
-            className="workspace-menu-item text-only"
-            type="button"
-            data-testid="home-project-item"
-            data-active={ws.kind === "none"}
-            onClick={() => {
-              void dispatch({
-                type: "SelectDraftWorkspace",
-                value: { kind: "none" },
-              });
-              close();
-            }}
-          >
-            <span className="ws-item-name">{t("home.picker.noProject")}</span>
-            {ws.kind === "none" && (
-              <span className="ws-item-check">
-                <GlyphIcon name="check" size={14} />
-              </span>
-            )}
-          </button>
         </div>
       )}
     </div>

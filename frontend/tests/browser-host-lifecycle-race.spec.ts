@@ -49,7 +49,7 @@ async function mount(page: Page, pause: "descriptor" | "attach") {
       return { promise, resolve };
     }
     const scope = { scope_version: 3, scope_kind: "conversation", binding_id: "binding",
-      backend_id: "backend", conversation_id: "conversation" };
+      backend_id: "backend", conversation_id: "conversation", host_flavor: "browser_sandbox" };
     const fixture: any = {
       hosts: [], attaches: [], descriptorEntered: gate(), descriptorGate: gate(),
       attachEntered: gate(), attachGate: gate(),
@@ -63,7 +63,7 @@ async function mount(page: Page, pause: "descriptor" | "attach") {
         fixture.attachEntered.resolve();
         await fixture.attachGate.promise;
       }
-      return { ready: true, scope, connection_generation: params.descriptor.host_id };
+      return { ready: true, scope, host_flavor: "browser_sandbox", connection_generation: params.descriptor.host_id };
     } };
     fixture.frames = [];
     fixture.conversations = new BrowserConversations(api, async (frame: unknown) => {
@@ -72,7 +72,7 @@ async function mount(page: Page, pause: "descriptor" | "attach") {
     });
     // Handle rejection immediately so the intentional stale open never becomes
     // an unhandled browser rejection while its replacement is being prepared.
-    fixture.old = fixture.conversations.connect("conversation", "owner").then(
+    fixture.old = fixture.conversations.connect("conversation", "owner", "browser_sandbox").then(
       () => "ready", () => "stale",
     );
     await fixture.descriptorEntered.promise;
@@ -89,11 +89,11 @@ for (const pause of ["descriptor", "attach"] as const) {
     const result = await page.evaluate(async () => {
       const fixture = (window as any).hostRace;
       await fixture.conversations.close();
-      const replacement = await fixture.conversations.connect("conversation", "owner");
+      const replacement = await fixture.conversations.connect("conversation", "owner", "browser_sandbox");
       fixture.descriptorGate.resolve();
       fixture.attachGate.resolve();
       const old = await fixture.old;
-      const current = await fixture.conversations.connect("conversation", "owner");
+      const current = await fixture.conversations.connect("conversation", "owner", "browser_sandbox");
       return { old, attaches: fixture.attaches, replacementRetained: current === replacement,
         replacementGeneration: current.generation, closes: fixture.hosts.map((host: any) => host.closes) };
     });
@@ -133,13 +133,13 @@ for (const boundary of ["spontaneous", "send-failure", "handle-failure", "handle
         await started;
       }
       await fixture.conversations.close();
-      const replacement = await fixture.conversations.connect("conversation", "owner");
+      const replacement = await fixture.conversations.connect("conversation", "owner", "browser_sandbox");
       if (boundary === "spontaneous") oldHost.onFrame({ late: true });
       release();
       // Finish the actual async reply/rejection handlers before observing the
       // replacement, using an event-loop checkpoint instead of a race delay.
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
-      const current = await fixture.conversations.connect("conversation", "owner");
+      const current = await fixture.conversations.connect("conversation", "owner", "browser_sandbox");
       return { retained: current === replacement, frames: fixture.frames,
         replacementCloses: fixture.hosts[1].closes, generation: current.generation };
     }, boundary);

@@ -35,9 +35,13 @@ const tools = (
     tool_name: `reading_tool_${round}`,
   },
 ];
-async function setup(page: Page, messages?: NativeMessage[]) {
+async function setup(
+  page: Page,
+  messages?: NativeMessage[],
+  options: Parameters<typeof nativeBackend>[1] = {},
+) {
   await page.setViewportSize({ width: 1440, height: 700 });
-  const backend = await nativeBackend(page);
+  const backend = await nativeBackend(page, options);
   const snapshot = backend.snapshot();
   snapshot.session.status = "running";
   snapshot.inbox = { items: [], active: true, paused: false };
@@ -366,6 +370,127 @@ test("valid explicit send resumes following from an expanded tool reading positi
   await expect(row(page, 1)).toHaveAttribute("aria-expanded", "true");
 });
 
+for (const mode of ["queue", "steer", "submit"] as const) {
+  const outcomes =
+    mode === "queue"
+      ? (["completed"] as const)
+      : (["completed", "failed", "newer-pause", "pending"] as const);
+  for (const outcome of outcomes) {
+    test(`${mode} ${outcome} receipt respects reading and submission intent`, async ({
+      page,
+    }) => {
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const backend = await setup(page, undefined, {
+        extraMethods: ["turn.queue", "turn.steer"],
+        inboxTurn: async (command) => {
+          await held;
+          return {
+            id: command.params.operation_id,
+            session_id: "s1",
+            method: command.method,
+            status:
+              outcome === "failed"
+                ? "failed"
+                : outcome === "pending"
+                  ? "accepted"
+                  : "completed",
+            result: outcome === "failed" ? null : { admitted: true },
+            error:
+              outcome === "failed"
+                ? { code: "rejected", message: "Admission rejected" }
+                : null,
+          };
+        },
+      });
+      await connectHostUI(page);
+      await readTool(page, row(page, 1));
+      if (mode === "submit") {
+        const idle = structuredClone(backend.snapshot());
+        idle.session.status = "idle";
+        idle.inbox = { items: [], active: false, paused: false };
+        backend.publish(idle);
+        await expect(page.getByTestId("queue-input")).toHaveCount(0);
+      }
+      const input = page.getByRole("textbox", { name: "消息", exact: true });
+      await input.fill(`Reading ${mode} ${outcome}`);
+      const host = page.locator("#conversation-transcript");
+      // Focusing the sticky composer can reveal it; restore the reading position
+      // before sending so only the accepted submission may resume following.
+      await host.evaluate((node) => {
+        node.scrollTop = 300;
+      });
+      await expect.poll(() => gap(page)).toBeGreaterThan(200);
+      await expect(host).toHaveAttribute("data-following", "false");
+      const button =
+        mode === "submit"
+          ? page.getByRole("button", { name: "发送 (Enter)", exact: true })
+          : page.getByTestId(`${mode}-input`);
+      await button.click();
+      const method = mode === "steer" ? "turn.steer" : "turn.queue";
+      await expect
+        .poll(
+          () =>
+            backend.commands.filter((command) => command.method === method)
+              .length,
+        )
+        .toBe(1);
+      const command = backend.commands.find(
+        (command) => command.method === method,
+      )!;
+      expect(command.params.activate_if_idle).toBe(
+        mode === "submit" ? true : undefined,
+      );
+      // The request is in flight: clicking send alone must not move reading.
+      await expect(host).toHaveAttribute("data-following", "false");
+      await expect.poll(() => gap(page)).toBeGreaterThan(200);
+      if (outcome === "newer-pause") {
+        const box = (await host.boundingBox())!;
+        await page.mouse.move(box.x + 5, box.y + box.height / 2);
+        await page.mouse.wheel(0, -100);
+        await expect
+          .poll(() => host.evaluate((node) => node.scrollTop))
+          .toBeLessThan(300);
+      }
+      release();
+      if (outcome === "completed" || outcome === "newer-pause")
+        await expect(input).toHaveValue("");
+      else if (outcome === "failed") {
+        await expect(input).toHaveValue(`Reading ${mode} ${outcome}`);
+        await expect(button).toBeEnabled();
+      } else if (mode === "submit") {
+        await expect(
+          page.getByText(
+            "发送接纳结果未知，草稿已保留；正在核对操作回执，请勿重复发送。",
+            { exact: true },
+          ),
+        ).toBeVisible();
+        await expect(input).toHaveValue(`Reading ${mode} ${outcome}`);
+      } else {
+        // Barrier after processing the nonterminal receipt, with the same
+        // operation still pending; it must not be treated as accepted success.
+        backend.event("tool", {
+          operation_id: "reading-pending-op",
+          ...position(9),
+          call_id: "reading-pending-call",
+          name: "pending_receipt_barrier",
+          phase: "completed",
+          arguments: {},
+          result: "Still reading",
+        });
+        await expect(page.getByTestId("tool-row")).toHaveCount(3);
+        await expect(input).toHaveValue(`Reading ${mode} ${outcome}`);
+      }
+      const resumes = outcome === "completed" && mode !== "queue";
+      await expect(host).toHaveAttribute("data-following", String(resumes));
+      if (resumes) await expect.poll(() => gap(page)).toBeLessThanOrEqual(1);
+      else await expect.poll(() => gap(page)).toBeGreaterThan(200);
+      await expect(row(page, 1)).toHaveAttribute("aria-expanded", "true");
+    });
+  }
+}
 test("clicking the thought header pauses following before expansion and incoming events", async ({
   page,
 }) => {

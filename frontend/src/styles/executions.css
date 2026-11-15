@@ -73,9 +73,10 @@
   align-items: stretch;
   gap: var(--sp-3);
   min-width: 0;
-  padding: var(--sp-3) 0;
-  border-top: 1px solid var(--border);
-  border-bottom: 0;
+  padding: 12px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
 }
 
 .execution-record-body {

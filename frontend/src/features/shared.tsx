@@ -293,6 +293,8 @@ export function Icon({
           <polyline points="4 17 10 11 4 5" />
           <line x1="12" y1="19" x2="20" y2="19" />
         </>
+      ) : name === "folder" ? (
+        <path d="M3 7V5a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" />
       ) : ["read", "write", "file"].includes(name) ? (
         <>
           <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />

@@ -1,6 +1,34 @@
 import { test, expect, type Page, type Route } from "@playwright/test";
 import { nativeBackend } from "./native-fixture";
 import { connectHostUI } from "./host-fixture";
+import { LIMIT_FIELDS } from "../src/client/settings";
+
+function draftSettings(agent = "coding") {
+  const limits = Object.fromEntries(
+    LIMIT_FIELDS.map((field) => [field, 1048576]),
+  );
+  const effective = {
+    limits,
+    agent,
+    mode: "build",
+    model_selection: {
+      provider_id: "provider-b",
+      model: "shared",
+      variant: "low",
+    },
+  };
+  return {
+    revision: 0,
+    applied_revision: 0,
+    overrides: {},
+    effective,
+    desired_effective: effective,
+    sources: {},
+    constraints: { limits },
+    application: "defaults_saved",
+    reason: null,
+  };
+}
 
 async function selectionBackend(page: Page) {
   const backend = await nativeBackend(page);
@@ -35,6 +63,13 @@ async function selectionBackend(page: Page) {
       },
     }),
   );
+  for (const path of ["**/api/v1/settings", "**/api/v1/projects/*/settings"]) {
+    await page.route(path, (route) =>
+      route.fulfill({
+        json: draftSettings(),
+      }),
+    );
+  }
   const updates: any[] = [];
   let respond = async (route: Route) => {
     const { expected_revision, ...selection } = route.request().postDataJSON();
@@ -102,6 +137,65 @@ test("draft uses the server default and sends the selected provider/model/varian
     )?.body.model_selection,
   ).toEqual({ provider_id: "provider-b", model: "shared", variant: "high" });
   expect(backend.updates).toHaveLength(0);
+});
+
+test("inherited draft model leaves creation selection to scoped server defaults", async ({
+  page,
+}) => {
+  const backend = await selectionBackend(page);
+  for (const path of ["**/api/v1/settings", "**/api/v1/projects/*/settings"]) {
+    await page.route(path, (route) =>
+      route.fulfill({
+        json: draftSettings("preferred"),
+      }),
+    );
+  }
+  await page.route("**/api/v1/projects/*/agents", (route) =>
+    route.fulfill({
+      json: {
+        items: [
+          {
+            name: "coding",
+            component: "component-sha256",
+            modes: [{ name: "plan", role: "main_agent" }],
+            tools: [],
+            variables: {},
+          },
+          {
+            name: "preferred",
+            component: "preferred-component",
+            modes: [{ name: "build", role: "main_agent" }],
+            tools: [],
+            variables: {},
+          },
+        ],
+      },
+    }),
+  );
+  await page.goto("/");
+  await expect(page.locator(".composer-model-pill")).toContainText("Model B");
+  await connectHostUI(page);
+  await page.getByLabel("消息", { exact: true }).fill("inherit model");
+  await page.getByTitle("发送 (Enter)").click();
+  await expect
+    .poll(
+      () =>
+        backend.requests.filter(
+          (request) =>
+            request.method === "POST" && request.path === "/api/v1/sessions",
+        ).length,
+    )
+    .toBe(1);
+  const created = backend.requests.find(
+    (request) =>
+      request.method === "POST" && request.path === "/api/v1/sessions",
+  );
+  expect(created?.body).not.toHaveProperty("model_selection");
+  expect(created?.body).toMatchObject({
+    agent: "preferred",
+    mode: "build",
+    component: "preferred-component",
+  });
 });
 
 test("active selection uses PUT and canonical provider identity survives reload", async ({

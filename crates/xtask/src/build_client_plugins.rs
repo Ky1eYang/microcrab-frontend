@@ -11,7 +11,7 @@ use std::{
     collections::BTreeSet,
     error::Error,
     fs,
-    path::{Path, PathBuf},
+    path::PathBuf,
     process::Command,
 };
 use wasmparser::{Encoding, Parser, Payload, Validator};
@@ -206,13 +206,10 @@ pub(crate) fn run(args: impl Iterator<Item = String>) -> Result<()> {
         return Ok(());
     };
     let caller = std::env::current_dir()?;
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(Path::parent)
-        .ok_or("xtask workspace root missing")?;
+    let root = crate::workspace::root()?;
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     let output = Command::new(&cargo)
-        .current_dir(root)
+        .current_dir(&root)
         .args([
             "metadata",
             "--format-version",
@@ -238,7 +235,7 @@ pub(crate) fn run(args: impl Iterator<Item = String>) -> Result<()> {
     );
     let mut build = Command::new(cargo);
     build
-        .current_dir(root)
+        .current_dir(&root)
         .args(["build", "--locked", "--offline", "--target", TARGET]);
     if options.release {
         build.arg("--release");

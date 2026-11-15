@@ -1,4 +1,6 @@
+import { useId } from "react";
 import type { Permission, ArgumentPredicate } from "../../../client/types";
+import { useApp } from "../../../state";
 import { t } from "../../../i18n";
 
 /** Edit declarative predicates only. The shared runtime compiler owns regex
@@ -12,6 +14,12 @@ export function PredicateEditor({
   onChange: (rules: Permission[]) => void;
   disabled?: boolean;
 }) {
+  const { state } = useApp();
+  const listId = useId();
+  const agentNames = state.agents.map((a) => a.name);
+  const modeNames = [
+    ...new Set(state.agents.flatMap((a) => (a.modes ?? []).map((m) => m.name))),
+  ];
   const update = (index: number, rule: Permission) =>
     onChange(rules.map((current, at) => (at === index ? rule : current)));
   const predicate = (
@@ -37,13 +45,14 @@ export function PredicateEditor({
       <p className="perm-help">{t("permission.predicates.help")}</p>
       {rules.map((rule, ruleIndex) => (
         <div
-          className="settings-section"
+          className="settings-section predicate-rule-card"
           key={ruleIndex}
           data-testid="permission-predicate-rule"
         >
-          <div className="settings-actions-row">
+          <div className="settings-form-grid">
             <input
               className="settings-input"
+              list={`${listId}-agents`}
               aria-label={t("permission.predicates.agent")}
               placeholder={t("ownerSettings.inherit")}
               value={rule.agent ?? ""}
@@ -53,6 +62,7 @@ export function PredicateEditor({
             />
             <input
               className="settings-input"
+              list={`${listId}-modes`}
               aria-label={t("permission.predicates.mode")}
               placeholder={t("ownerSettings.inherit")}
               value={rule.mode ?? ""}
@@ -115,7 +125,7 @@ export function PredicateEditor({
           </select>
           {(rule.args ?? []).map((arg, index) => (
             <div
-              className="settings-section"
+              className="settings-section predicate-arg-row"
               key={index}
               data-testid="permission-predicate-row"
             >
@@ -220,6 +230,16 @@ export function PredicateEditor({
       >
         {t("permission.predicates.addRule")}
       </button>
+      <datalist id={`${listId}-agents`}>
+        {agentNames.map((name) => (
+          <option key={name} value={name} />
+        ))}
+      </datalist>
+      <datalist id={`${listId}-modes`}>
+        {modeNames.map((name) => (
+          <option key={name} value={name} />
+        ))}
+      </datalist>
     </fieldset>
   );
 }

@@ -81,6 +81,8 @@ export function Composer({
           "draftAgent",
           "draftMode",
           "draftModel",
+          "userSessionDefaults",
+          "projectSessionDefaults",
           "availableModels",
           "policy",
           "resolvedLocale",
@@ -115,7 +117,6 @@ export function Composer({
   }, [state.composerFocusRequest, state.sessionId, child]);
   const ready = state.connection === "ws" && !!state.authSession?.authenticated;
   const host = hostReadiness(state);
-  const currentProjectId = host.projectId;
   const isHostReady = host.ready;
   const isProjectOffline = !isHostReady;
   const browserHost = !host.projectId;
@@ -123,10 +124,19 @@ export function Composer({
     browserHost && host.matched && !!state.hostConnection?.catalogError;
   const hostNotice = browserHost
     ? browserError
-      ? t("browserHost.unavailableNotice", {
-          error: state.hostConnection?.catalogError ?? "",
-        })
-      : t("browserHost.loadingNotice")
+      ? t(
+          host.hostFlavor === "chat_only"
+            ? "chatOnly.unavailableNotice"
+            : "browserHost.unavailableNotice",
+          {
+            error: state.hostConnection?.catalogError ?? "",
+          },
+        )
+      : t(
+          host.hostFlavor === "chat_only"
+            ? "chatOnly.loadingNotice"
+            : "browserHost.loadingNotice",
+        )
     : host.status === "loading_catalog"
       ? t("host.readiness.loadingNotice")
       : host.status === "catalog_error"
@@ -259,7 +269,7 @@ export function Composer({
       if (slashMatch) return;
       const method = steer ? "turn.steer" : "turn.queue";
       if (!inboxBlocked && has(method)) {
-        const accepted = onSubmitIntent?.();
+        const accepted = steer ? onSubmitIntent?.() : undefined;
         void dispatch({ type: steer ? "SteerInput" : "QueueInput" }).then(
           (result) => {
             if (
@@ -461,15 +471,6 @@ export function Composer({
                 dispatch({ type: "SetAgentMode", agent, mode });
                 input.current?.focus();
               }}
-              onManage={() => {
-                setMenu(null);
-                if (currentProjectId)
-                  dispatch({
-                    type: "OpenProjectSettings",
-                    value: currentProjectId,
-                    tab: "agents",
-                  });
-              }}
             />
           )}
           {menu === "model" && (
@@ -586,7 +587,11 @@ export function Composer({
               }
             >
               {browserHost
-                ? t("browserHost.retry")
+                ? t(
+                    host.hostFlavor === "chat_only"
+                      ? "chatOnly.retry"
+                      : "browserHost.retry",
+                  )
                 : host.status === "catalog_error"
                   ? t("host.readiness.retryCatalog")
                   : host.status === "loading_catalog"

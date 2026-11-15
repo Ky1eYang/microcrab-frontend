@@ -1,3 +1,4 @@
+import { boundedCitationBlob, citationPath, CITATION_TIMEOUT_MS, type CitationRequest } from "./citations";
 import { validateExecutionHistory } from "./execution-history";
 import {
   validateSettingsSnapshot,
@@ -276,8 +277,12 @@ export class ApiClient {
   async disconnectBrowserConversation(conversationId: string) {
     return this.browserHosts.disconnect(conversationId);
   }
-  async connectBrowserConversation(conversationId: string, owner: string) {
-    return this.browserHosts.connect(conversationId, owner);
+  async connectBrowserConversation(
+    conversationId: string,
+    owner: string,
+    flavor: import("./types").ConversationHostFlavor,
+  ) {
+    return this.browserHosts.connect(conversationId, owner, flavor);
   }
   private hostEpoch = 0;
   private relayRelease: Promise<unknown> = Promise.resolve();
@@ -1434,6 +1439,7 @@ export class ApiClient {
     requestId?: string,
     trigger?: HostLifecycleTrigger,
     signal?: AbortSignal,
+    binary = false,
   ): Promise<T> {
     const controller = new AbortController();
     const abort = () => controller.abort(signal?.reason);
@@ -1454,7 +1460,7 @@ export class ApiClient {
         credentials: "include",
         cache: "no-store",
         headers: {
-          Accept: "application/json",
+          Accept: binary ? "application/octet-stream, image/png, image/jpeg, image/gif, image/webp" : "application/json",
           "x-client-tab-id": this.tabId,
           ...(trigger ? { "x-client-trigger": trigger } : {}),
           ...(body === undefined ? {} : { "Content-Type": contentType }),
@@ -1480,6 +1486,8 @@ export class ApiClient {
         void receipt.then(() => this.authReceipts.delete(receipt));
         this.handlers.authRequired?.();
       }
+      if (binary && response.ok)
+        return await boundedCitationBlob(response, controller.signal) as T;
       // Bound reads while streaming; an unreadable success can hide an admitted mutation.
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
@@ -1579,6 +1587,12 @@ export class ApiClient {
       this.httpPending.delete(controller);
       finishAuthReceipt?.();
     }
+  }
+  async readCitation(request: CitationRequest, signal: AbortSignal): Promise<Blob> {
+    if (this.httpPending.size + this.pending.size >= MAX_PENDING)
+      throw new CommandError("overloaded", "Too many pending requests");
+    return this.http<Blob>(this.url(citationPath(request)), "GET", undefined,
+      CITATION_TIMEOUT_MS, "application/json", undefined, undefined, signal, true);
   }
   async uploadImage(sessionId: string, file: File) {
     if (this.httpPending.size + this.pending.size >= MAX_PENDING)

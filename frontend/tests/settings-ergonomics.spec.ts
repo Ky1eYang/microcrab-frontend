@@ -269,7 +269,9 @@ test("provider and settings validation focus actual invalid controls with nearby
     route.fulfill({ json: { items: [] } }),
   );
   await page.getByRole("button", { name: "模型服务商", exact: true }).click();
+  await page.getByRole("button", { name: "+ 新建服务商", exact: true }).click();
   await page.getByRole("button", { name: "添加模型", exact: true }).click();
+  await page.locator('[data-validation-path="provider.models[0].id"]').fill("");
   await page.getByTestId("provider-save").click();
   await expect(page.getByTestId("provider-id")).toBeFocused();
   await expect(page.locator(".settings-field-error")).toContainText(

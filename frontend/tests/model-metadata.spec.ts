@@ -25,7 +25,7 @@ test("model choices and active selections retain the current provider-local prot
     const choices = modelChoices({ items });
     const state = initialState();
     state.availableModels = choices;
-    const initialDefault = selectedModel(state)?.protocol;
+    const initialDefault = selectedModel(state)?.protocol ?? null;
     state.draftModel = choices[3];
     const draft = selectedModel(state)?.protocol;
     state.sessionId = "s";
@@ -85,7 +85,7 @@ test("model choices and active selections retain the current provider-local prot
   });
   expect(result).toEqual({
     choices: ["openai-compatible", "openai", "anthropic", "google"],
-    initialDefault: "openai-compatible",
+    initialDefault: null,
     draft: "google",
     active: ["openai-compatible", "openai", "anthropic", "google"].map(
       (protocol, index) => ({

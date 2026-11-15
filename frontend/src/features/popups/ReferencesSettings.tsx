@@ -136,10 +136,17 @@ export function ReferencesSettings({ projectId }: { projectId: string }) {
     }
   };
   return (
-    <section data-testid="project-references" aria-busy={busy}>
-      <h4 className="project-settings-pane-title">
-        {t("project.settings.refs.heading")}
-      </h4>
+    <section
+      className="settings-section-card"
+      data-testid="project-references"
+      aria-busy={busy}
+    >
+      <div className="settings-section-head">
+        <h4 className="settings-section-title">
+          {t("project.settings.refs.heading")}
+        </h4>
+        <span className="limit-source-pill">{sources.length}</span>
+      </div>
       <p className="inline-notice">{t("ownerSettings.referencesHint")}</p>
       {error && (
         <p role="alert" className="inline-notice" data-tone="danger">
@@ -153,7 +160,7 @@ export function ReferencesSettings({ projectId }: { projectId: string }) {
       )}
       <div className="project-ref-add" data-testid="project-ref-add">
         <select
-          className="settings-input"
+          className="settings-input project-ref-type-select"
           aria-label={t("project.settings.refs.kind")}
           value={type}
           onChange={(event) =>
@@ -166,9 +173,9 @@ export function ReferencesSettings({ projectId }: { projectId: string }) {
         </select>
         {type === "host_path" && (
           <input
-            className="settings-input"
+            className="settings-input monospace-text"
             aria-label={t("project.settings.refs.path")}
-            placeholder={t("project.settings.refs.path")}
+            placeholder={t("project.settings.refs.pathPlaceholder")}
             value={path}
             onChange={(event) => setPath(event.target.value)}
           />
@@ -176,14 +183,16 @@ export function ReferencesSettings({ projectId }: { projectId: string }) {
         {type === "host_glob" && (
           <>
             <input
-              className="settings-input"
+              className="settings-input monospace-text"
               aria-label={t("project.settings.refs.root")}
+              placeholder={t("project.settings.refs.rootPlaceholder")}
               value={root}
               onChange={(event) => setRoot(event.target.value)}
             />
             <input
-              className="settings-input"
+              className="settings-input monospace-text"
               aria-label={t("project.settings.refs.pattern")}
+              placeholder={t("project.settings.refs.patternPlaceholder")}
               value={pattern}
               onChange={(event) => setPattern(event.target.value)}
             />
@@ -191,8 +200,13 @@ export function ReferencesSettings({ projectId }: { projectId: string }) {
         )}
         {(type === "url" || type === "directory_url") && (
           <input
-            className="settings-input"
+            className="settings-input monospace-text"
             aria-label={t("project.settings.refs.url")}
+            placeholder={t(
+              type === "directory_url"
+                ? "project.settings.refs.dirUrlPlaceholder"
+                : "project.settings.refs.urlPlaceholder",
+            )}
             value={url}
             onChange={(event) => setUrl(event.target.value)}
           />
@@ -213,7 +227,9 @@ export function ReferencesSettings({ projectId }: { projectId: string }) {
               key={index}
               data-testid="project-ref-row"
             >
-              <span className="project-ref-kind">{source.type}</span>
+              <span className="limit-source-pill project-ref-kind">
+                {source.type}
+              </span>
               <span className="project-ref-main monospace-text">
                 {"path" in source
                   ? source.path

@@ -1,3 +1,5 @@
+import { readHttpResponse } from "./http-response";
+import type { PluginResources } from "./resources";
 import { LIMITS, type Json, type PluginManifest } from "./types";
 interface SocketScope {
   isCurrent: () => boolean;
@@ -14,6 +16,7 @@ export class PluginNetwork {
   constructor(
     private readonly manifest: PluginManifest,
     private readonly event: (requestId: number, value: Json) => void,
+    private readonly resources?: PluginResources,
   ) {}
   private url(value: Json | undefined, protocols: string[]): URL {
     if (typeof value !== "string")
@@ -40,7 +43,14 @@ export class PluginNetwork {
       throw new Error("network payload must be object");
     const p = payload;
     if (kind === "http") {
-      const url = this.url(p.url, ["http:", "https:"]);
+      const resource =
+        p.resource !== undefined ? this.resources?.network(p) : undefined;
+      if (p.resource !== undefined && !resource)
+        throw Error("Resource grants are unavailable");
+      const url = resource
+        ? new URL(resource.url)
+        : this.url(p.url, ["http:", "https:"]);
+      if (resource) signal = AbortSignal.any([signal, resource.signal]);
       if (p.body !== undefined && typeof p.body !== "string")
         throw new Error("HTTP body must be string");
       if (
@@ -62,6 +72,22 @@ export class PluginNetwork {
           headers[k] = v;
         }
       }
+      if (resource) {
+        for (const key of Object.keys(headers))
+          if (
+            ["authorization", "cookie", "proxy-authorization"].includes(
+              key.toLowerCase(),
+            )
+          )
+            throw Error("Resource credentials are host-owned");
+        Object.assign(headers, resource.headers);
+      }
+      if (
+        p.response_id !== undefined &&
+        typeof p.response_id !== "string" &&
+        typeof p.response_id !== "number"
+      )
+        throw Error("Invalid response identity");
       const response = await fetch(url, {
         method: typeof p.method === "string" ? p.method : "GET",
         headers,
@@ -69,31 +95,21 @@ export class PluginNetwork {
         signal,
         redirect: "error",
         credentials: "omit",
+        referrerPolicy: "no-referrer",
+        cache: "no-store",
       });
-      const reader = response.body?.getReader();
-      const chunks: Uint8Array[] = [];
-      let size = 0;
-      if (reader)
-        try {
-          while (true) {
-            const part = await reader.read();
-            if (part.done) break;
-            size += part.value.length;
-            if (size > LIMITS.networkBytes) {
-              await reader.cancel();
-              throw new Error("HTTP response exceeds 2 MiB");
-            }
-            chunks.push(part.value);
-          }
-        } finally {
-          reader.releaseLock();
-        }
-      const bytes = new Uint8Array(size);
-      let offset = 0;
-      for (const chunk of chunks) {
-        bytes.set(chunk, offset);
-        offset += chunk.length;
-      }
+      let body: string;
+      if (p.response_mode === "discard") {
+        await response.body?.cancel();
+        body = "";
+      } else
+        body = await readHttpResponse(
+          response,
+          p.response_id as string | number | undefined,
+          signal,
+        );
+      if (resource && !resource.isCurrent())
+        throw Error("Resource grant was revoked");
       const responseHeaders: Record<string, string> = {};
       response.headers.forEach((v, k) => {
         responseHeaders[k] = v;
@@ -101,7 +117,7 @@ export class PluginNetwork {
       return {
         status: response.status,
         headers: responseHeaders,
-        body: new TextDecoder().decode(bytes),
+        body,
       };
     }
     if (kind === "ws-open") {

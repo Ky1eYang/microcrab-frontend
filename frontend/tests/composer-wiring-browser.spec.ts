@@ -268,6 +268,214 @@ test("Insert has a distinct label and bent arrow and is the only steering action
   expect(methods).toEqual(["turn.steer"]);
 });
 
+for (const width of [1440, 390]) {
+  for (const theme of ["light", "dark"]) {
+    test(`Agent menu unified frame keeps hover targets fixed and ellipsizes modes at ${width} ${theme}`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await mount(page);
+      await page.evaluate((theme) => {
+        document.documentElement.dataset.theme = theme;
+      }, theme);
+      await page.getByTestId("composer-agent-pill").click();
+      const menu = page.locator(".composer-agent-mode-menu");
+      const primary = page.locator(".composer-agent-primary-pane");
+      const secondary = page.locator(".composer-mode-secondary-pane");
+      const description = "Full description remains available on hover. ".repeat(12);
+      for (const count of [2, 12]) {
+        await page.evaluate(({ count, description }) => {
+          const { store } = (window as any).h;
+          store.update({ agents: [
+            { name: "alpha", component: "alpha.wasm", modes: Array.from({ length: 8 }, (_, index) => ({ name: `mode-${index}`, role: "main", description })) },
+            { name: "beta", component: "beta.wasm", modes: [{ name: "execute", role: "main", description }] },
+            ...Array.from({ length: count - 2 }, (_, index) => ({ name: `extra-${index}`, component: "extra.wasm", modes: [{ name: "default", role: "main" }] })),
+          ] });
+        }, { count, description });
+        const alpha = page.getByTestId("composer-agent-item").filter({ hasText: /^alpha$/ });
+        const beta = page.getByTestId("composer-agent-item").filter({ hasText: /^beta$/ });
+        await primary.evaluate((element) => { element.scrollTop = 0; });
+        await alpha.hover();
+        await expect(page.getByTestId("composer-mode-item")).toHaveCount(8);
+        const original = [await alpha.boundingBox(), await beta.boundingBox()];
+        const tallFrame = await menu.boundingBox();
+        const modeWidth = (await secondary.boundingBox())!.width;
+        for (let repeat = 0; repeat < 3; repeat++) {
+          for (const [index, expectedCount] of [[1, 1], [0, 8]] as const) {
+            const target = original[index]!;
+            // Use the original coordinates: locator.hover() could follow a moving
+            // target and conceal the bottom-anchored resize/hover feedback loop.
+            await page.mouse.move(target.x + target.width / 2, target.y + target.height / 2);
+            await expect(page.getByTestId("composer-mode-item")).toHaveCount(expectedCount);
+            await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+            for (const [row, before] of [[alpha, original[0]!], [beta, original[1]!]] as const) {
+              const after = (await row.boundingBox())!;
+              for (const key of ["x", "y", "width", "height"] as const)
+                expect(Math.abs(after[key] - before[key])).toBeLessThan(0.5);
+            }
+            expect(Math.abs((await secondary.boundingBox())!.width - modeWidth)).toBeLessThan(0.5);
+            const underPointer = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest('[data-testid="composer-agent-item"]')?.textContent, { x: target.x + target.width / 2, y: target.y + target.height / 2 });
+            expect(underPointer).toBe(index === 0 ? "alpha" : "beta");
+            if (count === 2 && index === 1)
+              expect((await menu.boundingBox())!.height).toBeLessThan(tallFrame!.height);
+          }
+        }
+        const bounds = (await menu.boundingBox())!;
+        expect(bounds.x).toBeGreaterThanOrEqual(0);
+        expect(bounds.x + bounds.width).toBeLessThanOrEqual(width);
+        expect(await menu.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+        const styles = await menu.evaluate((element) => {
+          const outer = getComputedStyle(element);
+          const primary = getComputedStyle(element.querySelector(".composer-agent-primary-pane")!);
+          const secondary = getComputedStyle(element.querySelector(".composer-mode-secondary-pane")!);
+          return { outerBorder: outer.borderTopWidth, outerShadow: outer.boxShadow, divider: primary.borderRightWidth, primaryShadow: primary.boxShadow, secondaryBorder: secondary.borderTopWidth, secondaryShadow: secondary.boxShadow };
+        });
+        expect(styles).toMatchObject({ outerBorder: "1px", divider: "1px", primaryShadow: "none", secondaryBorder: "0px", secondaryShadow: "none" });
+        expect(styles.outerShadow).not.toBe("none");
+        const firstMode = page.getByTestId("composer-mode-item").first();
+        await expect(firstMode).toHaveAttribute("title", description);
+        const text = await firstMode.locator(".composer-mode-item-text").evaluate((element) => {
+          const style = getComputedStyle(element);
+          return { whiteSpace: style.whiteSpace, overflow: style.overflow, ellipsis: style.textOverflow, clipped: element.scrollWidth > element.clientWidth, height: element.getBoundingClientRect().height, lineHeight: parseFloat(style.lineHeight) };
+        });
+        expect(text).toMatchObject({ whiteSpace: "nowrap", overflow: "hidden", ellipsis: "ellipsis", clipped: true });
+        expect(text.height).toBeLessThanOrEqual(text.lineHeight + 1);
+        if (count === 12) {
+          expect(await primary.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
+          await menu.screenshot({ path: `.microcrab/evidence/agent-mode-frame/${width}-${theme}.png` });
+        }
+      }
+    });
+  }
+}
+
+async function setSearchCatalog(page: Page, count = 6) {
+  await page.evaluate((count) => {
+    const { store } = (window as any).h;
+    const agents = [
+      ...store.state.agents.slice(0, 2),
+      ...["gamma", "delta", "epsilon", "zeta"].map((name) => ({
+        name,
+        component: `${name}.wasm`,
+        modes: [{ name: "default", role: "main" }],
+      })),
+    ];
+    store.update({
+      agents: [
+        ...agents.slice(0, count),
+        {
+          name: "beta-helper-only",
+          component: "helper.wasm",
+          modes: [{ name: "helper", role: "sub_agent" }],
+        },
+      ],
+    });
+  }, count);
+}
+
+test("Agent search starts above five main candidates and keeps filtered selection atomic", async ({
+  page,
+}) => {
+  await mount(page);
+  await setSearchCatalog(page, 5);
+  await page.getByTestId("composer-agent-pill").click();
+  const search = page.getByRole("searchbox", { name: "搜索 Agent…" });
+  await expect(search).toHaveCount(0);
+  await expect(page.getByTestId("composer-agent-item")).toHaveCount(5);
+  await setSearchCatalog(page);
+  await expect(search).toBeVisible();
+  await expect(search).toHaveAttribute("placeholder", "搜索 Agent…");
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect(search).toBeInViewport();
+    const menu = page.locator(".composer-agent-mode-menu");
+    const bounds = await menu.boundingBox();
+    expect(bounds!.x).toBeGreaterThanOrEqual(0);
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
+    expect(await menu.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  }
+  await search.fill("  BeTa  ");
+  await expect(page.getByTestId("composer-agent-item")).toHaveText(["beta"]);
+  await expect(page.getByRole("menuitemradio", { name: "helper" })).toHaveCount(0);
+  await search.press("ArrowDown");
+  await expect(page.getByTestId("composer-agent-item")).toBeFocused();
+  await page.getByTestId("composer-agent-item").press("ArrowRight");
+  const review = page.getByRole("menuitemradio", { name: "review" });
+  await expect(review).toBeFocused();
+  expect(
+    await page.evaluate(() => [
+      (window as any).h.store.state.draftAgent,
+      (window as any).h.store.state.draftMode,
+    ]),
+  ).toEqual(["alpha", "default"]);
+  await review.press("Enter");
+  await expect(page.locator(".composer-agent-mode-menu")).toHaveCount(0);
+  await page.getByRole("textbox", { name: "消息" }).fill("filtered choice");
+  await page.getByRole("button", { name: "发送 (Enter)", exact: true }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (window as any).h.calls.find(
+            (call: any) => call.method === "session.create",
+          )?.params,
+      ),
+    )
+    .toMatchObject({ agent: "beta", mode: "review", component: "beta.wasm" });
+});
+
+test("Agent search preserves horizontal caret and remains recoverable when the catalog shrinks", async ({
+  page,
+}) => {
+  await mount(page);
+  await setSearchCatalog(page);
+  await page.getByTestId("composer-agent-pill").click();
+  const search = page.getByRole("searchbox", { name: "搜索 Agent…" });
+  await search.fill("beta");
+  const compositionArrows = await search.evaluate((node) => {
+    node.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+    const accepted = ["ArrowUp", "ArrowDown"].map(key => node.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, isComposing: true })));
+    const focused = document.activeElement === node;
+    node.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
+    return { accepted, focused };
+  });
+  expect(compositionArrows).toEqual({ accepted: [true, true], focused: true });
+  await search.evaluate((node) =>
+    (node as HTMLInputElement).setSelectionRange(1, 1),
+  );
+  await search.press("ArrowRight");
+  await expect(search).toBeFocused();
+  expect(
+    await search.evaluate((node) => (node as HTMLInputElement).selectionStart),
+  ).toBe(2);
+  await search.press("ArrowLeft");
+  await expect(search).toBeFocused();
+  expect(
+    await search.evaluate((node) => (node as HTMLInputElement).selectionStart),
+  ).toBe(1);
+  await search.press("ArrowUp");
+  await expect(page.getByTestId("composer-agent-item")).toBeFocused();
+  await search.fill("missing-agent");
+  await expect(page.getByTestId("composer-agent-item")).toHaveCount(0);
+  await expect(page.getByTestId("composer-mode-item")).toHaveCount(0);
+  await expect(page.getByText("没有匹配结果", { exact: true })).toBeVisible();
+  await setSearchCatalog(page, 2);
+  await expect(search).toBeVisible();
+  await expect(search).toHaveValue("missing-agent");
+  await expect(search).toBeFocused();
+  await search.fill("alpha");
+  await expect(page.getByTestId("composer-agent-item")).toHaveText(["alpha"]);
+  await expect(page.getByText("没有匹配结果", { exact: true })).toHaveCount(0);
+  await search.fill("");
+  await expect(search).toHaveCount(0);
+  await expect(page.getByTestId("composer-agent-item")).toHaveText(["alpha", "beta"]);
+  expect(
+    await page.evaluate(() => [
+      (window as any).h.store.state.draftAgent,
+      (window as any).h.store.state.draftMode,
+      (window as any).h.calls.length,
+    ]),
+  ).toEqual(["alpha", "default", 0]);
+});
+
 test("agent and main mode are selected atomically before creation", async ({
   page,
 }) => {
@@ -301,10 +509,78 @@ test("agent and main mode are selected atomically before creation", async ({
     .toMatchObject({ agent: "beta", mode: "review", component: "beta.wasm" });
 });
 
+for (const width of [1440, 390]) {
+  test(`Agent menu keyboard navigation stays within each pane at ${width}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await mount(page);
+    await page.getByTestId("composer-agent-pill").click();
+    const alpha = page
+      .getByTestId("composer-agent-item")
+      .filter({ hasText: "alpha" });
+    const beta = page
+      .getByTestId("composer-agent-item")
+      .filter({ hasText: "beta" });
+    await alpha.focus();
+    await alpha.press("ArrowDown");
+    await expect(beta).toBeFocused();
+    await expect(
+      page.getByRole("menuitemradio", { name: "review" }),
+    ).toBeVisible();
+    await beta.press("ArrowRight");
+    const review = page.getByRole("menuitemradio", { name: "review" });
+    await expect(review).toBeFocused();
+    await review.press("ArrowDown");
+    await expect(review).toBeFocused();
+    await review.press("ArrowLeft");
+    await expect(beta).toBeFocused();
+    expect(
+      await page.evaluate(() => [
+        (window as any).h.store.state.draftAgent,
+        (window as any).h.store.state.draftMode,
+      ]),
+    ).toEqual(["alpha", "default"]);
+    const bounds = await page
+      .locator(".composer-agent-mode-menu")
+      .boundingBox();
+    expect(bounds!.x).toBeGreaterThanOrEqual(0);
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
+    expect(
+      await page
+        .locator(".composer-agent-mode-menu")
+        .evaluate((el) => el.scrollWidth <= el.clientWidth),
+    ).toBe(true);
+    await expect(
+      page.getByRole("menuitem", { name: /Manage project|管理项目/ }),
+    ).toHaveCount(0);
+    await beta.press("ArrowUp");
+    await expect(alpha).toBeFocused();
+    await alpha.press("ArrowRight");
+    const first = page.getByRole("menuitemradio", {
+      name: "default",
+      exact: true,
+    });
+    await expect(first).toBeFocused();
+    await first.press("ArrowUp");
+    const plan = page.getByRole("menuitemradio", { name: "plan", exact: true });
+    await expect(plan).toBeFocused();
+    await plan.press("Enter");
+    await expect(page.locator(".composer-agent-mode-menu")).toHaveCount(0);
+    expect(
+      await page.evaluate(() => [
+        (window as any).h.store.state.draftAgent,
+        (window as any).h.store.state.draftMode,
+      ]),
+    ).toEqual(["alpha", "plan"]);
+  });
+}
+
 test("existing pinned mode uses CAS and waits for backend confirmation across resync", async ({
   page,
 }) => {
   await mount(page);
+  await setSearchCatalog(page);
   await page.evaluate(async () => {
     const h = (window as any).h;
     await h.existing();
@@ -312,6 +588,8 @@ test("existing pinned mode uses CAS and waits for backend confirmation across re
   });
   await page.getByTestId("composer-agent-pill").click();
   await expect(page.getByTestId("composer-agent-item")).toHaveCount(0);
+  await expect(page.getByRole("searchbox")).toHaveCount(0);
+  await expect(page.getByTestId("composer-mode-item")).toHaveText(["default", "plan"]);
   await page.getByRole("menuitemradio", { name: "plan" }).click();
   await expect
     .poll(() =>

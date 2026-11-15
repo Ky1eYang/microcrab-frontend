@@ -10,6 +10,7 @@ playwright/.cache/
 *.tsbuildinfo
 
 # Generated plugin components and browser Host runtime assets
+/frontend/public/plugins/*.wasm
 /frontend/public/plugins/**/plugin.wasm
 /frontend/public/plugins/current.json
 /frontend/public/plugins/**/.*.xtask-*.tmp

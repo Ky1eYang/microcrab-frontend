@@ -1,3 +1,6 @@
+import { citationDestinations } from "./citations/parser";
+import { citationComponents } from "./citations/FileCitation";
+import { useCitationScope, type CitationScope } from "./citations/context";
 import { stopReasonText } from "../client/stop-reason";
 import { failureText } from "../client/failure";
 import { t, activeLocale, subscribeLocale } from "../i18n";
@@ -18,6 +21,12 @@ import {
 } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import { createContext, useContext } from "react";
+import { VisualPreview, visualLanguage } from "./visualizers/VisualPreview";
+import { MathNode } from "./visualizers/MathNode";
+import { closedFence } from "./visualizers/policy";
+import { ChartInteractions } from "./visualizers/chart-interactions";
 import { useAppDispatch, useAppSelector } from "../state";
 import {
   useConversationBlock,
@@ -90,16 +99,37 @@ function extractText(node: any): string {
 export function CodeBlock({
   language = "text",
   children,
+  visual = false,
+  rawSource,
+  chartInteractions,
 }: {
   language?: string;
   children: any;
+  visual?: boolean;
+  rawSource?: string;
+  chartInteractions?: ChartInteractions;
 }) {
+  const localInteractions = useRef<ChartInteractions | null>(null);
+  if (!localInteractions.current) localInteractions.current = new ChartInteractions();
+  const interactions = chartInteractions ?? localInteractions.current;
+  const [format, setFormat] = useState("preview");
   const [copied, setCopied] = useState(false);
   const [inspecting, setInspecting] = useState(false);
   const inContentDialog = useInContentDialog();
   const [copyFailed, setCopyFailed] = useState(false);
-  const source = extractText(children);
-  const text = source.replace(/\n$/, "");
+  const source = rawSource ?? extractText(children);
+  const text = rawSource ?? source.replace(/\n$/, "");
+  const rich = visual && visualLanguage(language);
+  const raw = (
+    <pre
+      className="code-block-pre"
+      tabIndex={0}
+      role="region"
+      aria-label={t("code.label", { language: language || "text" })}
+    >
+      <CodeText text={source} kind={syntaxForLanguage(language)} />
+    </pre>
+  );
   useEffect(() => {
     if (!copied) return;
     const timer = setTimeout(() => setCopied(false), 1200);
@@ -120,7 +150,19 @@ export function CodeBlock({
   return (
     <div className="code-block-card" data-testid="code-block">
       <div className="code-block-header">
-        <span className="code-block-lang">{language || "text"}</span>
+        {rich ? (
+          <select
+            className="visual-format"
+            aria-label={t("contentViewer.format")}
+            value={format}
+            onChange={(event) => setFormat(event.target.value)}
+          >
+            <option value="preview">{t("visual.preview")}</option>
+            <option value="raw">{t("contentViewer.raw")}</option>
+          </select>
+        ) : (
+          <span className="code-block-lang">{language || "text"}</span>
+        )}
         {!inContentDialog && (
           <button
             type="button"
@@ -150,34 +192,64 @@ export function CodeBlock({
           </span>
         </button>
       </div>
-      <pre
-        className="code-block-pre"
-        tabIndex={0}
-        role="region"
-        aria-label={t("code.label", { language: language || "text" })}
-      >
-        <CodeText text={source} kind={syntaxForLanguage(language)} />
-      </pre>
+      {rich && format === "preview" ? (
+        <VisualPreview language={language} source={source} fallback={raw} interactions={interactions} />
+      ) : (
+        raw
+      )}
       {inspecting && !inContentDialog && (
         <ContentDialog
           maximizable
           title={t("code.label", { language })}
           onClose={() => setInspecting(false)}
         >
-          <ContentViewer
-            source={text}
-            defaultFormat={
-              syntaxForLanguage(language) === "raw"
-                ? "raw"
-                : syntaxForLanguage(language)
-            }
-          />
+          {rich ? (
+            <CodeBlock language={language} visual rawSource={source} chartInteractions={interactions}>
+              {source}
+            </CodeBlock>
+          ) : (
+            <ContentViewer
+              source={text}
+              defaultFormat={
+                syntaxForLanguage(language) === "raw"
+                  ? "raw"
+                  : syntaxForLanguage(language)
+              }
+            />
+          )}
         </ContentDialog>
       )}
     </div>
   );
 }
 
+export type RichMarkdownContext = { streaming: boolean };
+const RichContext = createContext<{ text: string; enabled: boolean }>({
+  text: "",
+  enabled: false,
+});
+function mathProperties(options: { source: string }) {
+  return (tree: any) => {
+    const visit = (node: any) => {
+      if (node.type === "math" || node.type === "inlineMath") {
+        const raw = options.source.slice(
+          node.position.start.offset,
+          node.position.end.offset,
+        );
+        node.data = {
+          hName: "span",
+          hProperties: {
+            "data-math-source": node.value,
+            "data-math-raw": raw,
+            "data-math-display": node.type === "math" ? "true" : "false",
+          },
+          hChildren: [{ type: "text", value: raw }],
+        };
+      } else node.children?.forEach(visit);
+    };
+    visit(tree);
+  };
+}
 // ReactMarkdown uses renderer functions as element types. Recreating them during
 // a parent update would remount unchanged code/details and discard native focus.
 const markdownComponents: Components = {
@@ -197,7 +269,20 @@ const markdownComponents: Components = {
       <table>{children}</table>
     </div>
   ),
-  pre: ({ children }) => {
+  pre: ({ children, node }) => {
+    const context = useContext(RichContext);
+    const start = node?.position?.start.offset;
+    const end = node?.position?.end.offset;
+    const fence =
+      start != null && end != null ? context.text.slice(start, end) : "";
+    const closed = closedFence(fence);
+    const opening = /^ {0,3}(?:`{3,}|~{3,})[^\r\n]*(?:\r?\n|$)/.exec(fence);
+    const body = opening
+      ? fence.slice(
+          opening[0].length,
+          closed ? fence.lastIndexOf("\n") + 1 : undefined,
+        )
+      : undefined;
     let lang = "text";
     let codeContent = children;
     if (isValidElement(children)) {
@@ -210,7 +295,27 @@ const markdownComponents: Components = {
         codeContent = childProps.children ?? children;
       }
     }
-    return <CodeBlock language={lang}>{codeContent}</CodeBlock>;
+    return (
+      <CodeBlock
+        language={lang}
+        visual={context.enabled && closed}
+        rawSource={visualLanguage(lang) ? body : undefined}
+      >
+        {codeContent}
+      </CodeBlock>
+    );
+  },
+  span: ({ children, ...props }) => {
+    const data = props as any;
+    return typeof data["data-math-source"] === "string" ? (
+      <MathNode
+        source={data["data-math-source"]}
+        raw={data["data-math-raw"]}
+        display={data["data-math-display"] === "true"}
+      />
+    ) : (
+      <span>{children}</span>
+    );
   },
 };
 
@@ -222,21 +327,37 @@ const markdownWithoutImages: Components = {
 export const Markdown = memo(function Markdown({
   text,
   allowImages = true,
+  rich,
+  citation,
 }: {
   text: string;
   allowImages?: boolean;
+  rich?: RichMarkdownContext;
+  citation?: CitationScope;
 }) {
   useSyncExternalStore(subscribeLocale, activeLocale, activeLocale);
+  const enabled = !!rich && !rich.streaming;
+  const context = useMemo(() => ({ text, enabled }), [text, enabled]);
+  const components = useMemo(
+    () => citation && allowImages
+      ? { ...markdownComponents, ...citationComponents(citation) }
+      : allowImages ? markdownComponents : markdownWithoutImages,
+    [citation, allowImages],
+  );
+  const plugins = useMemo(() => {
+    const result: any[] = [remarkGfm, headingAttributes];
+    if (enabled) result.push(remarkMath, [mathProperties, { source: text }]);
+    if (citation && allowImages) result.push(citationDestinations);
+    return result;
+  }, [enabled, text, citation, allowImages]);
   return (
-    <div className="markdown-body markdown-content">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm, headingAttributes]}
-        skipHtml
-        components={allowImages ? markdownComponents : markdownWithoutImages}
-      >
-        {text}
-      </ReactMarkdown>
-    </div>
+    <RichContext.Provider value={context}>
+      <div className="markdown-body markdown-content">
+        <ReactMarkdown remarkPlugins={plugins} skipHtml components={components}>
+          {text}
+        </ReactMarkdown>
+      </div>
+    </RichContext.Provider>
   );
 });
 export function Think({
@@ -295,7 +416,7 @@ export function Think({
       </div>
       {expanded && (
         <div className="think-content">
-          <Markdown text={text} />
+          <Markdown text={text} allowImages={false} rich={{ streaming }} />
         </div>
       )}
     </div>
@@ -349,7 +470,7 @@ export function CompactionSummaryCard({
       </button>
       {expanded && hasSummary && (
         <div className="compaction-body">
-          <Markdown text={summary!} />
+          <Markdown text={summary!} allowImages={false} rich={{ streaming }} />
         </div>
       )}
     </div>
@@ -878,6 +999,7 @@ export const BlockView = memo(function BlockView({
   contentKey?: string;
 }) {
   const { block } = useConversationBlock(fallback);
+  const citation = useCitationScope(block);
   // Opt-in acceptance instrumentation counts actual React block renders;
   // the registry remains the sole content/subscription authority.
   const counts = (
@@ -994,7 +1116,12 @@ export const BlockView = memo(function BlockView({
             {pretty}
           </pre>
         ) : text ? (
-          <Markdown text={text} />
+          <Markdown
+            text={text}
+            allowImages={!!citation}
+            citation={citation}
+            rich={{ streaming: lower(block.stream) === "streaming" }}
+          />
         ) : null}
         {!["reasoning", "tool", "child", "error", "status"].includes(kind) && (
           <ConversationImages images={block.payload.attachments ?? []} />

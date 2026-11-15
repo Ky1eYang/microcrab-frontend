@@ -84,7 +84,7 @@
 .payload[data-variant="trajectory"][data-labelled] > .payload-body {
   max-height: 320px;
   overflow: auto;
-  overscroll-behavior: contain;
+  overscroll-behavior: auto;
   padding-right: 0;
   mask-image: none;
   -webkit-mask-image: none;

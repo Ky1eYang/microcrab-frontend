@@ -1,6 +1,6 @@
 import { OwnerSettings } from "./OwnerSettings";
 import { ReferencesSettings } from "./ReferencesSettings";
-import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { useApp } from "../../state";
 import { Icon } from "../shared";
@@ -76,6 +76,19 @@ function HostPane({
     (matched && connection?.endpoint) || hostLocator(scope, project) || "";
   const catalogReady = matched && connection?.catalogReady === true;
   const catalogError = matched ? connection?.catalogError : undefined;
+  const hostError =
+    connection?.projectId === projectId &&
+    (!!connection.cause ||
+      !!connection.debugError ||
+      !!connection.catalogError ||
+      connection.state === "error" ||
+      [
+        "connection_failed",
+        "connection_timeout",
+        "handshake_timeout",
+        "pairing_rejected",
+        "resume_rejected",
+      ].includes(connection.reason ?? ""));
   const copy = async (text: string) => {
     try {
       await navigator.clipboard.writeText(text);
@@ -93,10 +106,18 @@ function HostPane({
     }
   };
   return (
-    <div data-testid="project-host-summary">
-      <h4 className="project-settings-pane-title">
-        {t("project.settings.host.heading")}
-      </h4>
+    <div className="settings-section-card" data-testid="project-host-summary">
+      <div className="settings-section-head">
+        <h4 className="settings-section-title">
+          {t("project.settings.host.heading")}
+        </h4>
+        <span
+          className={`badge ${hostError ? "badge-danger" : statusKey === "ready" ? "badge-success" : ""}`}
+          data-host-state={statusKey}
+        >
+          {statusLabel}
+        </span>
+      </div>
       {!matched &&
         tip(
           "warn",
@@ -219,42 +240,72 @@ function PermissionsPane({ projectId }: { projectId: string }) {
   const current = state.sessions.find((item) => item.id === state.sessionId);
   const matches = !!current && current.projectID === projectId;
   return (
-    <div>
-      <h4 className="project-settings-pane-title">
-        {t("project.settings.perm.projectDefault")}
-      </h4>
+    <div className="providers-stack">
+      <div className="settings-section-head">
+        <h4 className="settings-section-title">
+          {t("project.settings.perm.projectDefault")}
+        </h4>
+        <button
+          type="button"
+          className="ghost-btn"
+          disabled={!matches}
+          title={!matches ? t("sessionPermissions.projectMismatch") : undefined}
+          onClick={() => dispatch({ type: "OpenSessionPermissionsDialog" })}
+        >
+          {t("sessionPermissions.openSession")}
+        </button>
+      </div>
       <OwnerSettings scope={{ kind: "project", id: projectId }} />
-      <button
-        type="button"
-        className="ghost-btn"
-        disabled={!matches}
-        title={!matches ? t("sessionPermissions.projectMismatch") : undefined}
-        onClick={() => dispatch({ type: "OpenSessionPermissionsDialog" })}
-      >
-        {t("sessionPermissions.openSession")}
-      </button>
     </div>
   );
 }
 function AgentsPane({ projectId }: { projectId: string }) {
   const { state, dispatch } = useApp();
+  const [agentQuery, setAgentQuery] = useState("");
   const matched =
     state.hostConnection?.projectId === projectId &&
     state.hostConnection.state === "ready";
   const agents: AgentInfo[] = matched ? state.agents : [];
+  const filteredAgents = agents.filter((agent) => {
+    const q = agentQuery.trim().toLowerCase();
+    return (
+      !q ||
+      `${agent.name} ${typeof agent.component === "string" ? agent.component : ""}`
+        .toLowerCase()
+        .includes(q)
+    );
+  });
   const hasSession = !!state.sessionId;
   return (
-    <div>
-      <h4 className="project-settings-pane-title">
-        {t("project.settings.agents.heading")}
-      </h4>
+    <div className="settings-section-card">
+      <div className="settings-section-head">
+        <h4 className="settings-section-title">
+          {t("project.settings.agents.heading")}
+        </h4>
+        <span className="limit-source-pill">{filteredAgents.length}</span>
+      </div>
       {!matched && tip("warn", t("project.settings.agents.emptyHost"))}
       {matched &&
         !agents.length &&
         tip("info", t("project.settings.agents.empty"))}
       {hasSession && tip("info", t("project.settings.agents.sessionNote"))}
+      {(agents.length > 3 || agentQuery.length > 0) && (
+        <input
+          type="search"
+          className="settings-input"
+          placeholder={t("uiPolish.searchAgents")}
+          aria-label={t("project.settings.agents.heading")}
+          value={agentQuery}
+          onChange={(e) => setAgentQuery(e.target.value)}
+        />
+      )}
+      {!!agentQuery.trim() && !filteredAgents.length && (
+        <p className="settings-description" role="status">
+          {t("uiPolish.noMatches")}
+        </p>
+      )}
       <div className="project-agent-list" data-testid="project-agent-list">
-        {agents.map((agent) => {
+        {filteredAgents.map((agent) => {
           const modes =
             agent.modes?.filter((mode) => mode.role !== "sub_agent") ?? [];
           const current = state.draftAgent === agent.name;
@@ -334,6 +385,12 @@ export function ProjectSettingsDialog() {
         ? document.activeElement
         : null;
     const onKey = (event: KeyboardEvent) => {
+      if (
+        event.key === "Escape" &&
+        event.target instanceof Element &&
+        event.target.closest('[role="combobox"][aria-expanded="true"]')
+      )
+        return;
       if (event.key === "Tab") {
         event.stopPropagation();
         trapFocus(dialog.current, event);
@@ -404,6 +461,41 @@ export function ProjectSettingsDialog() {
                   dispatch({ type: "SetProjectSettingsTab", value: item.id })
                 }
               >
+                <svg
+                  className="settings-nav-icon"
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  {item.id === "host" ? (
+                    <>
+                      <rect x="2" y="3" width="20" height="7" rx="2" />
+                      <rect x="2" y="14" width="20" height="7" rx="2" />
+                      <line x1="6" y1="6.5" x2="6.01" y2="6.5" />
+                      <line x1="6" y1="17.5" x2="6.01" y2="17.5" />
+                    </>
+                  ) : item.id === "references" ? (
+                    <>
+                      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+                    </>
+                  ) : item.id === "permissions" ? (
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                  ) : (
+                    <>
+                      <rect x="3" y="11" width="18" height="10" rx="2" />
+                      <circle cx="12" cy="5" r="2" />
+                      <path d="M12 7v4" />
+                    </>
+                  )}
+                </svg>
                 <span>{t(item.labelKey)}</span>
               </button>
             ))}

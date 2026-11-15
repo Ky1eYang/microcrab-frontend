@@ -1,3 +1,5 @@
+import { ChatOnlyHostRuntime } from "./chat-only-host";
+import type { ConversationHostFlavor } from "./types";
 import { diagnosticMessage, reportDiagnostic } from "./diagnostics";
 import { t } from "../i18n";
 import type { ApiClient } from "./api";
@@ -123,14 +125,14 @@ export function saveBrowserHostOrigins(
   }
   localStorage.setItem(policyKey(base, owner), JSON.stringify(origins));
 }
-interface ConversationScope {
+export interface ConversationScope {
   scope_version: 3;
   scope_kind: "conversation";
   binding_id: string;
   backend_id: string;
   conversation_id: string;
 }
-interface BrowserRuntime {
+export interface BrowserRuntime {
   lease: string;
   descriptor(): Promise<Record<string, unknown>>;
   handle(
@@ -144,6 +146,7 @@ interface BrowserConnection {
   host: BrowserRuntime;
   scope: ConversationScope;
   generation: string | null;
+  flavor: ConversationHostFlavor;
 }
 export class BrowserConversations {
   private hosts = new Map<string, BrowserConnection>();
@@ -152,16 +155,35 @@ export class BrowserConversations {
     ReturnType<BrowserConversations["open"]>
   >();
   private epoch = 0;
+  private flavors = new Map<
+    string,
+    { owner: string; flavor: ConversationHostFlavor }
+  >();
+  private revisions = new Map<string, number>();
   constructor(
     private api: ApiClient,
     private send: (frame: unknown) => Promise<void>,
   ) {}
-  async connect(conversationId: string, owner: string) {
+  async connect(
+    conversationId: string,
+    owner: string,
+    flavor: ConversationHostFlavor,
+  ) {
+    const pinned = this.flavors.get(conversationId);
+    if (pinned && (pinned.owner !== owner || pinned.flavor !== flavor))
+      throw Error(t("browserHost.bindingChanged"));
+    this.flavors.set(conversationId, { owner, flavor });
     const current = this.hosts.get(conversationId);
     if (current?.generation) return current;
     const inFlight = this.connecting.get(conversationId);
     if (inFlight) return inFlight;
-    const pending = this.open(conversationId, owner, this.epoch);
+    const pending = this.open(
+      conversationId,
+      owner,
+      flavor,
+      this.epoch,
+      this.revisions.get(conversationId) ?? 0,
+    );
     this.connecting.set(conversationId, pending);
     try {
       return await pending;
@@ -174,7 +196,16 @@ export class BrowserConversations {
         this.connecting.delete(conversationId);
     }
   }
-  private async open(conversationId: string, owner: string, epoch: number) {
+  private async open(
+    conversationId: string,
+    owner: string,
+    flavor: ConversationHostFlavor,
+    epoch: number,
+    revision: number,
+  ) {
+    const current = () =>
+      epoch === this.epoch &&
+      revision === (this.revisions.get(conversationId) ?? 0);
     if (!owner) throw Error(t("browserHost.authenticationRequired"));
     const prefix = `microcrab.browser-host.v1:${JSON.stringify([this.api.base, owner])}`;
     let browserId: string, workspaceId: string;
@@ -199,114 +230,132 @@ export class BrowserConversations {
       );
       throw failure;
     }
-    const scope = await this.api.command<ConversationScope>(
-      "conversation.binding",
-      {
-        conversation_id: conversationId,
-        browser_id: browserId,
-        workspace_id: workspaceId,
-      },
-    );
+    const binding = await this.api.command<
+      ConversationScope & { host_flavor: ConversationHostFlavor }
+    >("conversation.binding", {
+      conversation_id: conversationId,
+      browser_id: browserId,
+      workspace_id: workspaceId,
+      host_flavor: flavor,
+    });
+    const { host_flavor, ...scope } = binding;
+    if (!current() || host_flavor !== flavor)
+      throw Error(t("browserHost.bindingChanged"));
     if (
       scope.scope_version !== 3 ||
       scope.scope_kind !== "conversation" ||
       scope.conversation_id !== conversationId
     )
       throw Error(t("browserHost.bindingChanged"));
-    const manifestUrl = new URL("/browser-host/current.json", this.api.base);
-    const response = await fetch(manifestUrl, {
-      credentials: "include",
-      redirect: "error",
-      cache: "no-store",
-    });
-    if (!response.ok) {
-      const error = Error(
-        `${t("browserHost.artifactsMissing")} (HTTP ${response.status})`,
-      );
-      reportDiagnostic("browser_host", "manifest", error, response.status);
-      throw error;
-    }
-    const manifest = await response.json();
-    if (
-      manifest.schema !== 1 ||
-      manifest.kind !== "browser-host" ||
-      manifest.wasmsh_version !== "0.5.1" ||
-      !/^[a-f0-9]{64}$/.test(manifest.hash) ||
-      manifest.entry !== "supervisor.mjs" ||
-      manifest.base_url !== `/browser-host/${manifest.hash}/`
-    )
-      throw Error(t("browserHost.artifactsMissing"));
-    const entry = manifest.files?.find(
-      (file: { path: string }) => file.path === manifest.entry,
-    );
-    if (!entry) throw Error(t("browserHost.artifactsMissing"));
-    const entryUrl = new URL(
-      manifest.entry,
-      new URL(manifest.base_url, manifestUrl),
-    );
-    const source = await fetch(entryUrl, {
-      credentials: "include",
-      redirect: "error",
-    });
-    const bytes = await source.arrayBuffer();
-    const hash = Array.from(
-      new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)),
-      (byte) => byte.toString(16).padStart(2, "0"),
-    ).join("");
-    if (!source.ok || hash !== entry.sha256 || bytes.byteLength !== entry.size)
-      throw Error(t("browserHost.integrityFailed"));
-    const runtime = await import(/* @vite-ignore */ entryUrl.href);
     let frameOwner: BrowserConnection | undefined;
-    const host: BrowserRuntime = await runtime.BrowserHost.create({
-      backend: this.api.base,
-      owner,
-      browserId,
-      workspaceId,
-      conversationId,
-      manifestUrl: manifestUrl.href,
-      allowedOrigins: browserHostOrigins(this.api.base, owner),
-      onFrame: (frame: unknown) => {
-        const owner = frameOwner;
-        if (
-          !owner ||
-          epoch !== this.epoch ||
-          this.hosts.get(conversationId) !== owner
-        )
-          return;
-        void this.emit(conversationId, owner, frame).catch((error: unknown) => {
-          if (this.hosts.get(conversationId) === owner) {
-            reportDiagnostic("browser_host", "emit", error);
-            void this.disconnect(conversationId, false);
-          }
-        });
-      },
-    });
-    if (epoch !== this.epoch) {
+    let host: BrowserRuntime;
+    if (flavor === "chat_only") {
+      host = new ChatOnlyHostRuntime(browserId, workspaceId);
+    } else {
+      const manifestUrl = new URL("/browser-host/current.json", this.api.base);
+      const response = await fetch(manifestUrl, {
+        credentials: "include",
+        redirect: "error",
+        cache: "no-store",
+      });
+      if (!response.ok) {
+        const error = Error(
+          `${t("browserHost.artifactsMissing")} (HTTP ${response.status})`,
+        );
+        reportDiagnostic("browser_host", "manifest", error, response.status);
+        throw error;
+      }
+      const manifest = await response.json();
+      if (
+        manifest.schema !== 1 ||
+        manifest.kind !== "browser-host" ||
+        manifest.wasmsh_version !== "0.5.1" ||
+        !/^[a-f0-9]{64}$/.test(manifest.hash) ||
+        manifest.entry !== "supervisor.mjs" ||
+        manifest.base_url !== `/browser-host/${manifest.hash}/`
+      )
+        throw Error(t("browserHost.artifactsMissing"));
+      const entry = manifest.files?.find(
+        (file: { path: string }) => file.path === manifest.entry,
+      );
+      if (!entry) throw Error(t("browserHost.artifactsMissing"));
+      const entryUrl = new URL(
+        manifest.entry,
+        new URL(manifest.base_url, manifestUrl),
+      );
+      const source = await fetch(entryUrl, {
+        credentials: "include",
+        redirect: "error",
+      });
+      const bytes = await source.arrayBuffer();
+      const hash = Array.from(
+        new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)),
+        (byte) => byte.toString(16).padStart(2, "0"),
+      ).join("");
+      if (
+        !source.ok ||
+        hash !== entry.sha256 ||
+        bytes.byteLength !== entry.size
+      )
+        throw Error(t("browserHost.integrityFailed"));
+      const runtime = await import(/* @vite-ignore */ entryUrl.href);
+      host = await runtime.BrowserHost.create({
+        backend: this.api.base,
+        owner,
+        browserId,
+        workspaceId,
+        conversationId,
+        manifestUrl: manifestUrl.href,
+        allowedOrigins: browserHostOrigins(this.api.base, owner),
+        onFrame: (frame: unknown) => {
+          const owner = frameOwner;
+          if (!owner || !current() || this.hosts.get(conversationId) !== owner)
+            return;
+          void this.emit(conversationId, owner, frame).catch(
+            (error: unknown) => {
+              if (this.hosts.get(conversationId) === owner) {
+                reportDiagnostic("browser_host", "emit", error);
+                void this.disconnect(conversationId, false);
+              }
+            },
+          );
+        },
+      });
+    }
+    if (!current()) {
       await host.close();
       throw Error(t("browserHost.bindingChanged"));
     }
-    const connection = { host, scope, generation: null as string | null };
+    const connection = {
+      host,
+      scope,
+      flavor,
+      generation: null as string | null,
+    };
     frameOwner = connection;
     this.hosts.set(conversationId, connection);
     try {
       const descriptor = await host.descriptor();
       // Descriptor hashing and attachment cross lifecycle boundaries. Closing or
       // replacing this exact host revokes its authority even if a new socket is ready.
-      if (epoch !== this.epoch || this.hosts.get(conversationId) !== connection)
+      if (!current() || this.hosts.get(conversationId) !== connection)
         throw Error(t("browserHost.bindingChanged"));
       const attached = await this.api.command<{
         scope: ConversationScope;
         connection_generation: string;
         ready: boolean;
+        host_flavor: ConversationHostFlavor;
       }>("conversation.attach", {
         conversation_id: conversationId,
         descriptor,
         lease_generation: host.lease,
+        host_flavor: flavor,
       });
       if (
-        epoch !== this.epoch ||
+        !current() ||
         this.hosts.get(conversationId) !== connection ||
         !attached.ready ||
+        attached.host_flavor !== flavor ||
         attached.scope.binding_id !== scope.binding_id
       )
         throw Error(t("browserHost.bindingChanged"));
@@ -360,6 +409,8 @@ export class BrowserConversations {
       });
   }
   async disconnect(id: string, detach = true) {
+    this.revisions.set(id, (this.revisions.get(id) ?? 0) + 1);
+    this.connecting.delete(id);
     const connection = this.hosts.get(id);
     this.hosts.delete(id);
     if (!connection) return;
@@ -372,6 +423,7 @@ export class BrowserConversations {
   async close() {
     this.epoch++;
     this.connecting.clear();
+    this.flavors.clear();
     await Promise.all(
       [...this.hosts.keys()].map((id) => this.disconnect(id, false)),
     );

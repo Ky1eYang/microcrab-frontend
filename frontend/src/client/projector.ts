@@ -195,6 +195,7 @@ export function sessionView(session: NativeSession): SessionView {
     parentID: session.parent_session_id,
     title: session.title,
     projectID: session.project_id,
+    hostFlavor: session.host_flavor,
     status: session.status === "running" ? "busy" : session.status,
     agent: session.agent ?? undefined,
     mode: session.mode,

@@ -7,7 +7,26 @@ test.setTimeout(90_000);
 
 const deadlineError = "plugin host effect exceeded 10000ms deadline";
 
+async function viewerOnlyBundle(page: Page) {
+  const response = await page.request.get("/plugins/current.json");
+  expect(response.ok(), "Build/install the real Viewer before this suite").toBe(
+    true,
+  );
+  const index = await response.json();
+  const viewer = index.plugins.find(
+    (plugin: { id: string }) => plugin.id === "microcrab.state-viewer",
+  );
+  expect(viewer, "The bundled index must contain the real Viewer").toBeTruthy();
+  // These fixtures count exact Viewer init/effect receipts. Other bundled
+  // plugins own independent workers and must not enter those observations.
+  // Keep the real Viewer descriptor and immutable bytes unchanged.
+  await page.route("**/plugins/current.json", (route) =>
+    route.fulfill({ json: { ...index, plugins: [viewer] } }),
+  );
+}
+
 async function captureApplication(page: Page) {
+  await viewerOnlyBundle(page);
   await page.route("**/src/main.tsx", async (route) => {
     const response = await route.fetch();
     await route.fulfill({
@@ -189,6 +208,7 @@ test("history replacement during a genuine init reply retries within the same Wo
   page,
 }) => {
   await nativeBackend(page);
+  await viewerOnlyBundle(page);
   await page.goto("/");
   const result = await page.evaluate(async () => {
     const path = "/src/plugins/registry.ts";
@@ -284,6 +304,7 @@ test("old host completions queued behind a real Worker call cannot enter replace
   page,
 }) => {
   await nativeBackend(page);
+  await viewerOnlyBundle(page);
   await page.goto("/");
   const result = await page.evaluate(async () => {
     const path = "/src/plugins/registry.ts";

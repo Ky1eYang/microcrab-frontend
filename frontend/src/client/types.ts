@@ -32,7 +32,11 @@ export interface NativeModelCatalog {
   }[];
 }
 
+export type ConversationHostFlavor = "chat_only" | "browser_sandbox";
+
 export interface NativeSession {
+  /** Present only when an actual conversation Host grant exists. */
+  host_flavor?: ConversationHostFlavor;
   kind?: "interactive" | "delegated" | "one_shot";
   parent_session_id?: string | null;
   id: string;
@@ -871,7 +875,7 @@ export interface ModelChoice {
   variants: string[];
 }
 export interface DraftWorkspace {
-  kind: "none" | "local" | "remote" | "direct-remote";
+  kind: ConversationHostFlavor | "local" | "remote" | "direct-remote";
   path?: string;
   host?: string;
   label?: string;
@@ -887,6 +891,7 @@ export interface SessionWorkspace {
   [key: string]: any;
 }
 export interface SessionView {
+  hostFlavor?: ConversationHostFlavor;
   kind?: "interactive" | "delegated" | "one_shot";
   id: string;
   title: string;
@@ -1066,6 +1071,7 @@ export interface AppState {
     readiness?: NativeHostReadiness;
     projectId?: string;
     conversationId?: string;
+    hostFlavor?: ConversationHostFlavor;
     endpoint?: string;
     transport?: "relay" | "grpc";
     effectiveTransport?: "relay" | "grpc" | "outbound";
@@ -1148,7 +1154,16 @@ export interface AppState {
   sandboxSession: string | null;
   currentWorkspace: string;
   draftWorkspace: DraftWorkspace;
+  /** Non-null only after an explicit composer choice. */
   draftModel: ModelChoice | null;
+  userSessionDefaults: Pick<
+    import("./settings").SettingsValues,
+    "model_selection" | "agent" | "mode"
+  > | null;
+  projectSessionDefaults: {
+    projectId: string;
+    effective: import("./settings").SettingsValues;
+  } | null;
   modelSelectionPending: boolean;
   availableModels: ModelChoice[];
   board: BoardState;

@@ -3,6 +3,7 @@ mod artifact_kind;
 mod browser_host;
 mod build_client_plugins;
 mod staging;
+mod workspace;
 use std::{error::Error, process::ExitCode};
 
 fn main() -> ExitCode {

@@ -13,7 +13,6 @@ import { t } from "../../i18n";
 import { trapFocus } from "../../client/viewport";
 import { unsupported } from "../../client/unsupported";
 import type { ReactNode } from "react";
-import { ModelRetrySettings } from "./ModelRetrySettings";
 import { ClientToolsSettings } from "../ClientToolsSettings";
 
 const THEME_OPTIONS: [ThemePreference, string][] = [
@@ -304,7 +303,34 @@ export function SettingsDialog() {
       strokeLinecap="round"
       strokeLinejoin="round"
     >
-      {tab === "backend" ? (
+      {tab === "providers" ? (
+        <>
+          <rect x="2" y="3" width="20" height="7" rx="2" />
+          <rect x="2" y="14" width="20" height="7" rx="2" />
+          <line x1="6" y1="6.5" x2="6.01" y2="6.5" />
+          <line x1="6" y1="17.5" x2="6.01" y2="17.5" />
+        </>
+      ) : tab === "defaults" ? (
+        <>
+          <line x1="4" y1="21" x2="4" y2="14" />
+          <line x1="4" y1="10" x2="4" y2="3" />
+          <line x1="12" y1="21" x2="12" y2="12" />
+          <line x1="12" y1="8" x2="12" y2="3" />
+          <line x1="20" y1="21" x2="20" y2="16" />
+          <line x1="20" y1="12" x2="20" y2="3" />
+          <line x1="1" y1="14" x2="7" y2="14" />
+          <line x1="9" y1="8" x2="15" y2="8" />
+          <line x1="17" y1="16" x2="23" y2="16" />
+        </>
+      ) : tab === "session-config" ? (
+        <>
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+        </>
+      ) : tab === "client-tools" ? (
+        <>
+          <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+        </>
+      ) : tab === "backend" ? (
         <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
       ) : tab === "appearance" ? (
         <>
@@ -346,7 +372,7 @@ export function SettingsDialog() {
           <div className="settings-nav-title">{t("settingsDlg.title")}</div>
           {[
             [0, 6, t("settingsDlg.group.system")],
-            [6, 8, t("settingsDlg.group.data")],
+            [6, 9, t("settingsDlg.group.data")],
           ].map(([start, end, title]) => (
             <div className="settings-nav-group" key={String(title)}>
               <div className="settings-nav-group-label">{title}</div>
@@ -383,7 +409,11 @@ export function SettingsDialog() {
               {p.tab === "providers" && (
                 <ProvidersSettings key={networkOwner} />
               )}
-              {p.tab === "defaults" && <OwnerSettings key={networkOwner} />}
+              {p.tab === "defaults" && (
+                <>
+                  <OwnerSettings key={networkOwner} />
+                </>
+              )}
               {p.tab === "session-config" &&
                 (state.sessionId ? (
                   <OwnerSettings
@@ -503,59 +533,61 @@ export function SettingsDialog() {
                       <div className="settings-input-hint">
                         {t("browserHost.networkHelp")}
                       </div>
-                      <button
-                        type="button"
-                        className="ghost-btn"
-                        onClick={() => {
-                          try {
-                            saveBrowserHostOrigins(
-                              state.apiBase,
-                              networkOwner,
-                              browserOrigins,
-                            );
-                            setBrowserNetworkDefault(false);
-                            setBrowserNetworkError("");
-                            setStatusMessage(t("browserHost.networkSaved"));
-                          } catch (error) {
-                            const message =
-                              error instanceof Error
-                                ? error.message
-                                : String(error);
-                            setBrowserNetworkError(message);
-                            browserOriginsInput.current?.focus({
-                              preventScroll: true,
-                            });
-                            browserOriginsInput.current?.scrollIntoView({
-                              block: "center",
-                            });
-                          }
-                        }}
-                      >
-                        {t("browserHost.networkSave")}
-                      </button>
-                      <button
-                        type="button"
-                        className="ghost-btn"
-                        onClick={() => {
-                          try {
-                            resetBrowserHostOrigins(
-                              state.apiBase,
-                              networkOwner,
-                            );
-                            setBrowserOrigins("");
-                            setBrowserNetworkDefault(true);
-                            setStatusMessage(t("browserHost.networkSaved"));
-                          } catch (error) {
-                            setStatusMessage(
-                              error instanceof Error
-                                ? error.message
-                                : String(error),
-                            );
-                          }
-                        }}
-                      >
-                        {t("browserHost.networkReset")}
-                      </button>
+                      <div className="settings-actions-row">
+                        <button
+                          type="button"
+                          className="ghost-btn"
+                          onClick={() => {
+                            try {
+                              saveBrowserHostOrigins(
+                                state.apiBase,
+                                networkOwner,
+                                browserOrigins,
+                              );
+                              setBrowserNetworkDefault(false);
+                              setBrowserNetworkError("");
+                              setStatusMessage(t("browserHost.networkSaved"));
+                            } catch (error) {
+                              const message =
+                                error instanceof Error
+                                  ? error.message
+                                  : String(error);
+                              setBrowserNetworkError(message);
+                              browserOriginsInput.current?.focus({
+                                preventScroll: true,
+                              });
+                              browserOriginsInput.current?.scrollIntoView({
+                                block: "center",
+                              });
+                            }
+                          }}
+                        >
+                          {t("browserHost.networkSave")}
+                        </button>
+                        <button
+                          type="button"
+                          className="ghost-btn"
+                          onClick={() => {
+                            try {
+                              resetBrowserHostOrigins(
+                                state.apiBase,
+                                networkOwner,
+                              );
+                              setBrowserOrigins("");
+                              setBrowserNetworkDefault(true);
+                              setStatusMessage(t("browserHost.networkSaved"));
+                            } catch (error) {
+                              setStatusMessage(
+                                error instanceof Error
+                                  ? error.message
+                                  : String(error),
+                              );
+                            }
+                          }}
+                        >
+                          {t("browserHost.networkReset")}
+                        </button>
+                      </div>
                     </div>
                   </div>
                   <div className="settings-card">
@@ -680,7 +712,6 @@ export function SettingsDialog() {
                       />
                     </Row>
                   </div>
-                  <ModelRetrySettings />
                 </>
               )}
               {p.tab === "account" && (
@@ -737,7 +768,7 @@ export function SettingsDialog() {
                 </>
               )}
               {p.tab === "about" && (
-                <>
+                <div className="settings-card">
                   <div className="about-brand-section">
                     <div className="about-logo">microcrab</div>
                     <div className="about-tagline">Local Agent Runtime</div>
@@ -749,7 +780,7 @@ export function SettingsDialog() {
                       })}
                     </div>
                   </div>
-                </>
+                </div>
               )}
             </div>
           </div>

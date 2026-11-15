@@ -39,6 +39,7 @@ export default defineConfig(({ mode }) => {
     },
     worker: { format: "es", plugins: () => [browserWasmTools()] },
     build: {
+      manifest: true,
       rollupOptions: {
         output: {
           manualChunks: {

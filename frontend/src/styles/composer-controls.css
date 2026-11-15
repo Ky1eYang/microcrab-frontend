@@ -40,7 +40,6 @@
   overflow-y: auto;
   resize: vertical;
 }
-.composer-agent-mode-menu,
 .composer-action-menu {
   position: absolute;
   z-index: var(--z-popover);
@@ -52,28 +51,83 @@
   max-width: calc(100vw - var(--sp-6));
 }
 .composer-agent-mode-menu {
+  position: absolute;
+  z-index: var(--z-popover);
   bottom: calc(100% + var(--sp-2));
   right: 0;
-  min-width: min(320px, calc(100vw - var(--sp-6)));
+  padding: var(--sp-1);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-pop);
+  box-sizing: border-box;
+  width: max-content;
+  max-width: calc(100vw - var(--sp-6));
 }
-.composer-agent-mode-columns {
+.composer-agent-mode-panes {
   display: flex;
+  flex-direction: row;
+  /* Keep the Agent rows bottom-anchored as the hovered Mode list changes height. */
+  align-items: flex-end;
+  min-height: 0;
+}
+.composer-agent-primary-pane,
+.composer-mode-secondary-pane {
+  box-sizing: border-box;
   max-height: min(45vh, 360px);
   overflow-y: auto;
 }
-.composer-agent-mode-list {
+.composer-agent-primary-pane {
+  width: 180px;
   min-width: 0;
-  flex: 1;
+  flex: 0 1 180px;
+  border-right: 1px solid var(--border);
+  padding-right: var(--sp-1);
+  margin-right: var(--sp-1);
+  display: flex;
+  flex-direction: column;
 }
-.composer-agent-mode-list + .composer-agent-mode-list {
-  border-left: 1px solid var(--border);
-  margin-left: var(--sp-2);
-  padding-left: var(--sp-2);
+.composer-mode-secondary-pane {
+  width: 240px;
+  min-width: 0;
+  max-width: 300px;
+  flex: 0 1 240px;
+  display: flex;
+  flex-direction: column;
 }
-.composer-agent-mode-list button {
+.composer-mode-list {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.composer-agent-primary-pane button,
+.composer-mode-list button {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   gap: var(--sp-2);
+  width: 100%;
+  box-sizing: border-box;
+}
+.composer-agent-search {
+  padding: 5px 8px;
+  font-size: var(--fs-xs);
+  border-radius: 6px;
+  margin-bottom: 4px;
+}
+.composer-agent-item-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.composer-mode-item-text {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
 }
 .composer-mode-heading {
   font-size: var(--fs-xs);

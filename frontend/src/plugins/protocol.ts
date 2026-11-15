@@ -18,7 +18,13 @@ export type WorkerRequest = { generation: number; callId: number } & (
     }
   | {
       type: "call";
-      method: "init" | "renderView" | "onAction" | "onPhase";
+      method:
+        | "init"
+        | "renderView"
+        | "onAction"
+        | "onPhase"
+        | "startTool"
+        | "cancelTool";
       args: string[];
       context: PluginContext;
     }
@@ -30,6 +36,7 @@ export type WorkerReply = { generation: number; callId: number } & (
       type: "loaded";
       manifest: PluginManifest;
       imports: string[];
+      providesTools: boolean;
       sourceKind: "core" | "component";
       normalizedBytes?: Uint8Array;
     }

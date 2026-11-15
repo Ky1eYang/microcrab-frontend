@@ -1,6 +1,15 @@
 import { CommandError } from "../client/errors";
 import { isPluginDrawerViewport } from "../client/viewport";
 import { PluginRegistry } from "../plugins/registry";
+import {
+  parseToolRequest,
+  PLUGIN_META_TOOL_DEFINITION,
+} from "../plugins/tool-hub";
+import {
+  sameToolSchema,
+  type ClientToolDefinition,
+} from "../client/client-tools";
+import type { ClientInvocation } from "../client/client-tool-controller";
 import type { HostEffect, Json, PluginRegistryAPI } from "../plugins/types";
 import type { AppState, NativePart } from "../client/types";
 import type { VariablesChange } from "../plugins/types";
@@ -18,6 +27,7 @@ export class ClientPlugins {
   private session: string | null | undefined;
   private environment = "";
   private summaries = "";
+  private shortArtifactReferences = true;
   private settledPending = new Map<string, Json>();
   private settledQueued = false;
   private decorationGeneration = 0;
@@ -86,6 +96,18 @@ export class ClientPlugins {
       }
       this.publish();
     }
+    // Only the bound catalog proves support. Old/unknown Session schemas keep
+    // full input pins until an explicit catalog refresh; drafts use the new schema.
+    this.shortArtifactReferences =
+      !state.sessionId ||
+      !!state.clientTools?.definitions.some(
+        (definition: ClientToolDefinition) =>
+          definition.name === "plugin" &&
+          sameToolSchema(
+            definition.parameters,
+            PLUGIN_META_TOOL_DEFINITION.parameters,
+          ),
+      );
     const selectedTab = state.sessionPluginTab;
     const tabVisible =
       state.page === "conversation" &&
@@ -343,6 +365,82 @@ export class ClientPlugins {
     this.bypass = true;
     this.publish();
   }
+  async execute(
+    name: string,
+    args: unknown,
+    signal: AbortSignal,
+    invocation: Readonly<ClientInvocation>,
+  ): Promise<Json> {
+    if (name !== "plugin") throw Error(`Unknown client tool: ${name}`);
+    const registry = this.registry,
+      generation = this.generation;
+    await this.ready;
+    if (
+      !registry ||
+      registry !== this.registry ||
+      generation !== this.generation ||
+      signal.aborted
+    )
+      throw Error("Plugin owner scope expired");
+    return registry.executeTool(
+      parseToolRequest(args),
+      {
+        invocation_id: invocation.invocation_id,
+        session_id: invocation.session_id,
+        parent_session_id: invocation.parent_session_id,
+        call_id: invocation.call_id,
+        catalog_digest: invocation.catalog_digest,
+        epoch: invocation.epoch,
+        turn_id: invocation.turn_id,
+        round_id: invocation.round_id,
+        history_anchor: invocation.history_anchor,
+        deadline_ms: invocation.deadline_ms,
+      },
+      signal,
+    );
+  }
+  private inventory(variables?: VariablesChange): VariablesChange {
+    const observed = this.registry?.toolInventory() ?? [];
+    const inventory = this.shortArtifactReferences
+      ? observed
+      : observed.map((entry) => {
+          if (!entry || typeof entry !== "object" || Array.isArray(entry))
+            throw Error("Invalid plugin inventory entry");
+          const installed = this.registry
+            ?.getSnapshot()
+            .find(
+              (plugin) =>
+                plugin.manifest.id === entry.id &&
+                plugin.artifact &&
+                /^[a-f0-9]{64}$/.test(plugin.artifact) &&
+                (entry.artifact === plugin.artifact ||
+                  entry.artifact === plugin.artifact.slice(0, 16)),
+            );
+          if (!installed?.artifact)
+            throw Error(
+              "Canonical plugin artifact is unavailable for the frozen catalog",
+            );
+          return { ...entry, artifact: installed.artifact };
+        });
+    return mergeVariables(variables, {
+      scoped_set: [
+        {
+          name: "plugins",
+          value: inventory,
+          visibility: "visible",
+          persistence: "persisted",
+          editors: ["client"],
+        },
+      ],
+    })!;
+  }
+  private freezeInput(input: PluginInput, operationId: string): PluginInput {
+    if (this.prepared.size >= 128 && !this.prepared.has(operationId))
+      throw Error("Too many unresolved plugin input operations");
+    const frozen = structuredClone(input);
+    this.prepared.set(operationId, frozen);
+    return structuredClone(frozen);
+  }
   async preprocess(
     input: PluginInput,
     operationId: string,
@@ -357,12 +455,18 @@ export class ClientPlugins {
     if (this.bypass) {
       this.bypass = false;
       this.error = null;
-      const frozen = structuredClone(input);
-      this.prepared.set(operationId, frozen);
+      const frozen = this.freezeInput(
+        { ...input, variables: this.inventory(input.variables) },
+        operationId,
+      );
       this.publish();
       return frozen;
     }
-    if (!registry) return structuredClone(input);
+    if (!registry)
+      return this.freezeInput(
+        { ...input, variables: this.inventory(input.variables) },
+        operationId,
+      );
     try {
       await this.ready;
       if (!current() || generation !== this.generation) return null;
@@ -383,12 +487,16 @@ export class ClientPlugins {
       });
       if (!replaced && result.input)
         parts.unshift({ type: "text", text: result.input });
-      const frozen = structuredClone({
-        ...input,
-        parts,
-        variables: mergeVariables(input.variables, result.variables),
-      });
-      this.prepared.set(operationId, frozen);
+      const frozen = this.freezeInput(
+        {
+          ...input,
+          parts,
+          variables: this.inventory(
+            mergeVariables(input.variables, result.variables),
+          ),
+        },
+        operationId,
+      );
       this.error = null;
       this.publish();
       return frozen;
@@ -416,6 +524,7 @@ export class ClientPlugins {
     this.session = undefined;
     this.environment = "";
     this.summaries = "";
+    this.shortArtifactReferences = true;
     this.decorationGeneration++;
     this.settledPending.clear();
     this.ready = Promise.resolve();

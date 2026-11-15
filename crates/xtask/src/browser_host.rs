@@ -99,10 +99,7 @@ pub(crate) fn run(args: impl Iterator<Item = String>) -> Result<()> {
         help();
         return Ok(());
     };
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(Path::parent)
-        .ok_or("xtask root missing")?;
+    let root = crate::workspace::root()?;
     let source = root.join(options.source);
     let assets = root.join(options.assets);
     let install = root.join(options.install);

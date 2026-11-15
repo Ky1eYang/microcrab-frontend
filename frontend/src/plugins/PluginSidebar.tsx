@@ -516,7 +516,9 @@ export function PluginSidebar({ children }: { children?: ReactNode }) {
       ) ?? [];
   const [selected, setSelected] = useState<string | null>(null);
   const active =
-    installed.find((plugin) => plugin.manifest.id === selected) ?? installed[0];
+    installed.find((plugin) => plugin.manifest.id === selected) ??
+    installed.find((plugin) => !plugin.providesTools) ??
+    installed[0];
   return (
     <div className="client-plugin-sidebar" data-testid="client-plugin-sidebar">
       <div className="client-plugin-toolbar">

@@ -4,6 +4,7 @@ import {
   verifyRecoveredDraftOwner,
 } from "../client/document-leave";
 import { documentLeaveSelector } from "../client/document-leave-actions";
+import type { ConversationHostFlavor } from "../client/types";
 import { ClientPlugins, type PluginInput } from "./client-plugins";
 import { retainPermissionDecisions } from "../client/permission-decisions";
 import { userTaskInputAllowed } from "../client/session-kind";
@@ -79,14 +80,8 @@ import {
   CLIENT_TOOL_DEFINITIONS,
   parseTodos,
   todosFromHistory,
-  sameToolSchema,
   type ClientToolDefinition,
 } from "../client/client-tools";
-import {
-  McpHttpClient,
-  createMcpToolCatalog,
-  type McpServerConfig,
-} from "../client/mcp";
 import {
   ClientToolController,
   type ClientBinding,
@@ -136,8 +131,10 @@ import type {
   Transcript,
   Block,
 } from "../client/types";
+import type { SettingsSnapshot } from "../client/settings";
 import {
   initialState,
+  effectiveDraftDefaults,
   parseLocation,
   sessionPath,
   selectedModel,
@@ -170,11 +167,106 @@ export class AppStore {
     publishTranscript(this.conversation, this.state.transcript);
     this.api.setSessionTransport(() => this.sessionSocket);
   }
+  private defaultsRead = 0;
+  private catalogRead = 0;
+  private draftAgentExplicit = false;
+  private draftModeExplicit = false;
+
+  private applyDraftAgentDefaults() {
+    if (this.state.sessionId || this.state.isCreatingSession) return;
+    const defaults = effectiveDraftDefaults(this.state);
+    if (
+      !defaults ||
+      !Object.hasOwn(defaults, "agent") ||
+      !Object.hasOwn(defaults, "mode")
+    ) {
+      this.update({
+        draftAgent: this.draftAgentExplicit ? this.state.draftAgent : "",
+        draftMode: this.draftModeExplicit ? this.state.draftMode : "",
+      });
+      return;
+    }
+    const name = this.draftAgentExplicit
+      ? this.state.draftAgent
+      : defaults?.agent;
+    const agent = name
+      ? this.state.agents.find((item) => item.name === name)
+      : this.state.agents[0];
+    const modes =
+      agent?.modes.filter((mode) => mode.role !== "sub_agent") ?? [];
+    this.update({
+      draftAgent: name ?? agent?.name ?? "",
+      draftMode: this.draftModeExplicit
+        ? this.state.draftMode
+        : ((!this.draftAgentExplicit ? defaults?.mode : null) ??
+          modes[0]?.name ??
+          ""),
+    });
+  }
+
+  private async refreshDraftDefaults() {
+    const ticket = ++this.defaultsRead;
+    const cycle = this.lifecycle;
+    const api = this.api;
+    const owner = this.state.authSession?.principal?.owner;
+    const projectId = this.state.draftWorkspace.projectId;
+    const current = () =>
+      ticket === this.defaultsRead &&
+      cycle === this.lifecycle &&
+      api === this.api &&
+      owner === this.state.authSession?.principal?.owner;
+    const requests = [api.request<SettingsSnapshot>("settings.get")];
+    if (projectId)
+      requests.push(
+        api.request<SettingsSnapshot>("project.settings.get", {
+          project_id: projectId,
+        }),
+      );
+    const results = await Promise.allSettled(requests);
+    if (!current()) return;
+    if (results[0].status === "fulfilled")
+      this.update({ userSessionDefaults: results[0].value.effective });
+    if (
+      projectId &&
+      projectId === this.state.draftWorkspace.projectId &&
+      results[1]?.status === "fulfilled"
+    )
+      this.update({
+        projectSessionDefaults: {
+          projectId,
+          effective: results[1].value.effective,
+        },
+      });
+    this.applyDraftAgentDefaults();
+    for (const result of results)
+      if (result.status === "rejected") this.toast(String(result.reason));
+  }
+
+  private async refreshModelCatalog() {
+    const ticket = ++this.catalogRead;
+    const cycle = this.lifecycle;
+    const api = this.api;
+    const owner = this.state.authSession?.principal?.owner;
+    const catalog = await api.request<NativeModelCatalog>("model.list");
+    if (
+      ticket !== this.catalogRead ||
+      cycle !== this.lifecycle ||
+      api !== this.api ||
+      owner !== this.state.authSession?.principal?.owner
+    )
+      return;
+    this.update({
+      availableModels: modelChoices(catalog),
+      modelMetadataStatus: catalog.metadata_status ?? null,
+    });
+  }
+
   private clientTools = new ClientToolController(
     this.api,
     () => this.projectClientTools(),
     (error) => this.toast(String(error)),
-    (name, args, signal) => this.executeMcp(name, args, signal),
+    (name, args, signal, invocation) =>
+      this.plugins.execute(name, args, signal, invocation),
   );
   private roundLimits = new RoundLimitController(
     this.api,
@@ -551,87 +643,8 @@ export class AppStore {
         this.projectPermissions();
     }
   }
-  private mcpNames = new Map<string, string>();
-  private mcpServers = new Map<
-    string,
-    {
-      client: McpHttpClient;
-      definitions: ClientToolDefinition[];
-      bindings: Map<string, string>;
-    }
-  >();
   private toolDefinitions(): ClientToolDefinition[] {
-    return [
-      ...CLIENT_TOOL_DEFINITIONS,
-      ...[...this.mcpServers.values()].flatMap((server) => server.definitions),
-    ];
-  }
-  private async executeMcp(
-    name: string,
-    args: unknown,
-    signal: AbortSignal,
-  ): Promise<unknown> {
-    for (const server of this.mcpServers.values()) {
-      const localName = server.bindings.get(name);
-      if (localName) {
-        const frozen = this.clientTools.binding?.definitions.find(
-          (tool) => tool.name === name,
-        );
-        const actual = server.definitions.find((tool) => tool.name === name);
-        if (
-          !frozen ||
-          !actual ||
-          !sameToolSchema(frozen.parameters, actual.parameters)
-        )
-          throw Error(t("error.mcp.schemaChanged"));
-        if (!args || typeof args !== "object" || Array.isArray(args))
-          throw Error("MCP arguments must be an object");
-        return server.client.callTool(
-          localName,
-          args as Record<string, unknown>,
-          { signal },
-        );
-      }
-    }
-    throw Error(`MCP tool is not connected in this browser: ${name}`);
-  }
-  private async connectMcp(config: McpServerConfig) {
-    if (this.mcpServers.has(config.id)) throw Error(t("error.mcp.duplicate"));
-    const client = new McpHttpClient(config);
-    try {
-      await client.initialize();
-      const catalog = await createMcpToolCatalog(
-        client,
-        await client.listTools(),
-        this.mcpNames,
-      );
-      const definitions: ClientToolDefinition[] = catalog.definitions.map(
-        (def) => ({
-          ...def,
-          reclaimable: false,
-          permissions: [
-            {
-              tool: { kind: "exact", value: def.name },
-              action: "allow",
-            },
-          ],
-        }),
-      );
-      this.mcpServers.set(config.id, {
-        client,
-        definitions,
-        bindings: catalog.bindings,
-      });
-      this.update({
-        mcpServers: [...this.mcpServers].map(([id, server]) => ({
-          id,
-          tools: server.definitions.length,
-        })),
-      });
-    } catch (error) {
-      client.close();
-      throw error;
-    }
+    return [...CLIENT_TOOL_DEFINITIONS];
   }
   private listeners = new Set<() => void>();
   private subscription: NativeSubscription | null = null;
@@ -953,9 +966,6 @@ export class AppStore {
     this.clearComposer();
     this.plugins.dispose();
     this.clientTools.reset();
-    for (const server of this.mcpServers.values()) server.client.close();
-    this.mcpServers.clear();
-    this.mcpNames.clear();
     this.started = false;
     this.lifecycle++;
     this.attaching++;
@@ -1106,8 +1116,15 @@ export class AppStore {
         const changedOwner = this.memoryScope !== null;
         this.clearSessionMemory();
         if (changedOwner) {
+          this.draftAgentExplicit = false;
+          this.draftModeExplicit = false;
           this.clearComposer();
           this.update({
+            draftModel: null,
+            userSessionDefaults: null,
+            projectSessionDefaults: null,
+            draftAgent: "",
+            draftMode: "",
             sessionId: null,
             transcript: createTranscript(),
             sessions: [],
@@ -1312,27 +1329,6 @@ export class AppStore {
       results[1].status === "fulfilled"
         ? modelChoices(models)
         : this.state.availableModels;
-    const previousDraft = this.state.draftModel;
-    const configuredDefault = models.default_model_selection;
-    const draftCatalog = availableModels.find(
-      (m) =>
-        previousDraft &&
-        m.id === previousDraft.id &&
-        m.providerId === previousDraft.providerId,
-    );
-    const defaultCatalog = availableModels.find(
-      (m) =>
-        configuredDefault &&
-        m.id === configuredDefault.model &&
-        m.providerId === configuredDefault.provider_id,
-    );
-    const draftModel = draftCatalog
-      ? { ...draftCatalog, variant: previousDraft?.variant ?? null }
-      : defaultCatalog
-        ? { ...defaultCatalog, variant: configuredDefault?.variant ?? null }
-        : configuredDefault
-          ? null
-          : (availableModels[0] ?? null);
     const host = this.state.hostConnection;
     const catalogCurrent =
       !!host &&
@@ -1352,8 +1348,13 @@ export class AppStore {
         results[1].status === "fulfilled"
           ? (models.metadata_status ?? null)
           : this.state.modelMetadataStatus,
-      draftModel:
-        results[1].status === "fulfilled" ? draftModel : this.state.draftModel,
+      userSessionDefaults:
+        results[1].status === "fulfilled"
+          ? {
+              ...this.state.userSessionDefaults,
+              model_selection: models.default_model_selection ?? null,
+            }
+          : this.state.userSessionDefaults,
       agents: catalogCurrent ? this.state.agents : agents.items,
       sessions: sessions
         ? sessions.items.filter((s) => !s.archived).map(sessionView)
@@ -1366,8 +1367,10 @@ export class AppStore {
             path: chosen.root,
             label: chosen.name,
           }
-        : { kind: "none" },
+        : { kind: this.savedDraftFlavor() },
     });
+    await this.refreshDraftDefaults();
+    if (!current()) return;
     if (route.page === "dashboard") this.update({ page: "dashboard" });
     const id = this.state.sessionId ?? route.sessionId;
     if (initialAttach) await initialAttach;
@@ -1401,6 +1404,22 @@ export class AppStore {
         true,
       ).catch((error) => this.toast(String(error)));
     }
+  }
+  private savedDraftFlavor(): ConversationHostFlavor {
+    try {
+      const saved = localStorage.getItem(
+        "microcrab.conversation-flavor.v1:" + this.hostScope(),
+      );
+      return saved === "browser_sandbox" ? "browser_sandbox" : "chat_only";
+    } catch {
+      return "chat_only";
+    }
+  }
+  private draftFlavor(): ConversationHostFlavor | undefined {
+    const kind = this.state.draftWorkspace.kind;
+    return kind === "chat_only" || kind === "browser_sandbox"
+      ? kind
+      : undefined;
   }
   private hostScope() {
     return hostPreferenceScope(this.api.base, this.state.authSession);
@@ -1474,14 +1493,23 @@ export class AppStore {
   private draftConversationOwner: string | null = null;
   private browserPreparation: {
     id: string;
+    flavor: ConversationHostFlavor;
     attempt: number;
     cycle: number;
     owner?: string;
     promise: Promise<void>;
   } | null = null;
-  private browserPrepared: { id: string; cycle: number; owner: string } | null =
-    null;
+  private browserPrepared: {
+    id: string;
+    flavor: ConversationHostFlavor;
+    cycle: number;
+    owner: string;
+  } | null = null;
   private connectBrowserConversation(id: string, draft = false): Promise<void> {
+    const flavor = draft
+      ? this.draftFlavor()
+      : this.state.sessions.find((session) => session.id === id)?.hostFlavor;
+    if (!flavor) return Promise.reject(Error(t("browserHost.bindingChanged")));
     const pending = this.browserPreparation;
     const owner = this.state.authSession?.principal?.owner;
     if (draft && owner) {
@@ -1496,6 +1524,7 @@ export class AppStore {
     }
     if (
       pending?.id === id &&
+      pending.flavor === flavor &&
       pending.attempt === this.hostAttempt &&
       pending.cycle === this.lifecycle &&
       pending.owner === owner
@@ -1504,18 +1533,21 @@ export class AppStore {
     const host = this.state.hostConnection;
     if (
       this.browserPrepared?.id === id &&
+      this.browserPrepared.flavor === flavor &&
       this.browserPrepared.cycle === this.lifecycle &&
       this.browserPrepared.owner === owner &&
       host?.conversationId === id &&
+      host.hostFlavor === flavor &&
       host.state === "ready" &&
       host.connected &&
       host.catalogReady &&
       this.state.agents.length
     )
       return Promise.resolve();
-    const promise = this.prepareBrowserConversation(id, draft);
+    const promise = this.prepareBrowserConversation(id, draft, flavor);
     const preparation = {
       id,
+      flavor,
       attempt: this.hostAttempt,
       cycle: this.lifecycle,
       owner,
@@ -1529,7 +1561,11 @@ export class AppStore {
     void promise.then(settled, settled);
     return promise;
   }
-  private async prepareBrowserConversation(id: string, draft: boolean) {
+  private async prepareBrowserConversation(
+    id: string,
+    draft: boolean,
+    flavor: ConversationHostFlavor,
+  ) {
     const owner = this.state.authSession?.principal?.owner;
     if (!owner) throw Error(t("browserHost.authenticationRequired"));
     const attempt = ++this.hostAttempt;
@@ -1540,19 +1576,22 @@ export class AppStore {
       this.state.authSession?.principal?.owner === owner &&
       (draft
         ? this.state.sessionId === null &&
-          this.state.draftWorkspace.kind === "none" &&
+          this.draftFlavor() === flavor &&
           this.draftConversationId === id
-        : this.state.sessionId === id);
+        : this.state.sessionId === id &&
+          this.state.sessions.find((session) => session.id === id)
+            ?.hostFlavor === flavor);
     this.update({
       hostConnection: {
         state: "connecting",
         conversationId: id,
+        hostFlavor: flavor,
         connected: false,
       },
       agents: [],
     });
     try {
-      await this.api.connectBrowserConversation(id, owner);
+      await this.api.connectBrowserConversation(id, owner, flavor);
       if (!current()) return;
       const catalog = await this.call<{ items: AgentInfo[] }>(
         "agent.catalog",
@@ -1560,27 +1599,20 @@ export class AppStore {
         undefined,
       );
       if (!current()) return;
-      const agent =
-        catalog.items.find((item) => item.name === this.state.draftAgent) ??
-        catalog.items[0];
-      if (!agent) throw Error(t("browserHost.catalogUnavailable"));
-      const mode =
-        agent.modes.find(
-          (item) =>
-            item.name === this.state.draftMode && item.role !== "sub_agent",
-        ) ?? agent.modes.find((item) => item.role !== "sub_agent");
+      if (!catalog.items.length)
+        throw Error(t("browserHost.catalogUnavailable"));
       this.update({
         agents: catalog.items,
-        draftAgent: agent.name,
-        draftMode: mode?.name ?? "plan",
         hostConnection: {
           state: "ready",
           connected: true,
           catalogReady: true,
           conversationId: id,
+          hostFlavor: flavor,
         },
       });
-      this.browserPrepared = { id, cycle, owner };
+      this.applyDraftAgentDefaults();
+      this.browserPrepared = { id, flavor, cycle, owner };
       if (draft) this.draftConversationId = id;
     } catch (error) {
       if (current())
@@ -1589,6 +1621,7 @@ export class AppStore {
             state: "suspended",
             connected: false,
             conversationId: id,
+            hostFlavor: flavor,
             catalogError: String(error),
           },
         });
@@ -1614,10 +1647,7 @@ export class AppStore {
         !this.state.hostConnection.connected
       )
         return;
-      const agent =
-        catalog.items.find((item) => item.name === this.state.draftAgent) ??
-        catalog.items[0];
-      if (!agent)
+      if (!catalog.items.length)
         throw Error("当前项目没有可用的 Agent 组件，请检查服务端组件配置");
       if (
         catalog.items.some(
@@ -1625,21 +1655,15 @@ export class AppStore {
         )
       )
         throw Error("服务端组件目录缺少组件标识，请更新服务端后重试加载目录");
-      const modes =
-        agent?.modes.filter((mode) => mode.role !== "sub_agent") ?? [];
       this.update({
         agents: catalog.items,
-        draftAgent: agent?.name ?? "",
-        draftMode:
-          modes.find((mode) => mode.name === this.state.draftMode)?.name ??
-          modes[0]?.name ??
-          "plan",
         hostConnection: {
           ...this.state.hostConnection,
           catalogError: undefined,
           catalogReady: true,
         },
       });
+      this.applyDraftAgentDefaults();
     } catch (error) {
       if (
         current() &&
@@ -2990,7 +3014,7 @@ export class AppStore {
     const freshInitialization =
       subscription.snapshot.session.agent_initialization_deferred === true;
     if (pluginRoute().page === "conversation") location.hash = sessionPath(id);
-    if (subscription.snapshot.session.project_id === null) {
+    if (subscription.snapshot.session.host_flavor) {
       try {
         await this.connectBrowserConversation(id);
         if (ticket === this.attaching) {
@@ -4209,6 +4233,8 @@ export class AppStore {
     )
       throw Error(t("composer.mode.empty"));
     if (!state.sessionId) {
+      this.draftAgentExplicit = true;
+      this.draftModeExplicit = true;
       this.update({ draftAgent: agent.name, draftMode: mode });
       return;
     }
@@ -4966,6 +4992,13 @@ export class AppStore {
     let images = [...this.state.composerImages];
     const epoch = this.draftEpoch;
     let route = this.composerRoute;
+    const explicitModel = this.state.draftModel
+      ? {
+          provider_id: this.state.draftModel.providerId,
+          model: this.state.draftModel.id,
+          variant: this.state.draftModel.variant ?? null,
+        }
+      : null;
     const agentName = this.state.draftAgent,
       modeName = this.state.draftMode;
     const selectedAgent = this.state.agents.find(
@@ -5043,12 +5076,26 @@ export class AppStore {
 
     try {
       if (!id) {
-        const browser = this.state.draftWorkspace.kind === "none";
+        const flavor = this.draftFlavor();
+        const browser = !!flavor;
         const project = browser ? null : this.state.draftWorkspace.projectId;
-        if (browser) {
-          this.draftConversationId ??= crypto.randomUUID();
-          await this.connectBrowserConversation(this.draftConversationId, true);
+        const conversationId = browser
+          ? (this.draftConversationId ??= crypto.randomUUID())
+          : null;
+        if (conversationId) {
+          await this.connectBrowserConversation(conversationId, true);
         } else if (!project) throw Error(t("browserHost.projectRequired"));
+        if (
+          cycle !== this.lifecycle ||
+          route !== this.composerRoute ||
+          epoch !== this.draftEpoch ||
+          this.state.sessionId !== null ||
+          flavor !== this.draftFlavor() ||
+          (browser && conversationId !== this.draftConversationId) ||
+          project !==
+            (this.draftFlavor() ? null : this.state.draftWorkspace.projectId)
+        )
+          return;
         const component = selectedAgent?.component;
         if (typeof component !== "string" || !component)
           throw Error("项目组件目录尚未就绪，请重新连接工作区桥接");
@@ -5056,20 +5103,12 @@ export class AppStore {
           "session.create",
           {
             project_id: project,
-            ...(browser ? { conversation_id: this.draftConversationId } : {}),
+            ...(browser ? { conversation_id: conversationId } : {}),
             client_tools: this.toolDefinitions(),
             component,
             agent: agentName,
             mode: modeName,
-            ...(this.state.draftModel
-              ? {
-                  model_selection: {
-                    provider_id: this.state.draftModel.providerId,
-                    model: this.state.draftModel.id,
-                    variant: this.state.draftModel.variant ?? null,
-                  },
-                }
-              : {}),
+            ...(explicitModel ? { model_selection: explicitModel } : {}),
             operation_id: crypto.randomUUID(),
           },
           undefined,
@@ -5390,6 +5429,9 @@ export class AppStore {
     }
   }
   private newChat(activateBrowser = true) {
+    this.draftAgentExplicit = false;
+    this.draftModeExplicit = false;
+    this.update({ draftModel: null });
     this.releaseInterrupt();
     this.composerRoute++;
     this.cacheSession();
@@ -5435,9 +5477,11 @@ export class AppStore {
       menuSession: null,
     });
     location.hash = "";
+    this.applyDraftAgentDefaults();
+    void this.refreshDraftDefaults();
     if (
       activateBrowser &&
-      this.state.draftWorkspace.kind === "none" &&
+      !!this.draftFlavor() &&
       this.state.authSession?.authenticated
     ) {
       this.draftConversationId = crypto.randomUUID();
@@ -5499,23 +5543,52 @@ export class AppStore {
           if (!allowed.includes(action.method))
             throw Error("Unsupported settings operation");
           const owner = this.state.authSession?.principal?.owner;
-          const result = await this.api.request(
+          const cycle = this.lifecycle;
+          const api = this.api;
+          const result = await api.request(
             action.method,
             action.params ?? {},
             action.sessionId,
           );
-          if (owner !== this.state.authSession?.principal?.owner)
+          if (
+            owner !== this.state.authSession?.principal?.owner ||
+            cycle !== this.lifecycle ||
+            api !== this.api
+          )
             throw Error("Settings owner changed during request");
+          if (
+            ["settings.set", "project.settings.set"].includes(action.method)
+          ) {
+            const saved = result as SettingsSnapshot;
+            if (action.method === "settings.set") {
+              this.update({
+                userSessionDefaults: saved.effective ?? null,
+                projectSessionDefaults: null,
+              });
+            } else if (
+              action.params?.project_id === this.state.draftWorkspace.projectId
+            ) {
+              this.update({
+                projectSessionDefaults: saved.effective
+                  ? {
+                      projectId: action.params.project_id,
+                      effective: saved.effective,
+                    }
+                  : null,
+              });
+            }
+            this.applyDraftAgentDefaults();
+            await this.refreshDraftDefaults();
+          }
           if (
             ["provider.set", "provider.delete", "provider.discover"].includes(
               action.method,
             )
           ) {
             try {
-              const catalog =
-                await this.api.request<NativeModelCatalog>("model.list");
-              if (owner === this.state.authSession?.principal?.owner)
-                this.update({ availableModels: modelChoices(catalog) });
+              await this.refreshModelCatalog();
+              if (cycle === this.lifecycle && api === this.api)
+                await this.refreshDraftDefaults();
             } catch (failure) {
               if (owner === this.state.authSession?.principal?.owner)
                 this.toast(
@@ -5529,19 +5602,6 @@ export class AppStore {
             }
           }
           return result;
-        }
-        case "ConnectMcp":
-          return await this.connectMcp(action.config);
-        case "DisconnectMcp": {
-          this.mcpServers.get(value)?.client.close();
-          this.mcpServers.delete(value);
-          this.update({
-            mcpServers: [...this.mcpServers].map(([id, server]) => ({
-              id,
-              tools: server.definitions.length,
-            })),
-          });
-          return;
         }
         case "ReplyRoundLimit":
           return await this.roundLimits.reply(
@@ -5800,10 +5860,6 @@ export class AppStore {
             childListLoading: false,
           });
           this.clientTools.reset();
-          for (const server of this.mcpServers.values()) server.client.close();
-          this.mcpServers.clear();
-          this.mcpNames.clear();
-          this.update({ mcpServers: [] });
           this.uncertainCreation = false;
           this.hostAttempt++;
           this.lifecycle++;
@@ -5846,7 +5902,9 @@ export class AppStore {
             draftAgent: "",
             draftMode: "plan",
             draftModel: null,
-            draftWorkspace: { kind: "none" },
+            userSessionDefaults: null,
+            projectSessionDefaults: null,
+            draftWorkspace: { kind: "chat_only" },
             draftText: "",
             attachments: [],
           });
@@ -6301,9 +6359,10 @@ export class AppStore {
                           path: projects[0].root,
                           label: projects[0].name,
                         }
-                      : { kind: "none" }
+                      : { kind: "chat_only" }
                     : this.state.draftWorkspace,
               });
+              void this.refreshDraftDefaults();
               try {
                 localStorage.removeItem(
                   "microcrab.host-endpoint:" + this.api.base + popup.projectId,
@@ -6532,6 +6591,13 @@ export class AppStore {
             showWorkspaceDropdown: false,
           });
           if (action.type === "CreateSessionInProject") this.newChat();
+          const cycle = this.lifecycle;
+          await this.refreshDraftDefaults();
+          if (
+            cycle !== this.lifecycle ||
+            this.state.draftWorkspace.projectId !== project.id
+          )
+            return;
           await this.resumeProject(
             project.id,
             action.type === "CreateSessionInProject"
@@ -6544,6 +6610,7 @@ export class AppStore {
         case "LoadModelMetadata": {
           if (this.state.modelMetadataPending) return;
           const cycle = this.lifecycle;
+          const catalogTicket = ++this.catalogRead;
           this.update({ modelMetadataPending: true, modelMetadataError: null });
           try {
             const result = await this.call<NativeModelCatalog>(
@@ -6553,11 +6620,13 @@ export class AppStore {
               {},
               undefined,
             );
-            if (cycle !== this.lifecycle) return;
+            if (cycle !== this.lifecycle || catalogTicket !== this.catalogRead)
+              return;
             this.update({
               availableModels: modelChoices(result),
               modelMetadataStatus: result.metadata_status ?? null,
             });
+            await this.refreshDraftDefaults();
           } catch (error) {
             if (cycle === this.lifecycle)
               reportDiagnostic("store", action.type, error);
@@ -6657,6 +6726,8 @@ export class AppStore {
             agent?.modes.filter((mode) => mode.role !== "sub_agent") ?? [];
           if (!agent || !modes.length)
             throw Error("Agent 没有可用的主会话模式");
+          this.draftAgentExplicit = true;
+          this.draftModeExplicit = true;
           this.update({
             draftAgent: agent.name,
             draftMode: modes.some((mode) => mode.name === state.draftMode)
@@ -6790,8 +6861,9 @@ export class AppStore {
           this.update({ forkPending: id, menuSession: null });
           let allocated = false;
           let forkAttempted = false;
-          const conversationId =
-            source.projectID === null ? crypto.randomUUID() : undefined;
+          const conversationId = source.hostFlavor
+            ? crypto.randomUUID()
+            : undefined;
           let target: NativeSession;
           try {
             if (conversationId) {
@@ -6799,7 +6871,11 @@ export class AppStore {
               if (!owner) throw Error(t("browserHost.authenticationRequired"));
               // Attach only the fresh destination route. The source presentation
               // and running Host remain authoritative until fork commits.
-              await this.api.connectBrowserConversation(conversationId, owner);
+              await this.api.connectBrowserConversation(
+                conversationId,
+                owner,
+                source.hostFlavor!,
+              );
             }
             forkAttempted = true;
             target = await this.call<NativeSession>(
@@ -7158,6 +7234,19 @@ export class AppStore {
           });
           return;
         case "SelectDraftWorkspace": {
+          const flavor: ConversationHostFlavor =
+            value?.kind === "browser_sandbox" ? "browser_sandbox" : "chat_only";
+          // A mode choice always starts a new immutable conversation identity.
+          const existing = !!this.state.sessionId;
+          if (existing) this.newChat(false);
+          const oldId = existing ? null : this.draftConversationId;
+          const changed = this.draftFlavor() !== flavor;
+          if (existing || changed || !oldId) {
+            this.hostAttempt++;
+            this.draftConversationId = crypto.randomUUID();
+            this.browserPrepared = null;
+            this.browserPreparation = null;
+          }
           try {
             localStorage.setItem(
               "microcrab.host-project.v2:" +
@@ -7167,11 +7256,23 @@ export class AppStore {
           } catch {
             // Workspace selection does not require persistent preferences.
           }
+          try {
+            localStorage.setItem(
+              "microcrab.conversation-flavor.v1:" + this.hostScope(),
+              flavor,
+            );
+          } catch {}
           this.draftConversationId ??= crypto.randomUUID();
           this.update({
-            draftWorkspace: { kind: "none" },
+            draftWorkspace: { kind: flavor },
             showWorkspaceDropdown: false,
           });
+          const defaultsCycle = this.lifecycle;
+          await this.refreshDraftDefaults();
+          if (defaultsCycle !== this.lifecycle || this.draftFlavor() !== flavor)
+            return;
+          if (changed && oldId)
+            await this.api.disconnectBrowserConversation(oldId);
           await this.connectBrowserConversation(this.draftConversationId, true);
           return;
         }

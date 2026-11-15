@@ -1,3 +1,4 @@
+import { CitationConversationProvider } from "./citations/context";
 import { useClientPlugins } from "../state";
 import {
   sessionTabPlugins,
@@ -475,9 +476,11 @@ export function Conversation(props: ConversationProps = {}) {
   const registry = props.transcript ? local : store.conversation;
   const locale = useAppSelector((state) => state.resolvedLocale);
   return (
-    <ConversationRegistryProvider registry={registry} locale={locale}>
-      <ConversationList {...props} registry={registry} />
-    </ConversationRegistryProvider>
+    <CitationConversationProvider transcript={props.transcript} sessionId={props.sessionId} readOnly={props.readOnly}>
+      <ConversationRegistryProvider registry={registry} locale={locale}>
+        <ConversationList {...props} registry={registry} />
+      </ConversationRegistryProvider>
+    </CitationConversationProvider>
   );
 }
 

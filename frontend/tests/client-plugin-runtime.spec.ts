@@ -241,10 +241,16 @@ test("history reset drops delayed genuine Worker effects while fresh Viewer requ
           new URL("/src/plugins/worker.ts", location.origin),
           { type: "module" },
         );
-        // Delay real transport frames, preserving the Rust guest's original
-        // request IDs and ordering. No Worker or guest response is fabricated.
+        // Delay this exact guest's real transport frames. Other default plugins
+        // can complete startup concurrently without satisfying this capture.
+        let pluginId = "";
         worker.addEventListener("message", (event) => {
-          if (!holding || !["effect", "result"].includes(event.data.type))
+          if (event.data.type === "loaded") pluginId = event.data.manifest.id;
+          if (
+            pluginId !== "microcrab.state-viewer" ||
+            !holding ||
+            !["effect", "result"].includes(event.data.type)
+          )
             return;
           event.stopImmediatePropagation();
           held.push({ worker, data: event.data });

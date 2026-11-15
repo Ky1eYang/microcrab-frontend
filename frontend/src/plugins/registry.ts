@@ -1,5 +1,7 @@
 import { authorizeKind, PluginImportError, wasmSourceKind } from "./component";
 import { PluginNetwork } from "./network";
+import { PluginResources } from "./resources";
+import { identityKey } from "./tool-hub";
 import {
   assertJson,
   overlayVariables,
@@ -20,6 +22,8 @@ import {
   type InstalledPlugin,
   type Json,
   type PluginContext,
+  type PluginToolIdentity,
+  type PluginToolRequest,
   type PluginEffect,
   type PluginRegistryAPI,
   type PluginResult,
@@ -56,6 +60,7 @@ interface Live {
   queued: number;
   controllers: Set<AbortController>;
   network: PluginNetwork;
+  resources: PluginResources;
   ready: boolean;
   effectIds: Set<number>;
   effectSequence: number;
@@ -77,10 +82,34 @@ export class PluginRegistry implements PluginRegistryAPI {
   private readonly store: PluginStore;
   private plugins = new Map<string, InstalledPlugin>();
   private live = new Map<string, Live>();
+  private artifactReferences = new Map<string, string | null>();
   private listeners = new Set<() => void>();
   private snapshot: readonly InstalledPlugin[] = [];
   private preferences: Preferences = { sessions: {}, tombstones: [] };
   private pending = new Map<number, Pending>();
+  private cleanupTools = new Map<
+    string,
+    {
+      instance: Live;
+      identity: PluginToolIdentity;
+      controller: AbortController;
+      expires: number;
+      used: boolean;
+    }
+  >();
+  private toolSeen = new Set<string>();
+  private tools = new Map<
+    string,
+    {
+      pluginId: string;
+      instance: Live;
+      identity: PluginToolIdentity;
+      context: PluginContext;
+      resolve: (value: Json) => void;
+      reject: (error: Error) => void;
+      controller: AbortController;
+    }
+  >();
   private generation = 0;
   private callId = 0;
   private sessionId: string | null = null;
@@ -230,8 +259,19 @@ export class PluginRegistry implements PluginRegistryAPI {
     this.assertActive();
     const installed = await this.store.plugins();
     this.assertActive();
-    for (const p of installed)
-      this.plugins.set(p.manifest.id, { ...p, status: "disabled" });
+    for (const p of installed) {
+      const artifact = await this.sha256(p.bytes);
+      const referenceAvailable = await this.store.registerArtifactReference(
+        p.manifest.id,
+        artifact,
+      );
+      this.assertActive();
+      this.artifactReferences.set(
+        p.manifest.id,
+        referenceAvailable ? artifact : null,
+      );
+      this.plugins.set(p.manifest.id, { ...p, artifact, status: "disabled" });
+    }
     this.publish();
     // Normal startup honors removals. Only an explicit action restores tombstones.
     try {
@@ -486,12 +526,20 @@ export class PluginRegistry implements PluginRegistryAPI {
       64 * 1024 * 1024
     )
       throw new Error("installed plugin Components exceed 64 MiB total");
+    const artifact = await this.sha256(storedBytes);
+    const referenceAvailable = await this.store.registerArtifactReference(
+      id,
+      artifact,
+    );
+    this.assertActive();
     this.stop(id);
     const p: InstalledPlugin = {
       manifest: reply.manifest,
       imports: reply.imports,
       bytes: storedBytes.slice(),
       importFormat: reply.sourceKind,
+      providesTools: reply.providesTools,
+      artifact,
       priority: old?.priority ?? this.plugins.size,
       enabledByDefault:
         old?.enabledByDefault ?? options.enabledByDefault ?? false,
@@ -500,6 +548,7 @@ export class PluginRegistry implements PluginRegistryAPI {
     await this.store.put(p);
     this.assertActive();
     this.plugins.set(id, p);
+    this.artifactReferences.set(id, referenceAvailable ? artifact : null);
     this.preferences.tombstones = this.preferences.tombstones.filter(
       (x) => x !== id,
     );
@@ -534,6 +583,7 @@ export class PluginRegistry implements PluginRegistryAPI {
     this.stop(id);
     await this.store.remove(id);
     this.plugins.delete(id);
+    this.artifactReferences.delete(id);
     if (!this.preferences.tombstones.includes(id))
       this.preferences.tombstones.push(id);
     for (const enabled of Object.values(this.preferences.sessions))
@@ -569,6 +619,7 @@ export class PluginRegistry implements PluginRegistryAPI {
     this.require(id);
     this.stop(id);
     await this.store.clearKV(id);
+    PluginResources.reset(this.options.serverOrigin, this.options.ownerId, id);
     const p = this.require(id);
     p.error = undefined;
     p.status = "disabled";
@@ -693,8 +744,15 @@ export class PluginRegistry implements PluginRegistryAPI {
   private async start(id: string): Promise<void> {
     const previous = this.live.get(id);
     if (previous) return previous.queue.then(() => {});
-    const p = this.require(id),
-      worker = this.createWorker(),
+    const p = this.require(id);
+    if (!p.artifact) throw Error("Plugin artifact pin is unavailable");
+    const resources = new PluginResources(
+      this.options.serverOrigin,
+      this.options.ownerId,
+      id,
+      p.artifact,
+    );
+    const worker = this.createWorker(),
       generation = ++this.generation;
     const instance: Live = {
       worker,
@@ -708,8 +766,12 @@ export class PluginRegistry implements PluginRegistryAPI {
       queue: Promise.resolve(),
       queued: 0,
       controllers: new Set(),
-      network: new PluginNetwork(p.manifest, (requestId, value) =>
-        this.completion(id, instance, requestId, true, value),
+      resources,
+      network: new PluginNetwork(
+        p.manifest,
+        (requestId, value) =>
+          this.completion(id, instance, requestId, true, value),
+        resources,
       ),
       ready: false,
       effectIds: new Set(),
@@ -746,6 +808,15 @@ export class PluginRegistry implements PluginRegistryAPI {
             "installed Component inspection differs from persisted manifest/imports",
           );
         if (this.live.get(id) !== instance) return;
+        p.providesTools = reply.providesTools;
+        const artifact = await this.sha256(p.bytes);
+        const referenceAvailable = await this.store.registerArtifactReference(
+          id,
+          artifact,
+        );
+        if (this.live.get(id) !== instance) return;
+        p.artifact = artifact;
+        this.artifactReferences.set(id, referenceAvailable ? artifact : null);
         instance.ready = true;
         const session = this.sessionId,
           deadline = Date.now() + LIMITS.callMs;
@@ -776,6 +847,9 @@ export class PluginRegistry implements PluginRegistryAPI {
         }
         this.apply(id, instance, init);
         p.status = "ready";
+        if (!referenceAvailable)
+          p.error =
+            "Plugin artifact reference is ambiguous; short discovery is unavailable; use the full SHA-256";
         this.publish();
         if (this.settled.size) {
           const history = this.historyGeneration,
@@ -823,6 +897,20 @@ export class PluginRegistry implements PluginRegistryAPI {
       this.live.delete(id);
       instance.worker.terminate();
       instance.network.close();
+      instance.resources.close();
+      for (const [key, cleanup] of this.cleanupTools)
+        if (cleanup.instance === instance) {
+          this.cleanupTools.delete(key);
+          cleanup.controller.abort();
+        }
+      for (const [key, tool] of this.tools)
+        if (tool.instance === instance) {
+          this.tools.delete(key);
+          tool.controller.abort();
+          tool.reject(
+            new Error("Plugin authority retired; outcome may be unknown"),
+          );
+        }
       for (const controller of instance.controllers) controller.abort();
       for (const [key, p] of this.pending)
         if (p.worker === instance.worker) {
@@ -849,15 +937,23 @@ export class PluginRegistry implements PluginRegistryAPI {
   private async invoke(
     id: string,
     instance: Live,
-    method: "init" | "renderView" | "onAction" | "onPhase",
+    method:
+      | "init"
+      | "renderView"
+      | "onAction"
+      | "onPhase"
+      | "startTool"
+      | "cancelTool",
     args: string[],
     timeout: number,
     surface?: PluginSurfaceDescriptor,
+    captured?: PluginContext,
   ): Promise<PluginResult> {
     if (this.live.get(id) !== instance)
       throw new StalePluginCall("stale plugin instance");
-    const context = {
+    const context = captured ?? {
         ...this.context(instance.generation, surface),
+        user_action: method === "onAction",
         invocation_id: crypto.randomUUID(),
       },
       history = this.historyGeneration;
@@ -935,6 +1031,35 @@ export class PluginRegistry implements PluginRegistryAPI {
     context?: PluginContext,
   ): void {
     if (this.live.get(id) !== instance) return;
+    if (r.tool_completion) {
+      const c = r.tool_completion;
+      const tool = this.tools.get(c.identity.invocation_id);
+      if (
+        !tool ||
+        tool.pluginId !== id ||
+        tool.instance !== instance ||
+        identityKey(c.identity) !== identityKey(tool.identity) ||
+        !this.currentContext(instance, tool.context)
+      )
+        throw new StalePluginCall(
+          "Tool completion identity expired or differs",
+        );
+      if (c.status !== "pending") {
+        this.tools.delete(c.identity.invocation_id);
+        tool.controller.abort();
+        if (c.status === "completed" && c.output !== undefined)
+          tool.resolve(c.output);
+        else
+          tool.reject(
+            new Error(
+              (c.error ?? "Plugin tool failed") +
+                (c.outcome_unknown
+                  ? "; outcome unknown; do not retry automatically"
+                  : ""),
+            ),
+          );
+      }
+    }
     const vars = r.vars_patch
       ? { ...instance.vars, ...r.vars_patch }
       : instance.vars;
@@ -1161,7 +1286,10 @@ export class PluginRegistry implements PluginRegistryAPI {
         !instance.surfaces.get(surface.surface_id)?.visible
       )
         throw new StalePluginCall("action surface was retired");
-      const ctx = this.context(instance.generation, surface);
+      const ctx = {
+        ...this.context(instance.generation, surface),
+        user_action: true,
+      };
       const r = await this.invoke(
         id,
         instance,
@@ -1355,6 +1483,20 @@ export class PluginRegistry implements PluginRegistryAPI {
           for (const controller of instance.controllers)
             controller.abort(new Error("history replaced"));
           instance.network.close();
+          instance.resources.close();
+          for (const [key, cleanup] of this.cleanupTools)
+            if (cleanup.instance === instance) {
+              this.cleanupTools.delete(key);
+              cleanup.controller.abort();
+            }
+          for (const [key, tool] of this.tools)
+            if (tool.instance === instance) {
+              this.tools.delete(key);
+              tool.controller.abort();
+              tool.reject(
+                new Error("Plugin authority retired; outcome may be unknown"),
+              );
+            }
           instance.trees.clear();
           for (const [key, mount] of instance.surfaces) {
             if (mount.descriptor.target === "block-slot")
@@ -1409,12 +1551,241 @@ export class PluginRegistry implements PluginRegistryAPI {
   ): readonly (BlockSlot & { pluginId: string })[] {
     return [...this.slots.values()].filter((s) => s.block_id === blockId);
   }
+  toolInventory(): Json[] {
+    return this.snapshot
+      .filter(
+        (p) =>
+          p.providesTools &&
+          p.artifact &&
+          this.artifactReferences.get(p.manifest.id) === p.artifact &&
+          p.status === "ready" &&
+          this.isEnabled(p.manifest.id),
+      )
+      .slice(0, 32)
+      .map((p) => ({
+        id: p.manifest.id,
+        name: p.manifest.name.slice(0, 128),
+        version: p.manifest.version,
+        artifact: p.artifact!.slice(0, 16),
+        description: (p.manifest.description ?? "").slice(0, 256),
+      }));
+  }
+  async executeTool(
+    request: PluginToolRequest,
+    invocation: Omit<
+      PluginToolIdentity,
+      "artifact" | "generation" | "history_generation"
+    >,
+    signal: AbortSignal,
+  ): Promise<Json> {
+    this.assertActive();
+    request = structuredClone(request);
+    const id = request.plugin,
+      p = this.require(id),
+      instance = this.live.get(id),
+      transition = this.sessionTransition,
+      history = this.historyGeneration;
+    if (
+      !instance?.ready ||
+      p.status !== "ready" ||
+      !p.providesTools ||
+      !this.isEnabled(id) ||
+      !p.artifact ||
+      !/^(?:[a-f0-9]{16}|[a-f0-9]{64})$/.test(request.artifact)
+    )
+      throw Error(
+        "Plugin provider/artifact is unavailable or changed; discover again",
+      );
+    let artifact = request.artifact;
+    if (artifact.length === 16) {
+      try {
+        // Read the authoritative persisted binding on every short dispatch so
+        // another tab's collision cannot be hidden by the inventory cache.
+        artifact = await this.store.resolveArtifactReference(id, artifact);
+      } catch (error) {
+        if (
+          this.live.get(id) === instance &&
+          this.plugins.get(id) === p &&
+          request.artifact === p.artifact.slice(0, 16)
+        ) {
+          this.artifactReferences.delete(id);
+          p.error = error instanceof Error ? error.message : String(error);
+          this.publish();
+        }
+        throw error;
+      }
+    }
+    this.assertActive();
+    if (
+      this.live.get(id) !== instance ||
+      this.plugins.get(id) !== p ||
+      transition !== this.sessionTransition ||
+      history !== this.historyGeneration ||
+      !instance.ready ||
+      p.status !== "ready" ||
+      !p.providesTools ||
+      !this.isEnabled(id) ||
+      p.artifact !== artifact
+    )
+      throw Error(
+        "Plugin provider/artifact is unavailable or changed; discover again",
+      );
+    // The guest and all host-owned invocation identities retain exact bytes.
+    request.artifact = artifact;
+    // Delegated sessions must own their own registry; do not borrow the selected
+    // main Session's authority through its execution lease.
+    if (
+      invocation.session_id !== this.sessionId ||
+      invocation.parent_session_id !== this.sessionId
+    )
+      throw Error("Plugin authority is unavailable for this delegated Session");
+    if (
+      signal.aborted ||
+      (invocation.deadline_ms > 0 && invocation.deadline_ms <= Date.now())
+    )
+      throw Error("Plugin invocation was cancelled or expired before dispatch");
+    if (
+      this.toolSeen.has(invocation.invocation_id) ||
+      this.toolSeen.size >= 8192 ||
+      this.tools.size >= 32
+    )
+      throw Error("Plugin invocation is duplicate or pending budget exceeded");
+    const identity: PluginToolIdentity = {
+      ...invocation,
+      artifact: request.artifact,
+      generation: instance.generation,
+      history_generation: this.historyGeneration,
+    };
+    const context: PluginContext = {
+      ...this.context(instance.generation),
+      invocation_id: invocation.invocation_id,
+      tool_invocation: identity,
+    };
+    this.toolSeen.add(invocation.invocation_id);
+    const controller = new AbortController();
+    let cancel = () => {};
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const completion = new Promise<Json>((resolve, reject) => {
+      this.tools.set(identity.invocation_id, {
+        pluginId: id,
+        instance,
+        identity,
+        context,
+        resolve,
+        reject,
+        controller,
+      });
+      cancel = () => {
+        if (!this.tools.delete(identity.invocation_id)) return;
+        controller.abort();
+        const cleanup = {
+          instance,
+          identity,
+          controller: new AbortController(),
+          expires: Date.now() + 1000,
+          used: false,
+        };
+        this.cleanupTools.set(identity.invocation_id, cleanup);
+        setTimeout(() => {
+          if (this.cleanupTools.get(identity.invocation_id) === cleanup)
+            this.cleanupTools.delete(identity.invocation_id);
+          cleanup.controller.abort();
+        }, 1000);
+        reject(
+          Error(
+            "Plugin invocation cancelled or deadline exceeded; outcome may be unknown; do not retry automatically",
+          ),
+        );
+        // Cancellation is queued after the bounded synchronous export, never after
+        // the unresolved tool promise. The worker is always free to process it.
+        void this.enqueue(id, async (live) => {
+          if (live !== instance) return;
+          await this.invoke(
+            id,
+            live,
+            "cancelTool",
+            [JSON.stringify(context)],
+            LIMITS.callMs,
+            undefined,
+            { ...context, tool_cleanup: true },
+          );
+        }).catch(() => {});
+      };
+      signal.addEventListener("abort", cancel, { once: true });
+      // Nonpositive deadlines leave cancellation to the external signal.
+      if (identity.deadline_ms > 0)
+        timer = setTimeout(
+          cancel,
+          Math.max(1, Math.min(2147483647, identity.deadline_ms - Date.now())),
+        );
+    });
+    // Only start/ack occupies the serial worker queue; event-result can now run.
+    void this.enqueue(id, async (live) => {
+      if (!this.tools.has(identity.invocation_id) || live !== instance) return;
+      const r = await this.invoke(
+        id,
+        live,
+        "startTool",
+        [JSON.stringify(request), JSON.stringify(context)],
+        LIMITS.callMs,
+        undefined,
+        context,
+      );
+      if (
+        !r.tool_completion ||
+        identityKey(r.tool_completion.identity) !== identityKey(identity)
+      )
+        throw Error("Tool provider did not acknowledge the exact invocation");
+      this.apply(id, live, r, undefined, context);
+    }).catch((error) => {
+      const tool = this.tools.get(identity.invocation_id);
+      if (tool) {
+        this.tools.delete(identity.invocation_id);
+        controller.abort();
+        tool.reject(
+          error instanceof Error ? error : Error("Plugin start failed"),
+        );
+      }
+    });
+    try {
+      return await completion;
+    } finally {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", cancel);
+      controller.abort();
+    }
+  }
   private currentContext(instance: Live, context: PluginContext): boolean {
     return (
       context.owner_id === this.options.ownerId &&
       context.session_id === this.sessionId &&
       context.instance_generation === instance.generation &&
       context.history_generation === this.historyGeneration &&
+      (!context.tool_invocation ||
+        (() => {
+          if (context.tool_cleanup) {
+            const cleanup = this.cleanupTools.get(
+              context.tool_invocation.invocation_id,
+            );
+            return (
+              !!cleanup &&
+              cleanup.instance === instance &&
+              Date.now() < cleanup.expires &&
+              !cleanup.controller.signal.aborted &&
+              identityKey(cleanup.identity) ===
+                identityKey(context.tool_invocation)
+            );
+          }
+          const tool = this.tools.get(context.tool_invocation.invocation_id);
+          return (
+            !!tool &&
+            tool.instance === instance &&
+            !tool.controller.signal.aborted &&
+            (tool.identity.deadline_ms <= 0 ||
+              Date.now() < tool.identity.deadline_ms) &&
+            identityKey(tool.identity) === identityKey(context.tool_invocation)
+          );
+        })()) &&
       (!context.surface ||
         (instance.surfaces.get(context.surface.surface_id)?.visible === true &&
           instance.surfaces.get(context.surface.surface_id)?.revision ===
@@ -1453,6 +1824,7 @@ export class PluginRegistry implements PluginRegistryAPI {
     void this.enqueue(id, async (live) => {
       if (
         live !== instance ||
+        (origin && !this.currentContext(instance, origin)) ||
         history !== this.historyGeneration ||
         session !== this.sessionId ||
         (origin?.surface &&
@@ -1473,6 +1845,7 @@ export class PluginRegistry implements PluginRegistryAPI {
         ],
         LIMITS.callMs,
         origin?.surface,
+        origin?.tool_invocation ? origin : undefined,
       );
       this.apply(id, live, r, undefined, origin);
     }).catch((e) => {
@@ -1493,6 +1866,49 @@ export class PluginRegistry implements PluginRegistryAPI {
       return;
     authorizeKind(this.require(id).imports, effect.kind);
     assertJson(effect.payload);
+    if (context.tool_invocation) {
+      if (context.tool_cleanup) {
+        const cleanup = this.cleanupTools.get(
+          context.tool_invocation.invocation_id,
+        );
+        if (
+          !cleanup ||
+          cleanup.used ||
+          effect.kind !== "http" ||
+          !effect.payload ||
+          typeof effect.payload !== "object" ||
+          Array.isArray(effect.payload) ||
+          effect.payload.response_mode !== "discard"
+        )
+          throw Error(
+            "Cancellation cleanup permits one bounded resource notification only",
+          );
+        cleanup.used = true;
+      }
+      const surfaceOnly = [
+        "state-change",
+        "state-operation",
+        "storage-set",
+        "storage-remove",
+        "block-slots",
+        "resource-configure",
+      ];
+      if (surfaceOnly.includes(effect.kind))
+        throw Error(
+          "This capability requires an explicit owner surface action",
+        );
+      if (
+        ["http", "ws-open", "ws-send", "ws-close"].includes(effect.kind) &&
+        (effect.kind !== "http" ||
+          !effect.payload ||
+          typeof effect.payload !== "object" ||
+          Array.isArray(effect.payload) ||
+          typeof effect.payload.resource !== "string")
+      )
+        throw Error(
+          "Model plugin networking requires an exact configured resource grant",
+        );
+    }
     const requestId =
       effect.request_id ?? 0x80000000 + ++instance.effectSequence;
     if (requestId > 0xffffffff || instance.effectIds.size >= 65536)
@@ -1506,6 +1922,16 @@ export class PluginRegistry implements PluginRegistryAPI {
       throw new Error("plugin exceeds 128 pending asynchronous requests");
     const controller = new AbortController();
     instance.controllers.add(controller);
+    const toolSignal = context.tool_invocation
+      ? context.tool_cleanup
+        ? this.cleanupTools.get(context.tool_invocation.invocation_id)
+            ?.controller.signal
+        : this.tools.get(context.tool_invocation.invocation_id)?.controller
+            .signal
+      : undefined;
+    const cancelToolEffect = () => controller.abort();
+    toolSignal?.addEventListener("abort", cancelToolEffect, { once: true });
+    if (toolSignal?.aborted) controller.abort();
     const history = this.historyGeneration;
     const surfaceRevision = context.surface
       ? instance.surfaces.get(context.surface.surface_id)?.revision
@@ -1528,19 +1954,38 @@ export class PluginRegistry implements PluginRegistryAPI {
       completed = true;
       this.completion(id, instance, requestId, ok, value, error, context);
     };
-    const timer = setTimeout(() => {
-      // Scope cancellation is silent. A deadline in the current scope must
-      // settle the guest even if the underlying host operation ignores abort.
-      if (controller.signal.aborted) return;
-      deadlineExceeded = true;
-      const error = "plugin host effect exceeded 10000ms deadline";
-      controller.abort(new Error(error));
-      finish(false, undefined, error);
-      instance.controllers.delete(controller);
-    }, 10000);
+    const timer = setTimeout(
+      () => {
+        // Scope cancellation is silent. A deadline in the current scope must
+        // settle the guest even if the underlying host operation ignores abort.
+        if (controller.signal.aborted) return;
+        deadlineExceeded = true;
+        const error = "plugin host effect exceeded 10000ms deadline";
+        controller.abort(new Error(error));
+        finish(false, undefined, error);
+        instance.controllers.delete(controller);
+      },
+      Math.max(
+        1,
+        Math.min(
+          10000,
+          (context.tool_cleanup
+            ? Date.now() + 1000
+            : context.tool_invocation && context.tool_invocation.deadline_ms > 0
+              ? context.tool_invocation.deadline_ms
+              : Date.now() + 10000) - Date.now(),
+        ),
+      ),
+    );
     try {
       let value: Json;
-      if (effect.kind.startsWith("storage-")) {
+      if (effect.kind === "resource-list") value = instance.resources.list();
+      else if (effect.kind === "resource-configure")
+        value = instance.resources.configure(
+          effect.payload,
+          context.user_action === true && !context.tool_invocation,
+        );
+      else if (effect.kind.startsWith("storage-")) {
         const p = effect.payload;
         if (
           !p ||
@@ -1648,6 +2093,7 @@ export class PluginRegistry implements PluginRegistryAPI {
       );
     } finally {
       clearTimeout(timer);
+      toolSignal?.removeEventListener("abort", cancelToolEffect);
       instance.controllers.delete(controller);
     }
   }
