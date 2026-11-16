@@ -1,0 +1,57 @@
+.prompt-setting {
+  min-width: 0;
+  padding-block: 12px;
+  border-top: 1px solid var(--border);
+}
+.prompt-setting > .settings-form-label {
+  display: block;
+  margin-bottom: 6px;
+}
+.prompt-setting .settings-input {
+  width: 100%;
+  max-width: 360px;
+}
+.prompt-editor {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.prompt-editor .cm-editor {
+  background: var(--bg);
+  color: var(--text);
+  font-size: var(--fs-sm);
+}
+.prompt-editor .cm-scroller {
+  min-height: 150px;
+  max-height: 360px;
+  overflow: auto;
+  font-family: var(--font-mono);
+  line-height: 1.6;
+}
+.prompt-editor .cm-content {
+  padding: 10px 8px;
+}
+.prompt-editor .cm-gutters {
+  background: transparent;
+  color: var(--text-2);
+  border-color: var(--border);
+}
+.prompt-editor .cm-focused {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+.prompt-token-delimiter {
+  color: var(--syntax-muted);
+}
+.prompt-token-variable {
+  color: var(--syntax-key);
+  font-weight: 600;
+}
+.prompt-token-keyword {
+  color: var(--syntax-literal);
+}
+.prompt-token-invalid {
+  text-decoration: underline wavy var(--danger);
+  text-underline-offset: 3px;
+}

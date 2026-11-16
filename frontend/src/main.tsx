@@ -1,5 +1,6 @@
 import { useClientPlugins } from "./state";
 import {
+  hasActiveSessionSidebarPlugin,
   sessionTabPlugins,
   selectedSessionPlugin,
 } from "./plugins/session-tabs";
@@ -29,6 +30,9 @@ import { PopupView } from "./features/popups";
 import "./styles/tokens.css";
 import "./styles/chrome.css";
 import "./styles/components.css";
+import "./features/citations/citations.css";
+import "./features/visualizers/visualizers.css";
+import "./features/questions/question-images.css";
 import "./styles/interaction-polish.css";
 import "./styles/dashboard.css";
 
@@ -63,13 +67,19 @@ function Layout() {
     "sessionPluginTab",
     "toast",
   ]);
+  const installedSnapshot = plugins.registry?.getSnapshot() ?? [];
+  const isPluginEnabled = (id: string) =>
+    plugins.registry?.isEnabled(id, state.sessionId) ?? false;
   const selectedPlugin = selectedSessionPlugin(
     state.sessionPluginTab,
     state.sessionId,
-    sessionTabPlugins(
-      plugins.registry?.getSnapshot() ?? [],
-      (id) => plugins.registry?.isEnabled(id, state.sessionId) ?? false,
-    ),
+    sessionTabPlugins(installedSnapshot, isPluginEnabled),
+  );
+  const canShowRightRail = hasActiveSessionSidebarPlugin(
+    installedSnapshot,
+    isPluginEnabled,
+    state.page,
+    state.sessionId,
   );
   const menu =
     state.menuSession ||
@@ -139,7 +149,7 @@ function Layout() {
           className="shell"
           data-rail-collapsed={state.railCollapsed}
           data-left-collapsed={state.railCollapsed}
-          data-right-collapsed={state.rightRailCollapsed}
+          data-right-collapsed={!canShowRightRail || state.rightRailCollapsed}
         >
           <SessionRail />
           <div className="main-container">
@@ -159,15 +169,25 @@ function Layout() {
                   }
                 : {})}
             >
-              {state.page === "conversation" ? (
-                <ConversationPage />
-              ) : state.page === "plugins" ? (
+              {(state.page === "conversation" ||
+                state.page === "plugins" ||
+                state.page === "plugin") && (
+                <div
+                  className="retained-conversation-page"
+                  data-inactive={state.page !== "conversation"}
+                  inert={state.page !== "conversation"}
+                  aria-hidden={state.page !== "conversation"}
+                >
+                  <ConversationPage active={state.page === "conversation"} />
+                </div>
+              )}
+              {state.page === "plugins" ? (
                 <PluginsPage />
               ) : state.page === "plugin" ? (
                 <ExpandedPluginPage />
-              ) : (
+              ) : state.page !== "conversation" ? (
                 <HomePage />
-              )}
+              ) : null}
             </main>
           </div>
           <RightRail />

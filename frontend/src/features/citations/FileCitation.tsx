@@ -5,7 +5,6 @@ import { Icon } from "../shared";
 import { t } from "../../i18n";
 import type { CitationScope } from "./context";
 import { classifyCitation } from "./parser";
-import "./citations.css";
 
 function FileCitation({
   scope,

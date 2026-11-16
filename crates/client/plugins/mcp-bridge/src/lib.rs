@@ -29,11 +29,13 @@ fn reply(
     }
     json!({"schema_version":1,"tool_completion":c})
 }
+#[cfg(target_arch = "wasm32")]
 const VERSIONS: [&str; 3] = ["2025-11-25", "2025-06-18", "2025-03-26"];
 #[derive(Clone, Debug)]
 enum Stage {
     Resources,
     Initialize,
+    #[cfg(target_arch = "wasm32")]
     Notify,
     List,
     Call,
@@ -90,6 +92,7 @@ impl Operation {
         }
         reply(&self.identity, "completed", output, None, false)
     }
+    #[cfg(target_arch = "wasm32")]
     fn rpc_body(&mut self, sequence: u64, method: &str, params: Value) -> Value {
         self.rpc_id = format!(
             "{}:{sequence}",

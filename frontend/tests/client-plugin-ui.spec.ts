@@ -2,6 +2,7 @@ import { stateInspection } from "./state-inspection-fixture";
 import { expect, test, type Page } from "@playwright/test";
 import { nativeBackend } from "./native-fixture";
 import { connectHostUI } from "./host-fixture";
+import { maintainedPluginBundle } from "./plugin-bundle-fixture";
 
 test("real Component transforms actual Send once, observes unknown admission and retains rejected drafts", async ({
   page,
@@ -32,18 +33,20 @@ ${source}`,
   await page.goto("/#/session/s1/plugins");
   const manager = page.getByTestId("client-plugins-manager");
   await expect(
-    manager.locator('[data-plugin-id="microcrab.fixture"]'),
+    manager.locator('article[data-plugin-id="microcrab.fixture"]'),
   ).toBeVisible();
+  await manager.locator('[data-plugin-nav-id="microcrab.mcp-bridge"]').click();
   await manager
-    .locator('[data-plugin-id="microcrab.mcp-bridge"]')
+    .locator('article[data-plugin-id="microcrab.mcp-bridge"]')
     .getByLabel("在当前会话启用")
     .uncheck();
+  await manager.locator('[data-plugin-nav-id="microcrab.fixture"]').click();
   await manager
-    .locator('[data-plugin-id="microcrab.fixture"]')
+    .locator('article[data-plugin-id="microcrab.fixture"]')
     .getByLabel("在当前会话启用")
     .check();
   await expect(
-    manager.locator('[data-plugin-id="microcrab.fixture"]'),
+    manager.locator('article[data-plugin-id="microcrab.fixture"]'),
   ).toHaveAttribute("data-status", "ready");
   await page.evaluate(async () => {
     const store = (window as any).pluginSendStore;
@@ -159,20 +162,11 @@ ${source}`,
 });
 
 async function realAssets(page: Page) {
-  const response = await page.request.get("/plugins/current.json");
-  expect(
-    response.ok(),
-    "Build actual Rust client components before this suite",
-  ).toBeTruthy();
-  const index = await response.json();
+  const index = await maintainedPluginBundle(page);
   expect(index.version).toBe(1);
   expect(index.plugins.map((entry: { id: string }) => entry.id)).toEqual(
     expect.arrayContaining(["microcrab.state-viewer", "microcrab.fixture"]),
   );
-  for (const plugin of index.plugins)
-    expect(
-      (await page.request.get(`/plugins/${plugin.file}`)).ok(),
-    ).toBeTruthy();
   return index;
 }
 
@@ -206,9 +200,11 @@ test("real Viewer renders pure values, reveals invisible values locally and pres
   await realAssets(page);
   await page.goto("/#/session/s1/plugins");
   const manager = page.getByTestId("client-plugins-manager");
+  await manager.locator('[data-plugin-nav-id="microcrab.state-viewer"]').click();
   await expect(
-    manager.locator('[data-plugin-id="microcrab.state-viewer"]'),
+    manager.locator('article[data-plugin-id="microcrab.state-viewer"]'),
   ).toBeVisible();
+  await manager.getByRole("button", { name: "返回", exact: true }).click();
   const sidebar = page.getByTestId("client-plugin-sidebar");
   const viewerTab = sidebar.getByRole("tab", {
     name: "State Viewer",
@@ -249,8 +245,11 @@ test("real Viewer renders pure values, reveals invisible values locally and pres
   await expect(
     viewer.getByText("original-hidden-value", { exact: false }),
   ).toHaveCount(0);
-  const fixture = manager.locator('[data-plugin-id="microcrab.fixture"]');
+  await page.getByTestId("plugins-manage").click();
+  await manager.locator('[data-plugin-nav-id="microcrab.fixture"]').click();
+  const fixture = manager.locator('article[data-plugin-id="microcrab.fixture"]');
   await fixture.getByLabel("在当前会话启用").check();
+  await manager.getByRole("button", { name: "返回", exact: true }).click();
   await page
     .getByTestId("client-plugin-sidebar")
     .getByRole("tab", { name: "Component fixture", exact: true })
@@ -263,7 +262,7 @@ test("real Viewer renders pure values, reveals invisible values locally and pres
     page.getByTestId("client-plugin-sidebar").getByText("1", { exact: true }),
   ).toBeVisible();
   await page.getByTestId("plugin-expand").click();
-  await expect(page).toHaveURL(/session\/s1\/plugins$/);
+  await expect(page).toHaveURL(/session\/s1$/);
   await expect(page.getByTestId("plugin-workspace-dialog")).toBeVisible();
   await expect(
     page.getByTestId("expanded-plugin-page").getByText("1", { exact: true }),
@@ -272,11 +271,15 @@ test("real Viewer renders pure values, reveals invisible values locally and pres
     .getByTestId("content-dialog")
     .getByRole("button", { name: "关闭", exact: true })
     .click();
+  await expect(page.getByTestId("plugin-workspace-dialog")).toHaveCount(0);
+  await page.getByTestId("plugins-manage").click();
+  await manager.locator('[data-plugin-nav-id="microcrab.fixture"]').click();
   await expect(manager).toBeVisible();
   await page.reload();
+  await manager.locator('[data-plugin-nav-id="microcrab.fixture"]').click();
   await expect(
     manager
-      .locator('[data-plugin-id="microcrab.fixture"]')
+      .locator('article[data-plugin-id="microcrab.fixture"]')
       .getByLabel("在当前会话启用"),
   ).toBeChecked();
 });
@@ -375,7 +378,7 @@ test("real Component preprocessing caches exact operations and fences Session ch
       mcpTargets,
     };
   });
-  expect(result.mcpTargets).toEqual(["sidebar"]);
+  expect(result.mcpTargets).toEqual(["sidebar", "setting-page"]);
   expect(result.first).toEqual(result.cached);
   expect(result.first.parts).toEqual([
     { type: "text", text: "checked: first\nsecond" },
@@ -393,7 +396,7 @@ test("real Component preprocessing caches exact operations and fences Session ch
         version: "0.1.17",
         artifact: mcpArtifact,
         description:
-          "Multi-server MCP tools. List servers, describe exact tools, then call with schema/configuration pins.",
+          "Multi-server MCP tools. List servers and tools; describe(server) lists tools, describe(server, tool) returns schema and call_pin. Call with only pin and arguments. Expired references require describe again; never retry uncertain effects.",
       },
     ],
     visibility: "visible",

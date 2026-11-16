@@ -10,7 +10,7 @@ const malicious = readFileSync(
   "utf8",
 );
 
-async function mount(page: Page, html = inline) {
+async function mount(page: Page, html = inline, theme = "light") {
   let failMount: (error: Error) => void = () => {};
   const browserFailure = new Promise<never>((_, reject) => {
     failMount = reject;
@@ -46,6 +46,7 @@ window.MessageChannel = class extends NativeChannel {
 };
 const {PluginRenderer} = await import('/src/plugins/renderer.tsx');
 await import('/src/styles/tokens.css');
+document.documentElement.dataset.theme = ${JSON.stringify(theme)};
 window.actions = [];
 window.changes = [];
 window.presentation = {
@@ -98,6 +99,71 @@ async function actions(page: Page) {
   return page.evaluate(() => (window as any).actions);
 }
 
+test("host theme reaches first paint and live updates preserve the document, draft, focus and scroll", async ({
+  page,
+}) => {
+  await page.emulateMedia({ colorScheme: "dark" });
+  await mount(
+    page,
+    `<style>body { margin:0; background:var(--microcrab-bg); color:var(--microcrab-text); } #spacer {height:2000px}</style>
+    <input id="draft"><span id="first"></span><span id="theme"></span><div id="spacer"></div>
+    <script>
+      window.boots = (window.boots || 0) + 1;
+      document.getElementById('first').textContent = document.documentElement.dataset.theme;
+      microcrab.onThemeChange(scheme => document.getElementById('theme').textContent = scheme);
+    </script>`,
+    "light",
+  );
+  const guest = page.frameLocator('[data-testid="plugin-webview"]');
+  await expect(guest.locator("#first")).toHaveText("light");
+  await expect(guest.locator("body")).toHaveCSS(
+    "background-color",
+    "rgb(255, 255, 255)",
+  );
+  await guest.locator("#draft").fill("unsaved draft");
+  await guest.locator("body").evaluate(() => window.scrollTo(0, 200));
+  const srcdoc = await page
+    .getByTestId("plugin-webview")
+    .getAttribute("srcdoc");
+  for (const scheme of ["dark", "light"]) {
+    await page.evaluate(async (scheme) => {
+      const path = "/src/client/theme.ts";
+      const { applyTheme } = await import(path);
+      applyTheme(scheme);
+    }, scheme);
+    await expect(guest.locator("html")).toHaveAttribute("data-theme", scheme);
+    await expect(guest.locator("#theme")).toHaveText(scheme);
+    await expect(guest.locator("body")).toHaveCSS(
+      "background-color",
+      scheme === "dark" ? "rgb(31, 31, 31)" : "rgb(255, 255, 255)",
+    );
+    await expect(guest.locator("#draft")).toHaveValue("unsaved draft");
+    expect(
+      await guest.locator("body").evaluate(() => ({
+        boots: (window as any).boots,
+        focused: document.activeElement?.id,
+        scroll: window.scrollY,
+        scheme: getComputedStyle(document.documentElement).colorScheme,
+      })),
+    ).toEqual({ boots: 1, focused: "draft", scroll: 200, scheme });
+    expect(
+      await page.getByTestId("plugin-webview").getAttribute("srcdoc"),
+    ).toBe(srcdoc);
+  }
+  await page.evaluate(async () => {
+    const path = "/src/client/theme.ts";
+    const { applyTheme, watchSystemTheme } = await import(path);
+    applyTheme("system");
+    (window as any).stopThemeWatch = watchSystemTheme(() =>
+      applyTheme("system"),
+    );
+  });
+  await expect(guest.locator("html")).toHaveAttribute("data-theme", "dark");
+  await page.emulateMedia({ colorScheme: "light" });
+  await expect(guest.locator("html")).toHaveAttribute("data-theme", "light");
+  await page.evaluate(() => (window as any).stopThemeWatch());
+});
+
 test("all four targets render scripts, inline CSS/static SVG and only explicit projection without restarting on Vars", async ({
   page,
 }) => {
@@ -105,8 +171,8 @@ test("all four targets render scripts, inline CSS/static SVG and only explicit p
   const frame = page.frameLocator('[data-testid="plugin-webview"]');
   await expect(frame.locator("#projection")).toHaveText('{"count":1}');
   expect(
-    await page.evaluate(() => (window as any).bridgeEvents.slice(0, 2)),
-  ).toEqual(["in:ack", "out:view-state"]);
+    await page.evaluate(() => (window as any).bridgeEvents.slice(0, 3)),
+  ).toEqual(["in:ack", "out:theme", "out:view-state"]);
   await expect(frame.locator("#static-svg")).toBeVisible();
   expect(
     await frame

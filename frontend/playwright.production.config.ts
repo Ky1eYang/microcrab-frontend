@@ -12,6 +12,8 @@ export default defineConfig({
     "settings-redesign.spec.ts",
     "v0116-settings-policy-browser.spec.ts",
     "client-plugin-production-html.spec.ts",
+    "client-plugin-packaged-theme.spec.ts",
+    "client-plugin-packaged-mcp.spec.ts",
     "client-plugin-workspace.spec.ts",
     "client-plugin-restoration-ui.spec.ts",
     "state-omitted-browser.spec.ts",

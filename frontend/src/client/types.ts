@@ -992,6 +992,8 @@ export interface PendingQuestion extends QuestionIdentity {
   paused: boolean;
   observer: boolean;
   awaitingConfirmation: boolean;
+  /** Cleanup request revokes preview resources before the terminal receipt. */
+  imageRevoked?: boolean;
   disabled: boolean;
 }
 export interface Transcript {
@@ -1096,8 +1098,7 @@ export interface AppState {
   page: string;
   pluginId?: string | null;
   pluginReturnPath?: string | null;
-  pluginWorkspace?:
-    { type: "manager" } | { type: "view"; pluginId: string } | null;
+  pluginWorkspace?: { type: "view"; pluginId: string } | null;
   sessionId: string | null;
   sessionAttachingId?: string | null;
   sessions: SessionView[];

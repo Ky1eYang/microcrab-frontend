@@ -13,6 +13,7 @@ playwright/.cache/
 /frontend/public/plugins/*.wasm
 /frontend/public/plugins/**/plugin.wasm
 /frontend/public/plugins/current.json
+/frontend/public/plugins/.microcrab-install.lock
 /frontend/public/plugins/**/.*.xtask-*.tmp
 /frontend/public/browser-host/
 

@@ -1663,7 +1663,7 @@ function ConversationList({
     </div>
   );
 }
-export const ConversationPage = memo(function ConversationPage() {
+export const ConversationPage = memo(function ConversationPage({ active = true }: { active?: boolean }) {
   const plugins = useClientPlugins();
   const selected = useAppSelector((state) =>
     JSON.stringify({
@@ -1720,7 +1720,7 @@ export const ConversationPage = memo(function ConversationPage() {
       </div>
       {!chat && !activePlugin && (
         <div style={{ display: childOpen ? "none" : "contents" }}>
-          <TrajectoryView active={!childOpen} />
+          <TrajectoryView active={active && !childOpen} />
         </div>
       )}
       {activePlugin && !childOpen && (
@@ -1732,6 +1732,7 @@ export const ConversationPage = memo(function ConversationPage() {
             key={`${state.sessionId}:${activePlugin}`}
             pluginId={activePlugin}
             target="session-tab"
+            visible={active}
           />
         </section>
       )}

@@ -45,12 +45,14 @@ function SessionRow({
     "isCreatingSession",
     "menuSession",
     "modelSelectionPending",
+    "page",
     "resolvedLocale",
     "sessionAttachingId",
     "sessionId",
     "transcript",
   ]);
-  const active = state.sessionId === session.id;
+  const active =
+    state.page === "conversation" && state.sessionId === session.id;
   const loading = state.sessionAttachingId === session.id;
   const busy = active
     ? state.transcript.sessionStatus === "busy"
@@ -327,6 +329,16 @@ export function SessionRail() {
         </button>
         <button
           className="rail-icon-btn"
+          data-testid="rail-plugins-btn"
+          data-active={state.page === "plugins" || state.page === "plugin"}
+          title={t("rail.plugins")}
+          aria-label={t("rail.plugins")}
+          onClick={() => emit("OpenPluginsPage")}
+        >
+          <Icon name="plugin" size={18} />
+        </button>
+        <button
+          className="rail-icon-btn"
           title={t("rail.search")}
           aria-label={t("rail.search")}
           onClick={() => emit("OpenSearch")}
@@ -407,6 +419,16 @@ export function SessionRail() {
         >
           <Icon name="dashboard" size={15} />
           <span>{t("rail.dashboard")}</span>
+        </button>
+        <button
+          className="subnav-item-btn"
+          data-testid="rail-plugins-btn"
+          data-active={state.page === "plugins" || state.page === "plugin"}
+          title={t("rail.plugins")}
+          onClick={() => emit("OpenPluginsPage")}
+        >
+          <Icon name="plugin" size={15} />
+          <span>{t("rail.plugins")}</span>
         </button>
         <button
           className="subnav-item-btn"

@@ -1,7 +1,14 @@
 import type { FeatureBlock as Block } from "../features/shared";
 import { useAppSelector } from "../state";
 import { useConversationBlocks } from "../features/conversation/registry-context";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { Icon } from "../shell/Icon";
 import { useAppFields, useClientPlugins } from "../state";
 import { t } from "../i18n";
@@ -27,7 +34,7 @@ export function PluginSurface({
   target,
   surface,
   slot,
-  visible = true,
+  visible: requestedVisible = true,
 }: {
   pluginId: string;
   target: ViewTarget;
@@ -44,16 +51,42 @@ export function PluginSurface({
     "sessionId",
     "resolvedLocale",
     "authSession",
+    "page",
+    "pluginWorkspace",
   ]);
+  const settingsMount =
+    target === "setting-page" ||
+    surface?.surface_id.startsWith("setting-page:");
+  const visible =
+    requestedVisible &&
+    (settingsMount
+      ? state.page === "plugins" && !state.pluginWorkspace
+      : target === "expanded-page"
+        ? state.page === "plugin" ||
+          state.pluginWorkspace?.pluginId === pluginId
+        : state.page === "conversation");
   const ownerId = state.authSession?.principal?.owner ?? "";
   const history = plugins.historyRevision;
-  const descriptor = useMemo(
-    () =>
-      surface ?? {
-        surface_id: `default:${target}`,
-        target,
-      },
-    [surface, state.sessionId, history, pluginId, target],
+  const mountId = useId();
+  const descriptor = useMemo<PluginSurfaceDescriptor>(
+    () => ({
+      surface_id: `${surface?.surface_id ?? `default:${target}`}:mount:${mountId}`,
+      target,
+      ...(surface?.block_id ? { block_id: surface.block_id } : {}),
+      ...(surface?.slot_id ? { slot_id: surface.slot_id } : {}),
+      ...(surface?.placement ? { placement: surface.placement } : {}),
+    }),
+    [
+      surface?.surface_id,
+      surface?.block_id,
+      surface?.slot_id,
+      surface?.placement,
+      state.sessionId,
+      history,
+      pluginId,
+      target,
+      mountId,
+    ],
   );
   const ticket = useMemo(
     () => ({}),
@@ -110,6 +143,12 @@ export function PluginSurface({
     inlineSlot,
     ticket,
   ]);
+  useEffect(
+    () => () => {
+      registry?.releaseSurface(pluginId, descriptor);
+    },
+    [registry, pluginId, descriptor],
+  );
   if (entry && !declared) return null;
   if (!registry) return <p role="status">{t("plugins.unavailable")}</p>;
   const manage = (
@@ -167,10 +206,19 @@ export function PluginSurface({
     const childOpen =
       snapshot.popup.type === "subagentDetail" &&
       snapshot.popup.parentId === snapshot.sessionId;
+    if (
+      target === "setting-page" ||
+      descriptor.surface_id.startsWith("setting-page:")
+    )
+      return snapshot.page === "plugins" && !snapshot.pluginWorkspace;
     if (target === "sidebar")
-      return isPluginDrawerViewport()
-        ? snapshot.rightOverlayOpen
-        : !snapshot.rightRailCollapsed;
+      return (
+        snapshot.page === "conversation" &&
+        Boolean(snapshot.sessionId) &&
+        (isPluginDrawerViewport()
+          ? snapshot.rightOverlayOpen
+          : !snapshot.rightRailCollapsed)
+      );
     if (target === "expanded-page")
       return (
         (snapshot.page === "plugin" && snapshot.pluginId === pluginId) ||
@@ -186,6 +234,8 @@ export function PluginSurface({
       tabs,
     );
     return (
+      snapshot.page === "conversation" &&
+      !snapshot.pluginWorkspace &&
       !childOpen &&
       (target === "session-tab"
         ? selected === pluginId

@@ -118,7 +118,7 @@ fn conditional(path: &str, child: Value) -> Value {
 }
 pub(super) fn tree(target: &str, surface_key: &str) -> Value {
     // Keep this pure projection defensive as well as the render entry point.
-    if !matches!(target, "sidebar" | "expanded-page") {
+    if !matches!(target, "sidebar" | "expanded-page" | "setting-page") {
         return Value::Null;
     }
     let search = json!({"type":"input","props":{"value":bound("search"),"placeholder":bound("labels.search"),"input_type":"search","change_action":"search","clear_action":"clear-search","clear_label":bound("labels.clear_search")}});
@@ -130,7 +130,7 @@ pub(super) fn tree(target: &str, surface_key: &str) -> Value {
         "sidebar" => vec![search, json!({"type":"row","children":[eye,refresh]})],
         // Expand/direct URL retain full inspection with concise guidance and a
         // single horizontal toolbar in the larger presentation.
-        "expanded-page" => vec![
+        "expanded-page" | "setting-page" => vec![
             text("labels.description"),
             json!({"type":"row","children":[search,eye,refresh]}),
         ],

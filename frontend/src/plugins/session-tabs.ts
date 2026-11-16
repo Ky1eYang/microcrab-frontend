@@ -23,3 +23,22 @@ export function selectedSessionPlugin(
     ? selection.pluginId
     : null;
 }
+
+/**
+ * Right plugin sidebar is only available when on an active conversation page
+ * and at least one sidebar-targeted plugin is enabled and started in the session.
+ */
+export function hasActiveSessionSidebarPlugin(
+  entries: readonly InstalledPlugin[],
+  enabled: (id: string) => boolean,
+  page: string,
+  sessionId: string | null | undefined,
+): boolean {
+  if (page !== "conversation" || !sessionId) return false;
+  return entries.some(
+    (entry) =>
+      entry.manifest.targets.includes("sidebar") &&
+      enabled(entry.manifest.id) &&
+      entry.status !== "disabled",
+  );
+}

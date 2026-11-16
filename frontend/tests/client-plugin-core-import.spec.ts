@@ -7,7 +7,7 @@ test.setTimeout(90_000);
 // Reuse the existing parent-built Rust artifact. This suite never builds Rust or
 // substitutes a fabricated Component, guest manifest, or Worker response.
 const corePath = new URL(
-  "../../target/wasm32-unknown-unknown/release/microcrab_client_plugin_state_viewer.wasm",
+  "../../../target/root-build/frontend/wasm32-unknown-unknown/release/microcrab_client_plugin_state_viewer.wasm",
   import.meta.url,
 );
 
@@ -130,9 +130,9 @@ test("real Rust core import persists normalized Component and reloads without wr
   expect(installed.sourceKind).toBe("core");
   expect(installed.header).toEqual([0, 97, 115, 109, 13, 0, 1, 0]);
   expect(installed.imports).toEqual([
-    "microcrab:client-plugin/session-state@0.2.0",
-    "microcrab:client-plugin/session-state-write@0.2.0",
-    "microcrab:client-plugin/view-types@0.2.0",
+    "microcrab:client-plugin/session-state@0.4.0",
+    "microcrab:client-plugin/session-state-write@0.4.0",
+    "microcrab:client-plugin/view-types@0.4.0",
   ]);
   expect(installed.persistedMatches).toBe(true);
   expect(installed.rendered).toBe(true);

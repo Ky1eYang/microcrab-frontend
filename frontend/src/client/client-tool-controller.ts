@@ -63,6 +63,7 @@ export class ClientToolController {
   sessionId: string | null = null;
   private seen = new Set<string>();
   private settling = new Set<string>();
+  private imageRevoked = new Set<string>();
   private preparations = new Set<string>();
   private active = new Map<string, AbortController>();
   private generation = 0;
@@ -94,6 +95,7 @@ export class ClientToolController {
     this.sessionId = null;
     this.seen.clear();
     this.settling.clear();
+    this.imageRevoked.clear();
     this.preparations.clear();
     this.buffered = null;
     this.changed();
@@ -188,6 +190,7 @@ export class ClientToolController {
             paused: call.status === "paused",
             observer: this.binding?.role !== "executor",
             awaitingConfirmation: this.settling.has(call.invocation_id),
+            imageRevoked: this.imageRevoked.has(call.invocation_id),
             disabled:
               this.binding?.role !== "executor" ||
               this.settling.has(call.invocation_id),
@@ -219,6 +222,8 @@ export class ClientToolController {
     if (kind === "client_tool.cancel_requested") {
       // Request local cleanup; only the server's settled record confirms the outcome.
       this.active.get(call.invocation_id)?.abort();
+      this.imageRevoked.add(call.invocation_id);
+      this.changed();
       return;
     }
     const prior = this.binding.calls.find(

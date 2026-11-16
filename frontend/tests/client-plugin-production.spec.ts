@@ -1,11 +1,35 @@
+import { maintainedPluginBundle } from "./plugin-bundle-fixture";
 import { stateInspection } from "./state-inspection-fixture";
 import { test, expect } from "@playwright/test";
 import { nativeBackend } from "./native-fixture";
+
+test("emitted MCP settings configure and revoke an exact disabled service", async ({ page }) => {
+  await nativeBackend(page);
+  await maintainedPluginBundle(page);
+  let externalCalls = 0;
+  await page.route("https://production-mcp.example.test/**", route => { externalCalls++; return route.abort(); });
+  await page.goto("/#/session/s1/plugins");
+  const manager = page.getByTestId("client-plugins-manager");
+  await manager.locator('[data-plugin-nav-id="microcrab.mcp-bridge"]').click();
+  const surface = manager.getByTestId("plugin-setting-surface");
+  await expect(surface.getByText("MCP 服务器", { exact: true })).toBeVisible();
+  await surface.getByLabel("服务器 ID", { exact: true }).fill("production-fixture");
+  await surface.getByLabel("HTTP(S) 地址", { exact: true }).fill("https://production-mcp.example.test/mcp");
+  await surface.getByLabel("授权", { exact: true }).selectOption("false");
+  await surface.getByRole("button", { name: "添加或更新服务器", exact: true }).click();
+  await expect(surface.getByRole("button", { name: "移除并撤销授权", exact: true })).toBeVisible();
+  await expect(surface.getByText("production-fixture", { exact: true })).toBeVisible();
+  expect(externalCalls).toBe(0);
+  await surface.getByRole("button", { name: "移除并撤销授权", exact: true }).click();
+  await expect(surface.getByRole("button", { name: "移除并撤销授权", exact: true })).toHaveCount(0);
+  expect(externalCalls).toBe(0);
+});
 
 test("emitted State Viewer Worker renders full-page UI across themes and mobile widths", async ({
   page,
 }) => {
   await nativeBackend(page);
+  await maintainedPluginBundle(page);
   await page.route("**/api/v1/sessions/s1/state/inspection", (route) =>
     route.fulfill({
       json: stateInspection(

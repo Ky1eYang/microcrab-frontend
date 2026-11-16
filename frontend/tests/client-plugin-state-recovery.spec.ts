@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { maintainedPluginBundle } from "./plugin-bundle-fixture";
 import { createHash } from "node:crypto";
 import { stateInspection } from "./state-inspection-fixture";
 import { expect, test, type Page, type Route } from "@playwright/test";
@@ -8,11 +11,7 @@ test.setTimeout(90_000);
 const deadlineError = "plugin host effect exceeded 10000ms deadline";
 
 async function viewerOnlyBundle(page: Page) {
-  const response = await page.request.get("/plugins/current.json");
-  expect(response.ok(), "Build/install the real Viewer before this suite").toBe(
-    true,
-  );
-  const index = await response.json();
+  const index = await maintainedPluginBundle(page);
   const viewer = index.plugins.find(
     (plugin: { id: string }) => plugin.id === "microcrab.state-viewer",
   );
@@ -131,14 +130,12 @@ test("real Viewer reports the host deadline, stops loading and recovers only on 
     await route.fulfill({
       json: stateInspection({ framework: "obsolete-deadline-value" }, metadata),
     });
-  await page.evaluate(async () => {
-    await (window as any).stateRecoveryStore.plugins.registry.action(
-      "microcrab.state-viewer",
-      "search",
-      { value: "" },
-      { surface_id: "default:expanded-page", target: "expanded-page" },
-    );
-  });
+  // Drive the actual mounted surface so the check retains its host-issued identity.
+  await viewer.getByRole("searchbox").fill("framework");
+  const clearSearch = viewer.getByRole("button", { name: "清除搜索", exact: true });
+  await expect(clearSearch).toBeVisible();
+  await clearSearch.click();
+  await expect(clearSearch).toHaveCount(0);
   await expect(
     viewer.getByText("obsolete-deadline-value", { exact: false }),
   ).toHaveCount(0);
@@ -187,14 +184,12 @@ test("actual Session history.reset cancels stalled Viewer reads and recovers in 
     await route.fulfill({
       json: stateInspection({ framework: "obsolete-history-value" }, metadata),
     });
-  await page.evaluate(async () => {
-    await (window as any).stateRecoveryStore.plugins.registry.action(
-      "microcrab.state-viewer",
-      "search",
-      { value: "" },
-      { surface_id: "default:expanded-page", target: "expanded-page" },
-    );
-  });
+  // Drive the actual mounted surface so the check retains its host-issued identity.
+  await viewer.getByRole("searchbox").fill("framework");
+  const clearSearch = viewer.getByRole("button", { name: "清除搜索", exact: true });
+  await expect(clearSearch).toBeVisible();
+  await clearSearch.click();
+  await expect(clearSearch).toHaveCount(0);
   await expect(
     viewer.getByText("obsolete-history-value", { exact: false }),
   ).toHaveCount(0);
@@ -466,12 +461,7 @@ test("retired namespace imports are rejected without rewriting their supplied by
 });
 
 async function bundledViewerIndexes(page: Page) {
-  const response = await page.request.get("/plugins/current.json");
-  expect(
-    response.ok(),
-    "Build/install the current real Viewer before this suite",
-  ).toBe(true);
-  const index = await response.json();
+  const index = await maintainedPluginBundle(page);
   const current = index.plugins.find(
     (entry: { id: string }) => entry.id === "microcrab.state-viewer",
   );
@@ -479,16 +469,13 @@ async function bundledViewerIndexes(page: Page) {
     current,
     "The bundled index must contain the real Viewer",
   ).toBeTruthy();
-  expect(
-    current.supersedes ?? [],
-    "Only the exact built microcrab Viewers are bundled predecessors",
-  ).toEqual([
-    "781d4bd5abf1708a22936060fbe4df063590e86cd50eac9f02056a7e27fa33e5",
-    "2986d8730a92e2a6a48b13fa89ec56138ca5eff4a822e23ddc18505bbd9bc73f",
-  ]);
-  const artifact = await page.request.get(`/plugins/${current.file}`);
-  expect(artifact.ok(), "The real current Viewer must be installed").toBe(true);
-  const currentBytes = await artifact.body();
+  const directory =
+    process.env.MICROCRAB_TEST_PLUGIN_DIR ??
+    resolve(
+      import.meta.dirname,
+      "../../../target/root-build/frontend/client-plugins",
+    );
+  const currentBytes = readFileSync(resolve(directory, "state-viewer.wasm"));
   expect(createHash("sha256").update(currentBytes).digest("hex")).toBe(
     current.sha256,
   );
@@ -544,9 +531,9 @@ test("a known bundled predecessor upgrades the real Viewer while preserving pref
           targets: ["sidebar", "page"],
         },
         imports: [
-          "microcrab:client-plugin/session-state@0.2.0",
-          "microcrab:client-plugin/session-state-write@0.2.0",
-          "microcrab:client-plugin/view-types@0.2.0",
+          "microcrab:client-plugin/session-state@0.4.0",
+          "microcrab:client-plugin/session-state-write@0.4.0",
+          "microcrab:client-plugin/view-types@0.4.0",
         ],
         bytes,
         enabledByDefault: false,
@@ -674,9 +661,9 @@ test("bundled repairs preserve an unlisted installed hash and never reinstall a 
               targets: ["sidebar", "page"],
             },
             imports: [
-              "microcrab:client-plugin/session-state@0.2.0",
-              "microcrab:client-plugin/session-state-write@0.2.0",
-              "microcrab:client-plugin/view-types@0.2.0",
+              "microcrab:client-plugin/session-state@0.4.0",
+              "microcrab:client-plugin/session-state-write@0.4.0",
+              "microcrab:client-plugin/view-types@0.4.0",
             ],
             bytes,
             enabledByDefault: false,

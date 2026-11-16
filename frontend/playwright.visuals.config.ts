@@ -8,6 +8,10 @@ export default defineConfig({
     "rich-visuals.spec.ts",
     "chart-interactions.spec.ts",
     "content-inspection.spec.ts",
+    "svg-policy.spec.ts",
+    "markdown-svg-integration.spec.ts",
+    "extended-typography.spec.ts",
+    "question-markdown-svg.spec.ts",
   ],
   use: { ...base.use, baseURL: `http://127.0.0.1:${port}` },
   webServer: {

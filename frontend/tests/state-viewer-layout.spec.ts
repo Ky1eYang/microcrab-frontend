@@ -1,3 +1,4 @@
+import { maintainedPluginBundle } from "./plugin-bundle-fixture";
 import { stateInspection } from "./state-inspection-fixture";
 import { expect, test } from "@playwright/test";
 import { nativeBackend } from "./native-fixture";
@@ -8,6 +9,7 @@ for (const width of [1015, 1100, 900, 390]) {
   }) => {
     await page.setViewportSize({ width, height: 900 });
     await nativeBackend(page);
+  await maintainedPluginBundle(page);
     await page.route("**/api/v1/sessions/s1/state/inspection", (route) =>
       route.fulfill({
         json: stateInspection(
@@ -73,10 +75,12 @@ for (const width of [1015, 1100, 900, 390]) {
   });
 }
 
-test("expanded Viewer fetches full framework State with the sidebar closed and hides initial empty payload", async ({
+for (const entry of ["sidebar", "direct"] as const) {
+test(`expanded Viewer via ${entry} fetches full framework State and hides initial empty payload`, async ({
   page,
 }) => {
   await nativeBackend(page);
+  await maintainedPluginBundle(page);
   let release!: () => void;
   const gate = new Promise<void>((resolve) => {
     release = resolve;
@@ -98,12 +102,16 @@ test("expanded Viewer fetches full framework State with the sidebar closed and h
     });
   });
 
-  await page.goto("/#/session/s1/plugins");
-  const manager = page.getByTestId("client-plugins-manager");
-  const entry = manager.locator('[data-plugin-id="microcrab.state-viewer"]');
-  await expect(entry).toHaveAttribute("data-status", "ready");
-  await expect(page.getByTestId("client-plugin-sidebar")).toHaveCount(0);
-  await entry.getByRole("button", { name: "展开", exact: true }).click();
+  if (entry === "sidebar") {
+    await page.goto("/#/session/s1");
+    await page.locator(".header-right-toggle-btn").click();
+    const sidebar = page.getByTestId("client-plugin-sidebar");
+    await sidebar.getByRole("tab", { name: "State Viewer", exact: true }).click();
+    await sidebar.getByTestId("plugin-expand").click();
+  } else {
+    await page.goto("/#/session/s1/plugins/microcrab.state-viewer");
+    await expect(page.getByTestId("client-plugin-sidebar")).toHaveCount(0);
+  }
   const expanded = page.getByTestId("expanded-plugin-page");
   await expect.poll(() => reads).toBeGreaterThan(0);
   await expect(
@@ -132,7 +140,8 @@ test("expanded Viewer fetches full framework State with the sidebar closed and h
     expanded.getByText("framework-state-fixture", { exact: false }),
   ).toBeVisible();
   await page.screenshot({
-    path: "test-results/visual/state-viewer-governed-full-state-expanded.png",
+    path: `test-results/visual/state-viewer-governed-full-state-expanded-${entry}.png`,
     fullPage: true,
   });
 });
+}

@@ -1,6 +1,6 @@
 use super::*;
 use std::{cell::RefCell, collections::BTreeMap};
-wit_bindgen::generate!({ path: "../wit-v3", world: "tool-plugin" });
+wit_bindgen::generate!({ path: "../wit", world: "tool-plugin" });
 use microcrab::client_plugin::{net, resources, view_types::RenderMode};
 thread_local! {
     static CURSORS: RefCell<discovery::Cursors> = RefCell::new(discovery::Cursors::default());
@@ -251,13 +251,13 @@ fn advance(mut op: Operation, event: &Value) -> Value {
 struct Component;
 impl Guest for Component {
     fn manifest() -> PluginManifest {
-        PluginManifest { id: "microcrab.mcp-bridge".into(), name: "MCP bridge".into(), version: env!("CARGO_PKG_VERSION").into(), description: Some("Multi-server MCP tools. List servers and tools; describe(server) lists tools, describe(server, tool) returns schema and call_pin. Call with only pin and arguments. Expired references require describe again; never retry uncertain effects.".into()), targets: vec![ViewTarget::Sidebar], network_origins: None }
+        PluginManifest { id: "microcrab.mcp-bridge".into(), name: "MCP bridge".into(), version: env!("CARGO_PKG_VERSION").into(), description: Some("Multi-server MCP tools. List servers and tools; describe(server) lists tools, describe(server, tool) returns schema and call_pin. Call with only pin and arguments. Expired references require describe again; never retry uncertain effects.".into()), targets: vec![ViewTarget::Sidebar, ViewTarget::SettingPage], network_origins: None }
     }
     fn init(_ctx: String) -> String {
         config_request("resource-list", json!({})).to_string()
     }
     fn render_view(target: ViewTarget, _vars: String, ctx: String) -> ViewOutput {
-        if !matches!(target, ViewTarget::Sidebar) {
+        if !matches!(target, ViewTarget::Sidebar | ViewTarget::SettingPage) {
             return ViewOutput {
                 schema_version: 1,
                 mode: RenderMode::NativeJson,

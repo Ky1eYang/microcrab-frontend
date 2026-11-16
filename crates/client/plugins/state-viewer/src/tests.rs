@@ -191,3 +191,19 @@ fn surface_less_history_reset_read_is_not_replaced_by_mounted_renders() {
     assert_eq!(completed["loading"], false);
     assert_eq!(completed["witness"], inspection("2")["witness"]);
 }
+
+#[test]
+fn setting_page_without_session_is_localized_and_never_imports_state() {
+    for (locale, expected) in [("en", "Session required"), ("zh-CN", "需要会话")] {
+        let mut c = ctx("settings");
+        c["session_id"] = Value::Null;
+        c["locale"] = locale.into();
+        c["surface"]["target"] = "setting-page".into();
+        // Flat host context must win even if an untrusted nested value exists.
+        c["session"] = json!({"id":"not-authority"});
+        let output = render("setting-page", &snapshot(&ctx("old")), &c, no_request);
+        assert_eq!(output["tree"]["type"], "notice");
+        assert!(output["tree"]["props"]["text"].as_str().unwrap().contains(expected));
+        assert!(output.get("vars_patch").is_none());
+    }
+}

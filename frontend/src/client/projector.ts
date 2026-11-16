@@ -1,4 +1,5 @@
 import { placeOperationNotice } from "./operation-notice";
+import { operationFailureRoute } from "./operation-failure";
 import {
   cloneDisplayGraph,
   composeDisplayGraph,
@@ -42,14 +43,6 @@ import type {
   NativePartialOutput,
   NativeDisplayRecord,
 } from "./types";
-
-const SILENT_FAILURE_METHODS = new Set([
-  "session.auto_rename",
-  "turn.queue",
-  "turn.steer",
-  "inbox.update",
-  "inbox.remove",
-]);
 
 /** Only an authoritative retry admission can supersede its exact failed attempt. */
 function retryFailureTarget(
@@ -1044,6 +1037,11 @@ export function applySnapshot(
       block.role === "assistant" &&
       ["error", "cancelled"].includes(block.stream) &&
       !supersededFailures.has(failureOperationId(block) ?? "") &&
+      !snapshot.operations.some(
+        (operation) =>
+          operation.id === failureOperationId(block) &&
+          operationFailureRoute(operation) !== "conversation",
+      ) &&
       (block.sessionId === snapshot.session.id ||
         block.sessionId === "draft") &&
       // Undo removes the selected suffix. Its absent durable witness must not be
@@ -1073,7 +1071,7 @@ export function applySnapshot(
       (op) =>
         ["failed", "cancelled"].includes(op.status) &&
         !supersededFailures.has(op.id) &&
-        !SILENT_FAILURE_METHODS.has(op.method),
+        operationFailureRoute(op) === "conversation",
     )
     .sort((left, right) => left.updated_at_ms - right.updated_at_ms);
   const boundaryTails = new Map<string, Block>();
@@ -1543,7 +1541,7 @@ export function applyEvent(t: Transcript, event: NativeEvent, compose = true) {
   if (
     event.event === "turn" &&
     ["failed", "cancelled"].includes(data.status) &&
-    !SILENT_FAILURE_METHODS.has(data.method)
+    operationFailureRoute(event.data) === "conversation"
   ) {
     for (const preview of t.blocks) {
       if (

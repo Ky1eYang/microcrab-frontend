@@ -1,7 +1,86 @@
+import { maintainedPluginBundle } from "./plugin-bundle-fixture";
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { nativeBackend } from "./native-fixture";
 import { stateInspection } from "./state-inspection-fixture";
 import type { Json } from "../src/plugins/types";
+
+for (const intent of ["selection", "back"] as const) {
+  test(`plugin manager ${intent} guards dirty settings drafts`, async ({
+    page,
+  }) => {
+    const backend = await editorBackend(page);
+    await page.goto("/#/session/s1/plugins");
+    const manager = page.getByTestId("client-plugins-manager");
+    await manager
+      .locator('[data-plugin-nav-id="microcrab.state-viewer"]')
+      .click();
+    const surface = manager.getByTestId("plugin-setting-surface");
+    await expect(action(surface, "edit")).toBeVisible();
+    const values = await begin(surface);
+    values.owned = "manager draft survives guarded intent";
+    await fill(surface, values);
+    await editor(surface).evaluate(element => element.setAttribute("data-stable-editor", "original"));
+    const search = manager.getByRole("searchbox", { name: "搜索插件名称、ID 或描述…", exact: true });
+    await search.fill("does-not-match-selected-plugin");
+    await expect(editor(surface)).toHaveAttribute("data-stable-editor", "original");
+    await expect(manager.locator('[data-plugin-nav-id="microcrab.state-viewer"]')).toBeVisible();
+    await search.fill("");
+    await expect(manager.getByRole("button", { name: "展开", exact: true })).toHaveCount(0);
+    const navigate = () =>
+      intent === "selection"
+        ? manager.locator('[data-plugin-nav-id="microcrab.mcp-bridge"]').click()
+        : manager.getByRole("button", { name: "返回", exact: true }).click();
+    await navigate();
+    await expect(action(surface, "discard")).toBeVisible();
+    await action(surface, "keepEditing").click();
+    await expect(editor(surface)).toBeVisible();
+    await navigate();
+    await action(surface, "discard").click();
+    if (intent === "selection")
+      await expect(
+        manager.locator('article[data-plugin-id="microcrab.mcp-bridge"]'),
+      ).toBeVisible();
+    else await expect(manager).toHaveCount(0);
+    expect(backend.writes).toHaveLength(0);
+  });
+}
+
+test("plugin manager pending settings save vetoes selection and back", async ({
+  page,
+}) => {
+  const backend = await editorBackend(page);
+  await page.goto("/#/session/s1/plugins");
+  const manager = page.getByTestId("client-plugins-manager");
+  await manager
+    .locator('[data-plugin-nav-id="microcrab.state-viewer"]')
+    .click();
+  const surface = manager.getByTestId("plugin-setting-surface");
+  await expect(action(surface, "edit")).toBeVisible();
+  const values = await begin(surface);
+  values.owned = "one pending manager operation";
+  await fill(surface, values);
+  const release = backend.hold();
+  try {
+    await save(surface);
+    await expect.poll(() => backend.writes.length).toBe(1);
+    await manager
+      .locator('[data-plugin-nav-id="microcrab.mcp-bridge"]')
+      .click();
+    await manager.getByRole("button", { name: "返回", exact: true }).click();
+    await expect(manager.getByRole("button", { name: "展开", exact: true })).toHaveCount(0);
+    await expect(editor(surface)).toBeVisible();
+    await expect(
+      manager.locator('article[data-plugin-id="microcrab.state-viewer"]'),
+    ).toBeVisible();
+    await expect(page.getByTestId("plugin-workspace-dialog")).toHaveCount(0);
+    release();
+    await saved(surface);
+    await expect(manager).toBeVisible();
+    expect(backend.writes).toHaveLength(1);
+  } finally {
+    release();
+  }
+});
 
 type ScopedWrite = {
   name: string;
@@ -30,6 +109,7 @@ function deferred() {
 /** Only HTTP fixtures own server facts; the real Component computes every DTO. */
 async function editorBackend(page: Page) {
   await nativeBackend(page);
+  await maintainedPluginBundle(page);
   await page.addInitScript(() => {
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
@@ -220,8 +300,16 @@ async function fillText(surface: Locator, text: string) {
   await surface.page().keyboard.insertText(text);
   await exactDraft(surface, text);
 }
-async function openViewer(page: Page) {
-  await page.goto("/#/session/s1/plugins/microcrab.state-viewer");
+async function openViewer(page: Page, direct = false) {
+  if (direct) {
+    await page.goto("/#/session/s1/plugins/microcrab.state-viewer");
+  } else {
+    await page.goto("/#/session/s1");
+    await page.locator(".header-right-toggle-btn").click();
+    const sidebar = page.getByTestId("client-plugin-sidebar");
+    await sidebar.getByRole("tab", { name: "State Viewer", exact: true }).click();
+    await sidebar.getByTestId("plugin-expand").click();
+  }
   const viewer = page.getByTestId("expanded-plugin-page");
   await expect(action(viewer, "edit")).toBeVisible({ timeout: 20_000 });
   return viewer;
@@ -536,15 +624,7 @@ EditorScopeStore.prototype.start = function () { window.editorScopeStore = this;
 ${await response.text()}`,
     });
   });
-  await page.goto("/#/session/s1/plugins");
-  const entry = page
-    .getByTestId("client-plugins-manager")
-    .locator('[data-plugin-id="microcrab.state-viewer"]');
-  await expect(entry).toHaveAttribute("data-status", "ready", {
-    timeout: 20_000,
-  });
-  await entry.getByRole("button", { name: "展开", exact: true }).click();
-  const viewer = page.getByTestId("expanded-plugin-page");
+  const viewer = await openViewer(page);
   const next = await begin(viewer);
   next.owned = { admitted: true };
   await fill(viewer, next);
@@ -561,7 +641,7 @@ ${await response.text()}`,
     await dialog.getByRole("button", { name: "关闭", exact: true }).click();
     await expect(dialog).toBeVisible();
     await expect(editor(viewer)).toBeVisible();
-    if (baseURL?.includes(":18081")) {
+    if (await page.locator('script[type="module"][src*="/assets/index-"]').count()) {
       release();
       await saved(viewer);
       expect(backend.values.owned).toEqual({ admitted: true });
@@ -641,7 +721,7 @@ test("ordinary direct navigation retains position on continue and discard comple
   page,
 }) => {
   const backend = await editorBackend(page);
-  const viewer = await openViewer(page);
+  const viewer = await openViewer(page, true);
   const next = await begin(viewer);
   next.owned = "navigation draft";
   const text = await fill(viewer, next);

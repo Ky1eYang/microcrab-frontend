@@ -148,7 +148,7 @@ export const CLIENT_TOOL_DEFINITIONS: ClientToolDefinition[] = [
               question: {
                 ...string,
                 description:
-                  "Required question shown to the user. Empty and null values are invalid.",
+                  "Required nonempty Markdown body: GFM, KaTeX, safe inline SVG, svg/mermaid/echarts fenced previews, and safe semantic HTML. Embed SVG here directly; no files, Shell or hosting needed. Scripts and arbitrary HTML are unsupported. Images load on click: absolute http(s) URLs or authorized local PNG/JPEG/GIF/WebP (active Host; 8 MiB; 4096px per dimension). Local image restrictions do not apply to embedded SVG. Options remain plain text.",
               },
               multiple: {
                 type: "boolean",

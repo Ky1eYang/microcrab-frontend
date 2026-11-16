@@ -5,6 +5,7 @@ import { useApp } from "../../state";
 import { t } from "../../i18n";
 import {
   LIMIT_FIELDS,
+  PROMPT_FIELDS,
   validateSettingsOverrides,
   validateProviderConfig,
   type SettingsSnapshot,
@@ -16,6 +17,7 @@ import {
 import { ModelCombobox } from "../ModelCombobox";
 import { SearchableSelect } from "../SearchableSelect";
 import { Payload } from "../Payload";
+import { PromptSettings } from "./PromptSettings";
 
 type Scope =
   | { kind: "user" }
@@ -146,6 +148,8 @@ export function OwnerSettings({ scope = { kind: "user" } }: { scope?: Scope }) {
     const ticket = generation.current;
     try {
       const next = { ...draft };
+      for (const field of PROMPT_FIELDS)
+        if (scope.kind === "session" || next[field] == null) delete next[field];
       if (draft.permissions !== undefined) {
         try {
           next.permissions = JSON.parse(rules);
@@ -409,6 +413,9 @@ export function OwnerSettings({ scope = { kind: "user" } }: { scope?: Scope }) {
                 </div>
               )}
           </section>
+
+          <PromptSettings draft={draft} snapshot={snapshot} busy={busy}
+            frozen={scope.kind === "session"} onChange={change} />
 
           <section className="settings-section-card">
             <div className="settings-section-head">

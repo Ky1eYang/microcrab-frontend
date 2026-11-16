@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { nativeBackend } from "./native-fixture";
+import { maintainedPluginBundle } from "./plugin-bundle-fixture";
 
 test.setTimeout(90_000);
 
@@ -41,8 +42,13 @@ test("a deferred imported completion is not replayed into a newer surface mount"
             { type: "module" },
           ),
           post = worker.postMessage.bind(worker);
+        let loadedId: string | undefined;
+        worker.addEventListener("message", ({ data }) => {
+          if (data.type === "loaded") loadedId = data.manifest.id;
+        });
         worker.postMessage = ((data: any) => {
           if (
+            loadedId === "microcrab.state-viewer" &&
             data.type === "call" &&
             data.method === "onPhase" &&
             data.args[0] === "event-result"
@@ -68,6 +74,9 @@ test("a deferred imported completion is not replayed into a newer surface mount"
     const id = "microcrab.state-viewer",
       surface = { surface_id: "deferred", target: "sidebar" as const };
     try {
+      // Session-wide reads have their own valid lifetime. This case must hold a
+      // mount-owned read so retiring that mount is the event under test.
+      registry.setEnvironment({ target_visible: false });
       await registry.initialize();
       await registry.setSession("deferred");
       await registry.render(id, surface.target, false, surface);
@@ -140,7 +149,7 @@ test("canonical equality-bounded type imports never become host capability grant
     };
     const header = [0, 97, 115, 109, 13, 0, 1, 0];
     const typeInterface = section(
-      "microcrab:client-plugin/view-types@0.2.0",
+      "microcrab:client-plugin/view-types@0.4.0",
       [5, 2],
     );
     const types = [
@@ -159,7 +168,7 @@ test("canonical equality-bounded type imports never become host capability grant
           Uint8Array.from([
             ...header,
             ...section(
-              "microcrab:client-plugin/session-state@0.2.0",
+              "microcrab:client-plugin/session-state@0.4.0",
               [3, 0, 3],
             ),
           ]),
@@ -185,7 +194,7 @@ test("canonical equality-bounded type imports never become host capability grant
     }
     return { imports, errors };
   });
-  expect(actual.imports).toEqual(["microcrab:client-plugin/view-types@0.2.0"]);
+  expect(actual.imports).toEqual(["microcrab:client-plugin/view-types@0.4.0"]);
   expect(actual.errors).toHaveLength(5);
   expect(actual.errors[0]).toContain("requires actual Component import");
   expect(actual.errors[1]).toContain("unsupported Component type import");
@@ -401,6 +410,7 @@ for (const retirement of [
     );
   });
 test.beforeEach(async ({ page }) => {
+  await maintainedPluginBundle(page);
   await nativeBackend(page);
   await page.goto("/");
 });
@@ -859,7 +869,7 @@ test("registry WebSocket effects retain captured context and reject retired sock
                 reply({
                   type: "loaded",
                   manifest,
-                  imports: ["microcrab:client-plugin/net@0.2.0"],
+                  imports: ["microcrab:client-plugin/net@0.4.0"],
                   sourceKind: "component",
                 });
                 return;
@@ -987,7 +997,7 @@ test("typed normalization rejects legacy strings, separates state write grants a
       () => manifest('{"id":"legacy"}'),
       () =>
         authorizeKind(
-          ["microcrab:client-plugin/session-state@0.2.0"],
+          ["microcrab:client-plugin/session-state@0.4.0"],
           "state-change",
         ),
       () =>
@@ -1017,7 +1027,7 @@ test("typed normalization rejects legacy strings, separates state write grants a
       }
     }
     authorizeKind(
-      ["microcrab:client-plugin/session-state-write@0.2.0"],
+      ["microcrab:client-plugin/session-state-write@0.4.0"],
       "state-change",
     );
     validateTree({
@@ -1089,7 +1099,7 @@ test("typed normalization rejects legacy strings, separates state write grants a
   expect(actual.invalid[3]).toContain("specific render failure");
   expect(actual.errors).toHaveLength(4);
   expect(actual.errors[0]).toContain("typed record");
-  expect(actual.errors[1]).toContain("session-state-write@0.2.0");
+  expect(actual.errors[1]).toContain("session-state-write@0.4.0");
   expect(actual.errors[2]).toContain("content envelope");
   expect(actual.errors[3]).toContain("invalid scoped variable write");
   expect(actual.phase.effects[0].kind).toBe("state-change");
@@ -1193,7 +1203,7 @@ test("an incompatible installed custom binary retains exact bytes KV and enablem
           .find((p: any) => p.manifest.id === id),
         bytes = original.bytes.slice();
       const from = new TextEncoder().encode(
-        "microcrab:client-plugin/session-state@0.2.0",
+        "microcrab:client-plugin/session-state@0.4.0",
       );
       let changed = false;
       for (let i = 0; i <= bytes.length - from.length; i++)
@@ -1207,7 +1217,7 @@ test("an incompatible installed custom binary retains exact bytes KV and enablem
         ...original,
         bytes,
         imports: original.imports.map((name: string) =>
-          name.replace("session-state@0.2.0", "session-state@0.1.0"),
+          name.replace("session-state@0.4.0", "session-state@0.1.0"),
         ),
       });
       await store.writeKV(id, "retained", "custom-data");
@@ -1240,7 +1250,9 @@ test("an incompatible installed custom binary retains exact bytes KV and enablem
       store.close();
     }
   });
-  expect(actual.error).toContain("client-plugin@0.2.0 only");
+  expect(actual.error).toContain(
+    "unsupported Component import: microcrab:client-plugin/session-state@0.1.0",
+  );
   expect(actual.error).toContain("retained");
   expect(actual.bytesRetained).toBe(true);
   expect(actual.kv).toEqual({ retained: "custom-data" });

@@ -1,4 +1,9 @@
-import { authorizeKind, PluginImportError, wasmSourceKind } from "./component";
+import {
+  authorizeKind,
+  binaryImports,
+  PluginImportError,
+  wasmSourceKind,
+} from "./component";
 import { PluginNetwork } from "./network";
 import { PluginResources } from "./resources";
 import { identityKey } from "./tool-hub";
@@ -6,6 +11,7 @@ import {
   assertJson,
   overlayVariables,
   validateProjection,
+  resolveViewState,
   validateBlockSlot,
   writePath,
 } from "./schema";
@@ -279,6 +285,15 @@ export class PluginRegistry implements PluginRegistryAPI {
         if (this.preferences.tombstones.includes(item.id)) continue;
         const existing = this.plugins.get(item.id);
         if (existing) {
+          // An obsolete/unsupported installed ABI requires explicit replacement.
+          // Inspect its bytes before considering bundled repair; persisted metadata
+          // never authorizes an implicit ABI upgrade or rewrites retained choices.
+          try {
+            if (wasmSourceKind(existing.bytes) !== "component") continue;
+            binaryImports(existing.bytes);
+          } catch {
+            continue;
+          }
           const hash = await this.sha256(existing.bytes);
           // Only a declared predecessor authorizes automatic bundled repair.
           if (hash === item.sha256 || !item.supersedes?.includes(hash))
@@ -321,6 +336,8 @@ export class PluginRegistry implements PluginRegistryAPI {
       instance_generation: generation,
       ...this.environment,
       history_generation: this.historyGeneration,
+      host_time_ms: Date.now(),
+      host_monotonic_ms: performance.now(),
       ...(surface
         ? {
             surface: structuredClone(surface),
@@ -951,10 +968,15 @@ export class PluginRegistry implements PluginRegistryAPI {
   ): Promise<PluginResult> {
     if (this.live.get(id) !== instance)
       throw new StalePluginCall("stale plugin instance");
-    const context = captured ?? {
+    const authority = captured ?? {
         ...this.context(instance.generation, surface),
         user_action: method === "onAction",
         invocation_id: crypto.randomUUID(),
+      },
+      context: PluginContext = {
+        ...authority,
+        host_time_ms: Date.now(),
+        host_monotonic_ms: performance.now(),
       },
       history = this.historyGeneration;
     const surfaceRevision = surface
@@ -1031,6 +1053,45 @@ export class PluginRegistry implements PluginRegistryAPI {
     context?: PluginContext,
   ): void {
     if (this.live.get(id) !== instance) return;
+    const vars = r.vars_patch
+      ? { ...instance.vars, ...r.vars_patch }
+      : instance.vars;
+    assertJson(vars);
+    const trees = new Map(instance.trees);
+    if (r.view_output && target) trees.set(target, r.view_output);
+    for (const output of trees.values()) {
+      if (output.tree) validateProjection(output.tree, vars);
+      if (output.mode === "webview-html")
+        resolveViewState(output.viewState, vars);
+    }
+    let slots = this.slots;
+    if (r.block_slots) {
+      authorizeKind(this.require(id).imports, "block-slots");
+      if (r.block_slots.length > 64)
+        throw new Error("plugin exceeds 64 settled slots per call");
+      slots = new Map(this.slots);
+      for (const slot of r.block_slots) {
+        if (!this.settled.has(slot.block_id))
+          throw new Error(
+            `decoration target is not a settled block: ${slot.block_id}`,
+          );
+        validateBlockSlot(slot);
+        if (slot.tree) validateProjection(slot.tree, vars);
+        slots.set(JSON.stringify([id, slot.block_id, slot.slot_id]), {
+          ...slot,
+          pluginId: id,
+        });
+      }
+      if (slots.size > 512)
+        throw new Error("plugin settled slot quota exceeds 512");
+    }
+    for (const slot of slots.values())
+      if (slot.pluginId === id && slot.tree)
+        validateProjection(slot.tree, vars);
+    for (const effect of r.effects ?? [])
+      authorizeKind(this.require(id).imports, effect.kind);
+    // A rejected projection/patch must not publish a terminal tool success or
+    // abort its observation scope before the complete result passes admission.
     if (r.tool_completion) {
       const c = r.tool_completion;
       const tool = this.tools.get(c.identity.invocation_id);
@@ -1060,40 +1121,6 @@ export class PluginRegistry implements PluginRegistryAPI {
           );
       }
     }
-    const vars = r.vars_patch
-      ? { ...instance.vars, ...r.vars_patch }
-      : instance.vars;
-    assertJson(vars);
-    const trees = new Map(instance.trees);
-    if (r.view_output && target) trees.set(target, r.view_output);
-    for (const output of trees.values())
-      if (output.tree) validateProjection(output.tree, vars);
-    let slots = this.slots;
-    if (r.block_slots) {
-      authorizeKind(this.require(id).imports, "block-slots");
-      if (r.block_slots.length > 64)
-        throw new Error("plugin exceeds 64 settled slots per call");
-      slots = new Map(this.slots);
-      for (const slot of r.block_slots) {
-        if (!this.settled.has(slot.block_id))
-          throw new Error(
-            `decoration target is not a settled block: ${slot.block_id}`,
-          );
-        validateBlockSlot(slot);
-        if (slot.tree) validateProjection(slot.tree, vars);
-        slots.set(JSON.stringify([id, slot.block_id, slot.slot_id]), {
-          ...slot,
-          pluginId: id,
-        });
-      }
-      if (slots.size > 512)
-        throw new Error("plugin settled slot quota exceeds 512");
-    }
-    for (const slot of slots.values())
-      if (slot.pluginId === id && slot.tree)
-        validateProjection(slot.tree, vars);
-    for (const effect of r.effects ?? [])
-      authorizeKind(this.require(id).imports, effect.kind);
     instance.vars = vars;
     instance.trees = trees;
     this.slots = slots;
@@ -1106,7 +1133,9 @@ export class PluginRegistry implements PluginRegistryAPI {
       ).catch((error) => this.fault(id, error));
     if (r.rerender) {
       const targets = [...instance.trees.keys()];
-      instance.trees.clear();
+      // Keep each mounted output until its forced render validates and replaces it.
+      // Publishing an empty cache here would unmount HTML documents and drafts
+      // before the queued render/host completion can acknowledge the action.
       for (const name of targets) {
         const mounted = instance.surfaces.get(name);
         if (mounted?.visible)
@@ -1125,9 +1154,13 @@ export class PluginRegistry implements PluginRegistryAPI {
     descriptor?: PluginSurfaceDescriptor,
   ): PluginSurfaceDescriptor {
     if (
-      !["sidebar", "expanded-page", "session-tab", "block-slot"].includes(
-        target,
-      )
+      ![
+        "sidebar",
+        "expanded-page",
+        "session-tab",
+        "block-slot",
+        "setting-page",
+      ].includes(target)
     )
       throw new Error(`unsupported view target: ${target}`);
     const surface = descriptor ?? {
@@ -1143,6 +1176,14 @@ export class PluginRegistry implements PluginRegistryAPI {
     if (target === "block-slot" && (!surface.block_id || !surface.slot_id))
       throw new Error("block surface requires exact block and slot identity");
     return structuredClone(surface);
+  }
+  releaseSurface(id: string, descriptor: PluginSurfaceDescriptor): void {
+    const instance = this.live.get(id);
+    if (!instance) return;
+    this.setSurfaceVisible(id, descriptor, false);
+    instance.surfaces.delete(descriptor.surface_id);
+    instance.trees.delete(descriptor.surface_id);
+    instance.network.retireStale();
   }
   setSurfaceVisible(
     id: string,
@@ -1192,7 +1233,10 @@ export class PluginRegistry implements PluginRegistryAPI {
       target,
       mode: output?.mode ?? "native-json",
       content: output?.content,
-      viewState: output?.viewState,
+      viewState:
+        output?.mode === "webview-html"
+          ? resolveViewState(output.viewState, instance?.vars ?? {})
+          : output?.viewState,
       tree: output?.tree ?? null,
       vars: instance?.vars ?? {},
       surface,
@@ -1326,8 +1370,11 @@ export class PluginRegistry implements PluginRegistryAPI {
       throw new StalePluginCall("variable binding surface is retired");
     try {
       const vars = writePath(instance.vars, path, value);
-      for (const output of instance.trees.values())
+      for (const output of instance.trees.values()) {
         if (output.tree) validateProjection(output.tree, vars);
+        if (output.mode === "webview-html")
+          resolveViewState(output.viewState, vars);
+      }
       for (const slot of this.slots.values())
         if (slot.pluginId === id && slot.tree)
           validateProjection(slot.tree, vars);

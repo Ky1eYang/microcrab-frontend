@@ -226,27 +226,20 @@ test("recents persist minimal identities only within their owner and review curr
   await expect(page.getByText("最近选择", { exact: true })).toHaveCount(0);
 });
 
-test("nested plugin dialog owns Escape and close while Settings retains focus and navigation", async ({
+test("Settings plugin entry opens dedicated management and returns to conversation", async ({
   page,
 }) => {
   await setup(page);
   await page.getByRole("button", { name: "客户端工具", exact: true }).click();
-  const opener = page.getByRole("button", { name: "客户端插件", exact: true });
-  await opener.click();
-  const nested = page.getByTestId("content-dialog");
-  await expect(nested).toBeVisible();
-  await page.keyboard.press("Escape");
-  await expect(nested).toHaveCount(0);
-  await expect(
-    page.getByRole("dialog", { name: "设置", exact: true }),
-  ).toBeVisible();
-  await expect(opener).toBeFocused();
-  await opener.click();
-  await nested.getByRole("button", { name: "关闭", exact: true }).click();
-  await expect(nested).toHaveCount(0);
-  await expect(opener).toBeFocused();
-  await page.getByRole("button", { name: "会话默认设置", exact: true }).click();
-  await expect(page.getByTestId("settings-model-default")).toBeVisible();
+  await page.getByRole("button", { name: "客户端插件", exact: true }).click();
+  const manager = page.getByTestId("client-plugins-manager");
+  await expect(manager).toBeVisible();
+  await expect(page.getByTestId("content-dialog")).toHaveCount(0);
+  await expect(page.getByRole("dialog", { name: "设置", exact: true })).toHaveCount(0);
+  await expect(page).toHaveURL(/session\/s1\/plugins$/);
+  await manager.getByRole("button", { name: "返回", exact: true }).click();
+  await expect(manager).toHaveCount(0);
+  await expect(page).toHaveURL(/session\/s1$/);
 });
 
 test("provider and settings validation focus actual invalid controls with nearby concrete feedback", async ({

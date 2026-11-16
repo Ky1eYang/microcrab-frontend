@@ -9,6 +9,7 @@ import {
   type JsonRejection,
 } from "./webview-document";
 import "./webview.css";
+import { readWebviewTheme } from "./webview-theme";
 
 /** All values come from the authenticated mounting surface, never guest messages. */
 export interface PluginWebviewScope {
@@ -44,6 +45,8 @@ export function PluginWebview({
   visible = true,
   title,
 }: PluginWebviewProps) {
+  const fitContent = view.target === "setting-page";
+  const [contentHeight, setContentHeight] = useState(144);
   const enabled =
     visible && view.status === "ready" && view.mode === "webview-html";
   const identity = JSON.stringify([
@@ -72,7 +75,9 @@ export function PluginWebview({
     try {
       return {
         nonce,
-        html: enabled ? webviewDocument(view.content ?? "", nonce) : "",
+        html: enabled
+          ? webviewDocument(view.content ?? "", nonce, readWebviewTheme(), fitContent)
+          : "",
         error: null,
       };
     } catch (error) {
@@ -98,9 +103,11 @@ export function PluginWebview({
     let windowStart = performance.now();
     let messages = 0;
     let actions = 0;
+    const themeObserver = new MutationObserver(() => pushTheme());
     const active = () => !retired && current.current === identity;
     const retire = () => {
       retired = true;
+      themeObserver.disconnect();
       if (timer !== undefined) clearTimeout(timer);
       if (port) {
         port.onmessage = null;
@@ -115,6 +122,14 @@ export function PluginWebview({
       if (current.current === identity) {
         setFailure(reason);
         setStatus("retired");
+      }
+    };
+    const pushTheme = () => {
+      if (!active() || !acknowledged || !port) return;
+      try {
+        port.postMessage({ type: "theme", value: readWebviewTheme() });
+      } catch {
+        reject("channel-error");
       }
     };
     const push = () => {
@@ -176,7 +191,20 @@ export function PluginWebview({
           acknowledged = true;
           if (timer !== undefined) clearTimeout(timer);
           setStatus("ready");
+          pushTheme();
           push();
+          return;
+        }
+        if (
+          fitContent &&
+          exactKeys(data, ["type", "height"]) &&
+          data.type === "content-height" &&
+          typeof data.height === "number" &&
+          Number.isSafeInteger(data.height) &&
+          data.height > 0 &&
+          data.height <= 1000000
+        ) {
+          setContentHeight(data.height);
           return;
         }
         if (exactKeys(data, ["type"]) && data.type === "retire") {
@@ -212,6 +240,10 @@ export function PluginWebview({
       }
     };
     connection.current = { push };
+    themeObserver.observe(globalThis.document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-theme"],
+    });
     element.addEventListener("load", load);
     return () => {
       retire();
@@ -241,6 +273,8 @@ export function PluginWebview({
           key={identity}
           ref={frame}
           className="plugin-webview"
+          style={fitContent ? { height: contentHeight, flex: "none" } : undefined}
+          data-fit-content={fitContent || undefined}
           data-testid="plugin-webview"
           data-status={status}
           data-reason={reason ?? undefined}

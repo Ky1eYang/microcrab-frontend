@@ -1,7 +1,7 @@
-package microcrab:client-plugin@0.2.0;
+package microcrab:client-plugin@0.4.0;
 
 interface view-types {
-    enum view-target { sidebar, expanded-page, session-tab, block-slot }
+    enum view-target { sidebar, expanded-page, session-tab, block-slot, setting-page }
     enum render-mode { native-json, webview-html }
     record plugin-manifest {
         id: string,
@@ -82,4 +82,17 @@ world fixture {
 world surface-fixture {
     include plugin-exports;
     import conversation;
+}
+
+/// Optional model tool provider. Visual-only worlds do not include these exports.
+/// start-tool returns PluginResult.tool_completion pending or terminal immediately.
+/// Host requests complete through on-phase(event-result); no export awaits I/O.
+/// All completions echo the complete host tool_invocation identity from ctx.
+interface resources { request: func(kind: string, payload: string) -> result<u32, string>; }
+world tool-plugin {
+    include plugin-exports;
+    export start-tool: func(request: string, ctx: string) -> string;
+    export cancel-tool: func(ctx: string) -> string;
+    import net;
+    import resources;
 }

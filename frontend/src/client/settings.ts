@@ -30,7 +30,23 @@ export interface AutoCompactionPolicy {
   round_threshold: number;
   headroom_tokens: number;
 }
+export const PROMPT_FIELDS = [
+  "system_template",
+  "compact_template",
+  "auto_compact_template",
+  "rename_template",
+  "action_review_template",
+  "client_prompt",
+] as const;
+export type PromptField = (typeof PROMPT_FIELDS)[number];
+
 export interface SettingsOverrides {
+  system_template?: string | null;
+  compact_template?: string | null;
+  auto_compact_template?: string | null;
+  rename_template?: string | null;
+  action_review_template?: string | null;
+  client_prompt?: string | null;
   limits?: Partial<Limits>;
   model_selection?: NativeModelSelection;
   agent?: string;
@@ -151,7 +167,11 @@ export function validateSettingsOverrides(
     "review_model",
     "auto_compaction",
     "auto_naming",
+    ...PROMPT_FIELDS,
   ]);
+  for (const field of PROMPT_FIELDS)
+    if (row[field] != null && typeof row[field] !== "string")
+      throw Error(`settings.${field}: expected string or null`);
   if (row.limits !== undefined) {
     const limits = own(row.limits, "settings.limits", LIMIT_FIELDS);
     for (const [field, limit] of Object.entries(limits)) {

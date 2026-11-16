@@ -1,5 +1,6 @@
 import { LIMITS, type PluginManifest } from "./types";
 import { manifest } from "./schema";
+export const CLIENT_PLUGIN_ABI = "0.4.0";
 export const CAPABILITIES = [
   "session-state",
   "session-state-write",
@@ -184,17 +185,13 @@ export function binaryImports(bytes: Uint8Array): string[] {
         );
       uint();
       if (
-        !CAPABILITIES.some((c) =>
-          ["0.2.0", "0.3.0"].some(
-            (v) => name === `microcrab:client-plugin/${c}@${v}`,
-          ),
+        !CAPABILITIES.some(
+          (c) => name === `microcrab:client-plugin/${c}@${CLIENT_PLUGIN_ABI}`,
         ) &&
-        !["0.2.0", "0.3.0"].some(
-          (v) => name === `microcrab:client-plugin/view-types@${v}`,
-        )
+        name !== `microcrab:client-plugin/view-types@${CLIENT_PLUGIN_ABI}`
       )
         throw new Error(
-          `unsupported Component import: ${name}; this runtime supports client-plugin@0.2.0 and @0.3.0 only. Rebuild/update the plugin; existing installed bytes and preferences are retained.`,
+          `unsupported Component import: ${name}; this runtime supports client-plugin@${CLIENT_PLUGIN_ABI} only. Rebuild/update the plugin; existing installed bytes and preferences are retained.`,
         );
       imports.push(name);
     }
@@ -237,19 +234,17 @@ export async function inspectComponent(bytes: Uint8Array): Promise<Inspection> {
     noTypescript: true,
     noNodejsCompat: true,
     base64Cutoff: 0,
-    map: ["0.2.0", "0.3.0"].flatMap((v) =>
-      [...CAPABILITIES, "view-types"].map((c) => {
-        const name = `microcrab:client-plugin/${c}@${v}`;
-        return [name, name] as [string, string];
-      }),
-    ),
+    map: [...CAPABILITIES, "view-types"].map((c) => {
+      const name = `microcrab:client-plugin/${c}@${CLIENT_PLUGIN_ABI}`;
+      return [name, name] as [string, string];
+    }),
     asyncMode: { tag: "sync" },
   });
   for (const name of generated.imports)
     if (
       !imports.some(
         (original) =>
-          name === original || name === original.replace(/@0\.[23]\.0$/, ""),
+          name === original || name === original.replace(/@0\.4\.0$/, ""),
       )
     )
       throw new Error(`unexpected generated Component import: ${name}`);
@@ -270,7 +265,7 @@ export async function inspectComponent(bytes: Uint8Array): Promise<Inspection> {
       )
     )
       throw new Error(
-        `missing required Component export: ${name}; rebuild/update using client-plugin@0.2.0. This runtime does not adapt older ABIs; installed bytes/preferences are retained.`,
+        `missing required Component export: ${name}; rebuild/update using client-plugin@${CLIENT_PLUGIN_ABI}. This runtime does not adapt older ABIs; installed bytes/preferences are retained.`,
       );
   const has = (name: string) =>
     generated.exports.some(
@@ -305,12 +300,12 @@ export function authorizeKind(imports: string[], kind: string): void {
   const capability = capabilityForKind(kind);
   if (
     !capability ||
-    !["0.2.0", "0.3.0"].some((v) =>
-      imports.includes(`microcrab:client-plugin/${capability}@${v}`),
+    !imports.includes(
+      `microcrab:client-plugin/${capability}@${CLIENT_PLUGIN_ABI}`,
     )
   )
     throw new Error(
-      `effect ${kind} requires actual Component import microcrab:client-plugin/${capability ?? "unsupported"}@0.2.0`,
+      `effect ${kind} requires actual Component import microcrab:client-plugin/${capability ?? "unsupported"}@${CLIENT_PLUGIN_ABI}`,
     );
 }
 export type Guest = {

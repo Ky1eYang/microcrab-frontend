@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { nativeBackend } from "./native-fixture";
+import { maintainedPluginBundle } from "./plugin-bundle-fixture";
 
 // These contract checks use browser imports so they exercise the host parser and
 // subscription ordering without relying on a guest mutation or server write.
@@ -165,6 +166,7 @@ test("validation subscribes before dispatch and correlates its own receipt despi
 
 test("State search clears within a fixed-width field", async ({ page }) => {
   await nativeBackend(page);
+  await maintainedPluginBundle(page);
   await page.goto("/#/session/s1/plugins/microcrab.state-viewer");
   const field = page.getByPlaceholder("搜索名称或值", { exact: true });
   await expect(field).toBeVisible({ timeout: 20_000 });

@@ -20,6 +20,7 @@ mod bindings {
                     ViewTarget::ExpandedPage,
                     ViewTarget::SessionTab,
                     ViewTarget::BlockSlot,
+                    ViewTarget::SettingPage,
                 ],
                 network_origins: None,
             }
@@ -83,9 +84,10 @@ mod bindings {
 fn decode(input: &str) -> Value {
     serde_json::from_str(input).unwrap_or(Value::Null)
 }
+#[cfg(test)]
 fn manifest() -> Value {
     json!({"schema_version":1,"id":"microcrab.fixture","name":"Component fixture","version":env!("CARGO_PKG_VERSION"),
-        "description":"A disabled-by-default real Component for multi-plugin and deterministic input tests.","targets":["sidebar","expanded-page","session-tab","block-slot"]})
+        "description":"A disabled-by-default real Component for multi-plugin and deterministic input tests.","targets":["sidebar","expanded-page","session-tab","block-slot","setting-page"]})
 }
 fn init() -> Value {
     json!({"schema_version":1,"vars_patch":{"count":0,"label":"Fixture","prefix":"","reject":false,"inject_enabled":false,"fixture_value":null}})
@@ -270,7 +272,7 @@ mod tests {
         let manifest = manifest();
         assert_eq!(
             manifest["targets"],
-            json!(["sidebar", "expanded-page", "session-tab", "block-slot"])
+            json!(["sidebar", "expanded-page", "session-tab", "block-slot", "setting-page"])
         );
         let initial = init();
         let vars = &initial["vars_patch"];

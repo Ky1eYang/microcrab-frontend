@@ -1,5 +1,10 @@
+import { maintainedPluginBundle } from "./plugin-bundle-fixture";
 import { expect, test } from "@playwright/test";
 import { nativeBackend } from "./native-fixture";
+
+test.beforeEach(async ({ page }) => {
+  await maintainedPluginBundle(page);
+});
 
 test("bound button icons and pressed states validate without allowing arbitrary projected values", async ({
   page,
@@ -55,10 +60,20 @@ ${await response.text()}`,
   });
   await page.goto("/#/session/s1/plugins");
   const manager = page.getByTestId("client-plugins-manager");
-  const fixture = manager.locator('[data-plugin-id="microcrab.fixture"]');
+  await manager.locator('[data-plugin-nav-id="microcrab.fixture"]').click();
+  const fixture = manager.locator(
+    'article[data-plugin-id="microcrab.fixture"]',
+  );
   await fixture.getByLabel("在当前会话启用").check();
   await expect(fixture).toHaveAttribute("data-status", "ready");
-  await fixture.getByRole("button", { name: "展开", exact: true }).click();
+  await page.goto("/#/session/s1");
+  const sidebar = page.getByTestId("client-plugin-sidebar");
+  if (!(await sidebar.isVisible()))
+    await page.locator(".header-right-toggle-btn").click();
+  await sidebar
+    .getByRole("tab", { name: "Component fixture", exact: true })
+    .click();
+  await sidebar.getByTestId("plugin-expand").click();
   const surface = page.getByTestId("expanded-plugin-page");
   await expect(
     surface.getByRole("button", { name: "Increment", exact: true }),
@@ -106,9 +121,10 @@ ${await response.text()}`,
   ).toBeVisible();
   await expect(surface.getByTestId("plugin-retry")).toHaveCount(0);
   await surface.getByRole("button", { name: "管理", exact: true }).click();
+  await expect(page.getByTestId("client-plugins-manager")).toBeVisible();
   await expect(
     page
-      .getByTestId("plugin-workspace-dialog")
+      .getByTestId("client-plugins-manager")
       .getByTestId("plugins-restore-bundled"),
-  ).toBeVisible();
+  ).toHaveCount(0);
 });

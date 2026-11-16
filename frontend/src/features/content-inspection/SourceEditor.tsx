@@ -21,9 +21,13 @@ import { json, jsonParseLinter } from "@codemirror/lang-json";
 import { forceLinting, lintGutter, linter, lintKeymap } from "@codemirror/lint";
 import { tags } from "@lezer/highlight";
 import type { EditDiagnostic } from "./diagnostics";
+import type { PromptField } from "../../client/settings";
+import { promptHighlighting } from "./prompt-highlighting";
 
 export type SourceEditorProps = {
   text: string;
+  promptField?: PromptField;
+  autoFocus?: boolean;
   json: boolean;
   wrap: boolean;
   lineNumbers: boolean;
@@ -61,6 +65,7 @@ export default function SourceEditor(props: SourceEditorProps) {
     value.wrap ? EditorView.lineWrapping : [],
     value.lineNumbers ? lineNumbers() : [],
     value.json ? json() : [],
+    value.promptField ? promptHighlighting(value.promptField) : [],
   ];
   useEffect(() => {
     if (!host.current) return;
@@ -170,7 +175,7 @@ export default function SourceEditor(props: SourceEditorProps) {
       }),
     });
     editor.current = view;
-    view.focus();
+    if (current.current.autoFocus !== false) view.focus();
     return () => {
       editor.current = null;
       view.destroy();
@@ -180,7 +185,14 @@ export default function SourceEditor(props: SourceEditorProps) {
     const view = editor.current;
     if (!view) return;
     view.dispatch({ effects: config.current.reconfigure(extensions(props)) });
-  }, [props.json, props.wrap, props.lineNumbers, props.disabled, props.label]);
+  }, [
+    props.json,
+    props.wrap,
+    props.lineNumbers,
+    props.disabled,
+    props.label,
+    props.promptField,
+  ]);
   useEffect(() => {
     const view = editor.current;
     if (!view) return;

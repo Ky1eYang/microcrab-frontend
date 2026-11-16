@@ -1,4 +1,5 @@
 import type { Json } from "./types";
+import type { WebviewTheme } from "./webview-theme";
 
 /** Independent presentation quotas: never accept a whole plugin Vars bag here. */
 export const WEBVIEW_LIMITS = {
@@ -65,19 +66,73 @@ export function exactKeys(
 
 // This function is serialized as source, never interpolated with guest HTML or state.
 // The host-only port remains in this closure; plugins receive just action + projection.
-function bootstrap(nonce: string) {
+function bootstrap(nonce: string, initialTheme?: WebviewTheme, fitContent = false) {
+  const themeKeys = Object.keys(initialTheme?.tokens ?? {});
+  let theme = initialTheme?.scheme;
+  const themeSubscribers = new Set<(scheme: string) => void>();
+  const applyTheme = (value: WebviewTheme) => {
+    if (
+      !value ||
+      (value.scheme !== "light" && value.scheme !== "dark") ||
+      !value.tokens ||
+      typeof value.tokens !== "object"
+    )
+      return;
+    const root = document.documentElement;
+    root.dataset.theme = value.scheme;
+    root.style.colorScheme = value.scheme;
+    for (const key of themeKeys) {
+      if (typeof value.tokens[key] === "string")
+        root.style.setProperty(key, value.tokens[key]);
+    }
+    // Informational HTML without authored styles also inherits host colors.
+    root.style.backgroundColor = "var(--microcrab-bg)";
+    root.style.color = "var(--microcrab-text)";
+    root.style.fontFamily = "var(--microcrab-font-sans)";
+    theme = value.scheme;
+    for (const subscriber of themeSubscribers) {
+      try {
+        subscriber(theme);
+      } catch {
+        /* Isolate guest listeners. */
+      }
+    }
+  };
+  if (initialTheme) applyTheme(initialTheme);
   const host = window.parent;
   const listen = window.addEventListener.bind(window);
   const unlisten = window.removeEventListener.bind(window);
   const send = MessagePort.prototype.postMessage;
   const close = MessagePort.prototype.close;
   let port: MessagePort | undefined;
+  let resizeObserver: ResizeObserver | undefined;
+  let contentObserver: MutationObserver | undefined;
+  let resizeFrame: number | undefined;
+  let lastHeight = 0;
+  const measure = () => {
+    if (!fitContent || !port || resizeFrame !== undefined) return;
+    resizeFrame = window.setTimeout(() => {
+      resizeFrame = undefined;
+      if (!port || !document.body) return;
+      const height = Math.max(1, Math.ceil(document.body.getBoundingClientRect().height));
+      if (height !== lastHeight) {
+        lastHeight = height;
+        send.call(port, { type: "content-height", height });
+      }
+    });
+  };
   let current: unknown;
   let hasCurrent = false;
   const subscribers = new Set<(state: unknown) => void>();
   const api = Object.freeze({
     action(action: string, payload: unknown = null) {
       if (port) send.call(port, { type: "action", action, payload });
+    },
+    onThemeChange(listener: (scheme: string) => void) {
+      if (typeof listener !== "function") return () => {};
+      themeSubscribers.add(listener);
+      if (theme) listener(theme);
+      return () => themeSubscribers.delete(listener);
     },
     onViewState(listener: (state: unknown) => void) {
       if (typeof listener !== "function") return () => {};
@@ -109,6 +164,16 @@ function bootstrap(nonce: string) {
     port.onmessage = (message: MessageEvent) => {
       const update = message.data;
       if (
+        update &&
+        typeof update === "object" &&
+        Object.keys(update).length === 2 &&
+        update.type === "theme"
+      ) {
+        applyTheme(update.value);
+        measure();
+        return;
+      }
+      if (
         !update ||
         typeof update !== "object" ||
         Object.keys(update).length !== 2 ||
@@ -127,6 +192,17 @@ function bootstrap(nonce: string) {
     };
     port.start();
     send.call(port, { type: "ack", nonce });
+    if (fitContent) {
+      const style = document.createElement("style");
+      style.textContent = "html,body{height:auto!important;min-height:0!important;overflow-y:hidden!important}body{display:flow-root!important;margin:0!important}";
+      document.head.append(style);
+      resizeObserver = new ResizeObserver(measure);
+      resizeObserver.observe(document.body);
+      contentObserver = new MutationObserver(measure);
+      contentObserver.observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true });
+      listen("resize", measure);
+      measure();
+    }
   };
   listen("message", connect);
   listen(
@@ -137,8 +213,13 @@ function bootstrap(nonce: string) {
         send.call(port, { type: "retire" });
         close.call(port);
       }
+      resizeObserver?.disconnect();
+      contentObserver?.disconnect();
+      unlisten("resize", measure);
+      if (resizeFrame !== undefined) clearTimeout(resizeFrame);
       port = undefined;
       subscribers.clear();
+      themeSubscribers.clear();
     },
     { once: true },
   );
@@ -147,11 +228,17 @@ function bootstrap(nonce: string) {
 /** CSP is parsed before any untrusted bytes. Later guest meta policies only intersect it.
  * Scripted self-navigation remains a browser residual; subsequent loads revoke the broker.
  */
-export function webviewDocument(html: string, nonce: string): string {
+export function webviewDocument(
+  html: string,
+  nonce: string,
+  theme?: WebviewTheme,
+  fitContent = false,
+): string {
   if (new TextEncoder().encode(html).byteLength > WEBVIEW_LIMITS.htmlBytes)
     throw new Error("Plugin HTML exceeds the 512 KiB presentation limit");
   const policy =
     "default-src 'none'; script-src 'unsafe-inline'; script-src-attr 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'none'; img-src 'none'; font-src 'none'; media-src 'none'; frame-src 'none'; child-src 'none'; worker-src 'none'; object-src 'none'; manifest-src 'none'; form-action 'none'; base-uri 'none'";
   const argument = JSON.stringify(nonce).replace(/</g, "\\u003c");
-  return `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${policy}"><meta charset="utf-8"><meta name="referrer" content="no-referrer"><script>(${bootstrap.toString()})(${argument});</script></head><body>${html}</body></html>`;
+  const themeArgument = JSON.stringify(theme ?? null).replace(/</g, "\\u003c");
+  return `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${policy}"><meta charset="utf-8"><meta name="referrer" content="no-referrer"><script>(${bootstrap.toString()})(${argument},${themeArgument},${fitContent});</script></head><body>${html}</body></html>`;
 }

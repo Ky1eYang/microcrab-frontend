@@ -7,6 +7,7 @@ import {
   type VariablesChange,
   type PluginRenderOutput,
 } from "./types";
+import { jsonRejection } from "./webview-document";
 import { CONTENT_FORMATS } from "../features/content-inspection/format";
 const encoder = new TextEncoder();
 export function boundedJson<T>(text: string): T {
@@ -47,7 +48,7 @@ export function assertJson(value: unknown): asserts value is Json {
 export function manifest(value: unknown): PluginManifest {
   if (!value || typeof value !== "object" || Array.isArray(value))
     throw new Error(
-      "ABI 0.2.0 manifest must be a typed record; rebuild this plugin with client-plugin@0.2.0",
+      "plugin manifest must be a typed record; rebuild with a supported client-plugin ABI",
     );
   const typed = value as Record<string, unknown>;
   const m = {
@@ -75,7 +76,13 @@ export function manifest(value: unknown): PluginManifest {
     m.targets.length > 16 ||
     m.targets.some(
       (x) =>
-        !["sidebar", "expanded-page", "session-tab", "block-slot"].includes(x),
+        ![
+          "sidebar",
+          "expanded-page",
+          "session-tab",
+          "block-slot",
+          "setting-page",
+        ].includes(x),
     )
   )
     throw new Error("invalid plugin manifest schema/version/id/name/targets");
@@ -641,6 +648,48 @@ export function resolvePath(root: unknown, path: string): Json | undefined {
   }
   return current as Json | undefined;
 }
+/** HTML render-view envelopes may explicitly bind one safe projection subtree. */
+export function resolveViewState(
+  value: Json | undefined,
+  vars: Record<string, Json>,
+): Json | undefined {
+  if (value === undefined) return undefined;
+  let projection = value;
+  if (
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    Object.keys(value).length === 1 &&
+    Object.hasOwn(value, "$ref")
+  ) {
+    const path = value.$ref;
+    const parts =
+      typeof path === "string" ? path.replace(/^\$\.?/, "").split(".") : [];
+    if (
+      typeof path !== "string" ||
+      path.length > 512 ||
+      !parts.length ||
+      parts.some(
+        (part) =>
+          !part || ["__proto__", "prototype", "constructor"].includes(part),
+      )
+    )
+      throw new Error(
+        "HTML view-state binding requires a nonempty safe variable path of at most 512 characters",
+      );
+    const resolved = resolvePath(vars, path);
+    if (resolved === undefined)
+      throw new Error(
+        `HTML view-state binding is missing variable path: ${path}`,
+      );
+    projection = resolved;
+  }
+  assertJson(projection);
+  const rejection = jsonRejection(projection);
+  if (rejection)
+    throw new Error(`HTML view-state projection rejected: ${rejection}`);
+  return projection;
+}
 export function writePath(
   root: Record<string, Json>,
   path: string,
@@ -679,7 +728,7 @@ export function writePath(
 export function renderOutput(value: unknown): PluginResult {
   if (!value || typeof value !== "object" || Array.isArray(value))
     throw new Error(
-      "ABI 0.2.0 render-view must return a typed view-output record",
+      "ABI 0.4.0 render-view must return a typed view-output record",
     );
   const r = value as Record<string, unknown>;
   if (

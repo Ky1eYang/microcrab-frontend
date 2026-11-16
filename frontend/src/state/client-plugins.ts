@@ -1,4 +1,5 @@
 import { CommandError } from "../client/errors";
+import { failureText } from "../client/failure";
 import { isPluginDrawerViewport } from "../client/viewport";
 import { PluginRegistry } from "../plugins/registry";
 import {
@@ -57,6 +58,7 @@ export class ClientPlugins {
   constructor(
     private api: () => ApiClient,
     private onStateRead?: (value: unknown, sessionId: string) => void,
+    private onRequestError?: (message: string) => void,
   ) {}
   sync(state: AppState) {
     const owner =
@@ -125,13 +127,26 @@ export class ClientPlugins {
             entry.manifest.targets.includes("session-tab") &&
             this.registry?.isEnabled(entry.manifest.id, state.sessionId),
         );
+    const rightRailActive =
+      state.page === "conversation" &&
+      Boolean(state.sessionId) &&
+      !!this.registry
+        ?.getSnapshot()
+        .some(
+          (entry) =>
+            entry.manifest.targets.includes("sidebar") &&
+            this.registry?.isEnabled(entry.manifest.id, state.sessionId) &&
+            entry.status !== "disabled",
+        );
     const targetVisible =
       tabVisible ||
       state.pluginWorkspace?.type === "view" ||
       state.page === "plugin" ||
-      (isPluginDrawerViewport()
-        ? state.rightOverlayOpen
-        : !state.rightRailCollapsed);
+      state.page === "plugins" ||
+      (rightRailActive &&
+        (isPluginDrawerViewport()
+          ? state.rightOverlayOpen
+          : !state.rightRailCollapsed));
     const environment = JSON.stringify([
       state.resolvedLocale,
       state.resolvedTheme,
@@ -205,15 +220,70 @@ export class ClientPlugins {
       effect.sessionId !== sessionId
     )
       throw Error("Plugin request requires the current Session");
-    const request = (method: string, payload: Record<string, unknown> = {}) =>
-      this.api().request(
-        method,
-        payload,
-        sessionId,
-        undefined,
-        undefined,
-        effect.signal,
-      );
+    const current = () =>
+      generation === this.generation &&
+      !effect.signal.aborted &&
+      sessionId === this.session &&
+      history === this.decorationGeneration;
+    const notify = (
+      error: unknown,
+      operationId?: string,
+      outcome: "rejected" | "unknown" = "rejected",
+    ) => {
+      if (!current() || effect.context.tool_invocation) return;
+      if (operationId) {
+        const key = `${outcome}:${operationId}`;
+        if (this.reportedRequests.has(key)) return;
+        this.reportedRequests.add(key);
+        if (this.reportedRequests.size > 512)
+          this.reportedRequests.delete(
+            this.reportedRequests.values().next().value!,
+          );
+      }
+      this.onRequestError?.(failureText(error));
+    };
+    const request = async (
+      method: string,
+      payload: Record<string, unknown> = {},
+    ) => {
+      try {
+        const result = await this.api().request(
+          method,
+          payload,
+          sessionId,
+          undefined,
+          undefined,
+          effect.signal,
+        );
+        // Queue admission is not completion. Observation reports the exact outcome
+        // while leaving its receipt and explicit-save contract intact.
+        if (
+          result &&
+          typeof result === "object" &&
+          "status" in result &&
+          (result.status === "rejected" || result.status === "unknown") &&
+          "operation_id" in result &&
+          typeof result.operation_id === "string" &&
+          "reason" in result
+        )
+          notify(result.reason, result.operation_id, result.status);
+        return result;
+      } catch (error) {
+        notify(
+          error,
+          typeof payload.operation_id === "string"
+            ? payload.operation_id
+            : undefined,
+          error instanceof CommandError &&
+          (error.outcomeUnknown ||
+            (effect.kind === "state-change" &&
+              error.details?.operation_id !== payload.operation_id))
+            ? "unknown"
+            : "rejected",
+        );
+        throw error;
+      }
+    };
     let result: unknown;
     if (effect.kind === "state-values" || effect.kind === "state.get") {
       result = await request("state.get");
@@ -510,6 +580,7 @@ export class ClientPlugins {
   }
   // Retain exact transformed bytes under the admission identity; unknown receipts
   // are observation only and never call preprocessing again.
+  private reportedRequests = new Set<string>();
   private prepared = new Map<string, PluginInput>();
   forget(operationId: string) {
     this.prepared.delete(operationId);
@@ -530,6 +601,7 @@ export class ClientPlugins {
     this.ready = Promise.resolve();
     this.seen.clear();
     this.prepared.clear();
+    this.reportedRequests.clear();
     this.initializing = false;
     this.bypass = false;
     this.error = null;

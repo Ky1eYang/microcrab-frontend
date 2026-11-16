@@ -14,6 +14,7 @@
     "build": "tsc -b && vite build",
     "check": "tsc -b",
     "test:browser": "playwright test",
+    "test:plugin-abi": "playwright test tests/client-plugin-abi-v4.spec.ts --workers=1",
     "format": "prettier --write \"src/**/*.{ts,tsx}\" tests playwright.config.ts vite.config.ts",
     "preview": "vite preview --host 127.0.0.1 --port 8080",
     "fixture": "node fixture/serve.mjs"

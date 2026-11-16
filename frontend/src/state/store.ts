@@ -162,6 +162,7 @@ export class AppStore {
       if (sessionId === this.state.sessionId)
         this.update({ publicState: value, publicStateOmitted: false });
     },
+    (message) => this.toast(message, "error"),
   );
   constructor() {
     publishTranscript(this.conversation, this.state.transcript);
@@ -1074,6 +1075,13 @@ export class AppStore {
     if (route.sessionId && this.state.connection === "ws")
       void this.attach(route.sessionId).catch((e) => this.toast(String(e)));
     else if (route.page === "dashboard") this.update({ page: "dashboard" });
+    else if (route.page === "home")
+      this.update({
+        page: "home",
+        pluginId: null,
+        pluginWorkspace: null,
+        rightOverlayOpen: false,
+      });
   };
   private authPageShow = (event: PageTransitionEvent) => {
     if (event.persisted) {
@@ -6064,16 +6072,51 @@ export class AppStore {
             observer.stop();
           }
         }
-        case "Attach":
+        case "Attach": {
           if (state.sessionAttachingId === value) return;
+          const targetId = String(value ?? "");
+          if (state.page !== "conversation" && targetId) {
+            const nextHash = `#/${sessionPath(targetId)}`;
+            if (location.hash !== nextHash) {
+              history.pushState(null, "", nextHash);
+            }
+            if (targetId === state.sessionId && this.subscription) {
+              this.update({
+                page: "conversation",
+                pluginId: null,
+                pluginWorkspace: null,
+              });
+              return;
+            }
+          }
           return await this.attach(value);
+        }
         case "OpenPlugins":
+        case "OpenPluginsPage": {
+          const returnPath =
+            state.page === "plugins" || state.page === "plugin"
+              ? state.pluginReturnPath
+              : location.hash ||
+                (state.sessionId ? `#/${sessionPath(state.sessionId)}` : "#/");
+          const nextHash = state.sessionId
+            ? `#/${sessionPath(state.sessionId)}/plugins`
+            : "#/plugins";
+          if (location.hash !== nextHash) {
+            history.pushState(null, "", nextHash);
+          }
+          this.update({
+            page: "plugins",
+            pluginId: null,
+            pluginWorkspace: null,
+            pluginReturnPath: returnPath ?? null,
+            rightOverlayOpen: false,
+            popup: { type: "none" },
+          });
+          return;
+        }
         case "OpenPlugin": {
           this.update({
-            pluginWorkspace:
-              action.type === "OpenPlugin"
-                ? { type: "view", pluginId: action.id }
-                : { type: "manager" },
+            pluginWorkspace: { type: "view", pluginId: action.id },
             popup:
               state.popup.type === "settings" ? state.popup : { type: "none" },
           });

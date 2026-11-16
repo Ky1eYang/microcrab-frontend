@@ -1,3 +1,6 @@
+import { useQuestionImageScope, questionImageComponents, type QuestionImageScope } from "./questions/question-images";
+import { markdownExtensions } from "./markdown-extensions";
+import SvgBlock from "./visualizers/SvgBlock";
 import { citationDestinations } from "./citations/parser";
 import { citationComponents } from "./citations/FileCitation";
 import { useCitationScope, type CitationScope } from "./citations/context";
@@ -163,6 +166,7 @@ export function CodeBlock({
         ) : (
           <span className="code-block-lang">{language || "text"}</span>
         )}
+        <div className="code-block-actions">
         {!inContentDialog && (
           <button
             type="button"
@@ -191,6 +195,7 @@ export function CodeBlock({
             )}
           </span>
         </button>
+        </div>
       </div>
       {rich && format === "preview" ? (
         <VisualPreview language={language} source={source} fallback={raw} interactions={interactions} />
@@ -265,7 +270,7 @@ const markdownComponents: Components = {
       <input {...props} />
     ),
   table: ({ children }) => (
-    <div className="table-container">
+    <div className="table-container markdown-table-container" tabIndex={0}>
       <table>{children}</table>
     </div>
   ),
@@ -307,6 +312,10 @@ const markdownComponents: Components = {
   },
   span: ({ children, ...props }) => {
     const data = props as any;
+    if (typeof data["data-inline-svg"] === "string") {
+      const source = data["data-inline-svg"];
+      return <SvgBlock inline source={source} fallback={<code className="inline-svg-source">{source}</code>} />;
+    }
     return typeof data["data-math-source"] === "string" ? (
       <MathNode
         source={data["data-math-source"]}
@@ -329,27 +338,31 @@ export const Markdown = memo(function Markdown({
   allowImages = true,
   rich,
   citation,
+  questionImages,
 }: {
   text: string;
   allowImages?: boolean;
   rich?: RichMarkdownContext;
   citation?: CitationScope;
+  questionImages?: QuestionImageScope;
 }) {
   useSyncExternalStore(subscribeLocale, activeLocale, activeLocale);
   const enabled = !!rich && !rich.streaming;
   const context = useMemo(() => ({ text, enabled }), [text, enabled]);
   const components = useMemo(
-    () => citation && allowImages
-      ? { ...markdownComponents, ...citationComponents(citation) }
-      : allowImages ? markdownComponents : markdownWithoutImages,
-    [citation, allowImages],
+    () => questionImages && allowImages
+      ? { ...markdownComponents, ...questionImageComponents(questionImages) }
+      : citation && allowImages
+        ? { ...markdownComponents, ...citationComponents(citation) }
+        : allowImages ? markdownComponents : markdownWithoutImages,
+    [citation, questionImages, allowImages],
   );
   const plugins = useMemo(() => {
-    const result: any[] = [remarkGfm, headingAttributes];
+    const result: any[] = [remarkGfm, headingAttributes, [markdownExtensions, { source: text, rich: enabled }]];
     if (enabled) result.push(remarkMath, [mathProperties, { source: text }]);
-    if (citation && allowImages) result.push(citationDestinations);
+    if ((citation || questionImages) && allowImages) result.push(citationDestinations);
     return result;
-  }, [enabled, text, citation, allowImages]);
+  }, [enabled, text, citation, questionImages, allowImages]);
   return (
     <RichContext.Provider value={context}>
       <div className="markdown-body markdown-content">
@@ -1531,6 +1544,7 @@ export function PermissionCard({
 }
 export function QuestionCard({ value }: { value: PendingQuestion }) {
   const dispatch = useAppDispatch();
+  const questionImages = useQuestionImageScope(value);
   const questions = value.questions;
   const requestId = value.id;
   const [selected, setSelected] = useState<string[][]>(() =>
@@ -1576,7 +1590,9 @@ export function QuestionCard({ value }: { value: PendingQuestion }) {
       {questions.map((q, index) => (
         <Fragment key={q.id}>
           {q.header && <h4>{q.header}</h4>}
-          <p>{q.question}</p>
+          <div className="question-body">
+            <Markdown text={q.question} allowImages={!!questionImages} questionImages={questionImages} rich={{ streaming: false }} />
+          </div>
           <div className="choice-list">
             {(q.options ?? []).map((o) => (
               <button

@@ -1,12 +1,16 @@
 import { PluginSidebar } from "../plugins/PluginSidebar";
+import { hasActiveSessionSidebarPlugin } from "../plugins/session-tabs";
 import { t } from "../i18n";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { useAppFields } from "../state";
+import { useAppFields, useClientPlugins } from "../state";
 import { focusFirst, usePluginDrawerViewport } from "../client/viewport";
 import { Icon } from "./shared";
 
 export function RightRail() {
+  const plugins = useClientPlugins();
   const { state, dispatch } = useAppFields([
+    "page",
+    "sessionId",
     "rightRailWidth",
     "railCollapsed",
     "rightOverlayOpen",
@@ -14,6 +18,12 @@ export function RightRail() {
     "conversationWidth",
     "resolvedLocale",
   ]);
+  const canShowRightRail = hasActiveSessionSidebarPlugin(
+    plugins.registry?.getSnapshot() ?? [],
+    (id) => plugins.registry?.isEnabled(id, state.sessionId) ?? false,
+    state.page,
+    state.sessionId,
+  );
   const [dragging, setDragging] = useState(false);
   const shell = useRef<HTMLElement>(null);
   const start = useRef({ x: 0, width: state.rightRailWidth });
@@ -86,7 +96,7 @@ export function RightRail() {
     return () => document.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [overlay]);
-  if (narrow ? !overlay : state.rightRailCollapsed) return null;
+  if (!canShowRightRail || (narrow ? !overlay : state.rightRailCollapsed)) return null;
   return (
     <>
       {overlay && (

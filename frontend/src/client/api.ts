@@ -1,3 +1,4 @@
+import { questionImagePath, type QuestionImageRequest } from "./question-images";
 import { boundedCitationBlob, citationPath, CITATION_TIMEOUT_MS, type CitationRequest } from "./citations";
 import { validateExecutionHistory } from "./execution-history";
 import {
@@ -1440,6 +1441,7 @@ export class ApiClient {
     trigger?: HostLifecycleTrigger,
     signal?: AbortSignal,
     binary = false,
+    executorLease?: string,
   ): Promise<T> {
     const controller = new AbortController();
     const abort = () => controller.abort(signal?.reason);
@@ -1465,6 +1467,7 @@ export class ApiClient {
           ...(trigger ? { "x-client-trigger": trigger } : {}),
           ...(body === undefined ? {} : { "Content-Type": contentType }),
           ...(requestId ? { "X-Request-ID": requestId } : {}),
+          ...(executorLease ? { "X-Microcrab-Executor-Lease": executorLease } : {}),
         },
         body,
         signal: controller.signal,
@@ -1593,6 +1596,20 @@ export class ApiClient {
       throw new CommandError("overloaded", "Too many pending requests");
     return this.http<Blob>(this.url(citationPath(request)), "GET", undefined,
       CITATION_TIMEOUT_MS, "application/json", undefined, undefined, signal, true);
+  }
+  async readQuestionImage(
+    request: QuestionImageRequest,
+    leaseId: string,
+    signal: AbortSignal,
+  ): Promise<Blob> {
+    if (!leaseId) throw new CommandError("executor_required", "Question image requires an active executor lease");
+    if (this.httpPending.size + this.pending.size >= MAX_PENDING)
+      throw new CommandError("overloaded", "Too many pending requests");
+    const blob = await this.http<Blob>(this.url(questionImagePath(request)), "GET", undefined,
+      CITATION_TIMEOUT_MS, "application/json", undefined, undefined, signal, true, leaseId);
+    if (!blob.type.startsWith("image/"))
+      throw new CommandError("unsupported_image", "Question reference is not a supported raster image");
+    return blob;
   }
   async uploadImage(sessionId: string, file: File) {
     if (this.httpPending.size + this.pending.size >= MAX_PENDING)

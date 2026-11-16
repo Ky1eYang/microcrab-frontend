@@ -2846,6 +2846,13 @@
   font-size: var(--fs-xs);
 }
 
+.code-block-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  margin-left: auto;
+}
+
 .code-block-lang {
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
@@ -3092,6 +3099,61 @@
   background: var(--border);
   margin: 16px 0;
 }
+
+/* Explicit Markdown semantics; arbitrary HTML remains disabled. */
+.markdown-body details {
+  margin: var(--sp-2) 0;
+  padding-left: var(--sp-3);
+  border-left: 1px solid var(--border-strong);
+}
+
+.markdown-body summary {
+  cursor: pointer;
+  min-height: 24px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.markdown-body summary > p {
+  display: inline;
+}
+
+.markdown-body summary:focus-visible,
+.markdown-table-container:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.markdown-body kbd {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  padding: 0 var(--sp-1);
+  border: 1px solid var(--border-strong);
+  border-bottom-width: 2px;
+  border-radius: var(--r-sm);
+  background: var(--bg-subtle);
+  color: var(--text);
+}
+
+.markdown-body mark {
+  color: var(--text);
+  background: color-mix(in srgb, var(--warn) 22%, var(--bg));
+  padding: 0 2px;
+  border-radius: 2px;
+}
+
+.markdown-body :is(sup, sub) {
+  font-size: 0.75em;
+  line-height: 0;
+  position: relative;
+  vertical-align: baseline;
+}
+
+.markdown-body sup { top: -0.5em; }
+.markdown-body sub { bottom: -0.2em; }
+.markdown-body .inline-svg-source { white-space: pre-wrap; overflow-wrap: anywhere; }
 
 /* Collapsible Think Card */
 .think-card {

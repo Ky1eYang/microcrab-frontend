@@ -79,19 +79,54 @@ effects retain a 10-second budget capped by any positive invocation deadline;
 cancellation cleanup retains its separate one-second bound. An unbounded invocation
 does not grant unbounded network/effect execution or replay authority.
 
-The maintained MCP Bridge declares only `sidebar` and renders no view for other
-targets. Its configuration remains available in that Sidebar; it contributes no
-Session tab or expanded page. Other plugins retain their declared surfaces.
+The maintained Zig MCP Bridge declares `sidebar` and `setting-page`: Sidebar is
+observation-only, while SettingPage owns server configuration. It contributes no
+Session tab or expanded page. The maintained Zig State Viewer declares only
+`sidebar` and `expanded-page`; it has no plugin parameters or SettingPage.
+The Rust State Viewer behavioral fixture also declares `setting-page`. With no
+selected Session, that fixture returns an English/Chinese Session-required notice
+before any State import, using the host's flat `ctx.session_id` and `ctx.locale` fields.
 
-## Deliberate dual ABI
+## Explicit versioned ABI
 
-ABI `microcrab:client-plugin@0.2.0` remains in `crates/client/plugins/wit/` for
-maintained visual guests and retained installed bytes. ABI `@0.3.0` is in
-`crates/client/plugins/wit-v3/`. Its optional `tool-plugin` world adds `start-tool`
-and `cancel-tool`; both must be present together. Visual-only worlds do not gain
-mandatory exports. The inspector validates actual imports/exports and the worker
-binds only supported exact versions. Production instantiation and WASM execution
-remain in a dedicated worker.
+The runtime supports only `microcrab:client-plugin@0.4.0`, defined by the single
+canonical `crates/client/plugins/wit/client-plugin.wit`. Maintained State Viewer,
+fixture and MCP guests bind to this directory. `view-target` includes `setting-page`.
+Both visual-only worlds and the optional `tool-plugin` world support settings
+surfaces; adding a target does not grant State, resource, network or tool authority.
+
+The optional `tool-plugin` world adds `start-tool` and `cancel-tool`; both must be
+present together. Visual-only worlds do not gain mandatory tool exports. The
+inspector validates actual imports/exports and the Worker binds exact 0.4.0 imports.
+Production instantiation and WASM execution remain in a dedicated Worker. Type-only
+imports never grant effect capabilities.
+
+HTML `render-view` envelopes may declare `view_state: {"$ref":"state"}` to bind
+an explicit plugin variable subtree. Only an exact single-key root object is a
+binding; objects with additional keys and nested `$ref` objects remain literal JSON.
+Paths must be nonempty, at most512 characters, resolve through own properties,
+and exclude prototype segments and the whole Vars root. A missing path is an error;
+explicit JSON null is valid. Each variable update validates all mounted projections
+before committing: the existing64-KiB/depth24/4096-node HTML message limits apply.
+Ordinary `vars_patch` updates then push the projection through the existing channel
+without a structural render or document replacement. Keep `rerender:false` when only
+projection data changes. HTML BlockSlot `view_state` remains literal.
+
+Installed 0.2/0.3 Components fail with a concrete unsupported-import diagnostic.
+Their bytes, preferences and KV remain retained; startup never silently upgrades an
+unsupported ABI through bundled predecessor repair. Explicit owner replacement is
+required, and no mutation is replayed to migrate an old guest.
+
+`npm run test:plugin-abi` proves real retained 0.2/0.3 Components are rejected before
+execution, then exercises newly built 0.4 Components using the actual inspector,
+jco instantiation, typed manifests, renders and optional tool exports. The outer
+`cargo xtask wasm zig-plugins` stages the maintained Zig guests;
+`cargo xtask wasm plugins` stages the Rust behavioral fixtures. Select and stage
+those graphs explicitly before the matching browser gate.
+The gate requires retained immutable old Component assets in
+`frontend/public/plugins`; these generated assets are local prerequisites, not
+tracked source fixtures. Missing old evidence fails the gate instead of substituting
+framing-only synthetic modules.
 
 `start-tool(request,ctx)` returns an immediate `PluginResult.tool_completion` with
 `pending`, `completed`, or `failed`. Imports still queue request IDs. Their results
@@ -112,8 +147,8 @@ resource reference. Actual component imports remain necessary independently.
 ## Resource configuration and credentials
 
 The generic `resources` import provides queued `resource-list` and
-`resource-configure`. Configuration is available through the MCP plugin's native
-surface. The authenticated owner's explicit Add/Update action creates or revokes a
+`resource-configure`. Configuration is available through the MCP plugin's declared
+HTML SettingPage. The authenticated owner's explicit Add/Update action creates or revokes a
 grant; there is no extra permission dialog. A grant binds the application server
 origin, owner, plugin ID, exact artifact digest, configured server ID, exact full
 HTTP(S) endpoint, POST method, and config revision. Endpoint changes never inherit
@@ -121,10 +156,13 @@ credentials from another endpoint. No wildcard origins, redirects, cookies,
 ambient credential headers, or arbitrary HTTP methods are admitted.
 
 Configuration and authorization persist in browser LocalStorage under the exact
-application-server/owner/plugin namespace. Credentials are host-owned and are not
-returned by the resource import or included in model inventories, plugin HTML,
-logs, or diagnostics. Native password input state is transient and cleared after
-queuing a configuration action. Blank authorization keeps the credential only for
+application-server/owner/plugin namespace. Persisted credentials are host-owned and
+are not returned by the resource import or included in model inventories, projected
+HTML view_state, Vars, histories, logs or diagnostics. The user-approved HTML form
+may temporarily contain a newly entered password and send it in one fenced save
+action; DOM and guest transient buffers are immediately cleared after queuing. Guest
+HTML can observe that new input; this grants no readback of saved credentials.
+Blank authorization keeps the credential only for
 the same endpoint; the explicit Clear credential selector removes it. Disable,
 remove, reconfiguration, and cross-tab LocalStorage changes revoke in-flight
 network work. Replacing plugin bytes preserves saved configuration/credentials but
@@ -197,11 +235,23 @@ defaults, argument coercions, regex execution, or remote schema fetches.
 
 ## Build and acceptance
 
-Build all maintained plugin packages together through the root Cargo entry with
-explicit `--frontend` and `--install-dir` selections. The workspace metadata-driven
-packager discovers MCP automatically, validates the component, publishes immutable
-`<id>/<sha256>/plugin.wasm`, and atomically updates the bounded discovery pointer.
-Generated bytes remain ignored and are release inputs, not source commits.
+Build maintained plugins through `cargo xtask wasm zig-plugins -p state-viewer
+-p mcp-bridge`, optionally selecting `--frontend-plugins` source and explicit
+`--install-dir` destination. Without installation this produces validated WIT
+Components only; actual optimization defaults to ReleaseSmall. Root Zig registrations
+own IDs/worlds/assets, with cache-generated HTML. Direct `zig build install-frontend`
+aggregates both approved public directories; an explicit destination replaces these
+defaults. Installation preserves unrelated entries/defaults, verifies immutable bytes,
+and atomically merges one bounded pointer per destination under locks. Explicit
+adopt-current verifies the previous selected package before retaining its exact hash;
+no artifact hash is hardcoded. The legacy `wasm plugins` Rust package entry remains
+for explicit behavioral fixtures and compatibility, never an implicit concurrent
+publisher. Generated bytes remain ignored release inputs, not source commits.
+
+Zig native tests cover protocol, pins/cursors, fail-closed schemas, operation cleanup,
+history/projection budgets and secret clearing. `frontend/tests/zig-mcp-bridge.spec.ts`
+uses the real Zig Component and Worker for protocol/UI/cancellation/history gates;
+`frontend/tests/client-plugin-packaged-mcp.spec.ts` consumes the actual assembled app.
 
 Native MCP tests cover RPC identity/unknown outcomes, pagination, schema pins, and
 argument validation. `frontend/tests/client-plugin-tool-hub.spec.ts` exercises

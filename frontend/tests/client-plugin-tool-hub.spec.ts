@@ -1,5 +1,10 @@
 import { test, expect } from "@playwright/test";
 import { nativeBackend } from "./native-fixture";
+import { maintainedPluginBundle } from "./plugin-bundle-fixture";
+
+test.beforeEach(async ({ page }) => {
+  await maintainedPluginBundle(page);
+});
 
 test("resource grants bind owner/plugin/artifact/config and revoke in-flight credentials", async ({
   page,

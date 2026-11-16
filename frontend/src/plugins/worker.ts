@@ -1,4 +1,5 @@
 import {
+  CLIENT_PLUGIN_ABI,
   PluginImportError,
   authorizeKind,
   capabilityForKind,
@@ -37,8 +38,8 @@ function request(
   if (++callEffects > LIMITS.effects)
     throw new Error("plugin exceeds 64 host requests per call");
   if (
-    !["0.2.0", "0.3.0"].some((v) =>
-      imports.includes(`microcrab:client-plugin/${capability}@${v}`),
+    !imports.includes(
+      `microcrab:client-plugin/${capability}@${CLIENT_PLUGIN_ABI}`,
     )
   )
     throw new Error(`missing actual ${capability} import`);
@@ -77,10 +78,9 @@ port.onmessage = async ({ data }) => {
       projects = data.projects;
       const inspection = await inspectComponent(data.bytes);
       imports = inspection.imports;
-      const host: Record<string, unknown> = {
-        "microcrab:client-plugin/view-types@0.2.0": {},
-      };
-      for (const version of ["0.2.0", "0.3.0"]) {
+      const host: Record<string, unknown> = {};
+      {
+        const version = CLIENT_PLUGIN_ABI;
         host[`microcrab:client-plugin/view-types@${version}`] = {};
         for (const capability of [
           "session-state",

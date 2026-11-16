@@ -4,7 +4,7 @@ export type Json =
   null | boolean | number | string | Json[] | { [key: string]: Json };
 export type Vars = Record<string, Json>;
 export type ViewTarget =
-  "sidebar" | "expanded-page" | "session-tab" | "block-slot";
+  "sidebar" | "expanded-page" | "session-tab" | "block-slot" | "setting-page";
 export type RenderMode = "native-json" | "webview-html";
 /** Supplied by the host mount, never accepted from plugin action payloads. */
 export interface PluginSurfaceDescriptor {
@@ -47,6 +47,9 @@ export interface PluginContext {
   /** Host mount revision; changes on hide/remount and history replacement. */
   surface_generation?: number;
   history_generation?: number;
+  /** Observational host samples; never execution/deadline authority. */
+  host_time_ms?: number;
+  host_monotonic_ms?: number;
   invocation_id?: string;
   tool_invocation?: PluginToolIdentity;
   /** Host-only bounded cancellation cleanup authority. */
@@ -290,6 +293,7 @@ export interface PluginRegistryAPI {
     payload?: Json,
     surface?: PluginSurfaceDescriptor,
   ): Promise<void>;
+  releaseSurface(pluginId: string, surface: PluginSurfaceDescriptor): void;
   setSurfaceVisible(
     pluginId: string,
     surface: PluginSurfaceDescriptor,

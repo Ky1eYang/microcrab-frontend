@@ -1,3 +1,4 @@
+import { maintainedPluginBundle } from "./plugin-bundle-fixture";
 import { stateInspection } from "./state-inspection-fixture";
 import { test, expect } from "@playwright/test";
 import { nativeBackend } from "./native-fixture";
@@ -6,6 +7,7 @@ test("omitted automatic State and partial execution updates stay distinct from a
   page,
 }) => {
   const backend = await nativeBackend(page);
+  await maintainedPluginBundle(page);
   backend.snapshot().state = null;
   backend.snapshot().state_omitted = true;
   let release!: () => void;

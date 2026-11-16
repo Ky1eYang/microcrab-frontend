@@ -27,22 +27,29 @@ export function documentLeaveSelector(
         ? ".client-plugin-workspace"
         : state.page === "plugin"
           ? ".client-plugin-expanded-page"
-          : undefined;
+          : state.page === "plugins"
+            ? ".client-plugins-page"
+            : undefined;
     case "OpenPlugins":
-      return state.pluginWorkspace?.type === "view"
-        ? ".client-plugin-workspace"
-        : undefined;
+    case "OpenPluginsPage":
+      return state.page === "plugins" && !state.pluginWorkspace
+        ? undefined
+        : null;
     case "OpenPlugin":
-      return state.pluginWorkspace?.type === "view" &&
-        state.pluginWorkspace.pluginId !== action.id
-        ? ".client-plugin-workspace"
-        : undefined;
+      return state.page === "plugins"
+        ? ".client-plugins-page"
+        : state.pluginWorkspace?.type === "view" &&
+            state.pluginWorkspace.pluginId !== action.id
+          ? ".client-plugin-workspace"
+          : undefined;
     case "Navigate":
       return action.value === state.page ? undefined : null;
     case "OpenDashboard":
       return state.page === "dashboard" ? undefined : null;
     case "Attach":
-      return action.value === state.sessionId ? undefined : null;
+      return action.value === state.sessionId && state.page === "conversation"
+        ? undefined
+        : null;
     case "Logout":
     case "NewChat":
     case "SelectKnownProject":

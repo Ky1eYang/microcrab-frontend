@@ -1,5 +1,6 @@
 import { useClientPlugins } from "../state";
 import {
+  hasActiveSessionSidebarPlugin,
   sessionTabPlugins,
   selectedSessionPlugin,
 } from "../plugins/session-tabs";
@@ -78,6 +79,8 @@ export function Header() {
           "childListError",
           "showRunningToolsMenu",
           "apiBase",
+          "page",
+          "pluginId",
           "viewMode",
           "sessionPluginTab",
           "resolvedLocale",
@@ -87,7 +90,15 @@ export function Header() {
   const host = hostReadiness(state);
   const hostLabel = hostStatusLabel(host.status);
   const narrow = usePluginDrawerViewport();
-  const rightOpen = narrow ? state.rightOverlayOpen : !state.rightRailCollapsed;
+  const canShowRightRail = hasActiveSessionSidebarPlugin(
+    clientPlugins.registry?.getSnapshot() ?? [],
+    (id) => clientPlugins.registry?.isEnabled(id, state.sessionId) ?? false,
+    state.page,
+    state.sessionId,
+  );
+  const rightOpen =
+    canShowRightRail &&
+    (narrow ? state.rightOverlayOpen : !state.rightRailCollapsed);
   const [, tick] = useState(0);
   const [peek, setPeek] = useState<NativeExecution | null>(null);
   const tools: NativeExecution[] = (state.executionHistory ?? []).filter(
@@ -131,7 +142,18 @@ export function Header() {
     state.popup.parentId === state.sessionId
       ? state.popup
       : null;
-  const title = current?.title || current?.id || "New chat";
+  const activePluginName =
+    state.page === "plugin" && state.pluginId
+      ? clientPlugins.registry
+          ?.getSnapshot()
+          .find((entry) => entry.manifest.id === state.pluginId)?.manifest.name
+      : undefined;
+  const title =
+    state.page === "plugins"
+      ? t("plugins.title")
+      : state.page === "plugin"
+        ? (activePluginName ?? t("plugins.title"))
+        : current?.title || current?.id || "New chat";
   const children = (
     state.childList?.parent_session_id === state.sessionId
       ? state.childList.children
@@ -613,30 +635,32 @@ export function Header() {
           >
             {t(`header.state.${status}`)}
           </span>
-          <button
-            className={`header-right-toggle-btn${rightOpen ? " active" : ""}`}
-            title={
-              rightOpen
-                ? t("header.pluginsCollapse")
-                : t("header.pluginsExpand")
-            }
-            aria-label={
-              rightOpen
-                ? t("header.pluginsCollapse")
-                : t("header.pluginsExpand")
-            }
-            aria-expanded={rightOpen}
-            onClick={() =>
-              narrow
-                ? emit("SetRightOverlay", !state.rightOverlayOpen)
-                : emit("ToggleRightRail")
-            }
-          >
-            <Icon name="plugins" size={18} />
-          </button>
+          {canShowRightRail && (
+            <button
+              className={`header-right-toggle-btn${rightOpen ? " active" : ""}`}
+              title={
+                rightOpen
+                  ? t("header.pluginsCollapse")
+                  : t("header.pluginsExpand")
+              }
+              aria-label={
+                rightOpen
+                  ? t("header.pluginsCollapse")
+                  : t("header.pluginsExpand")
+              }
+              aria-expanded={rightOpen}
+              onClick={() =>
+                narrow
+                  ? emit("SetRightOverlay", !state.rightOverlayOpen)
+                  : emit("ToggleRightRail")
+              }
+            >
+              <Icon name="plugins" size={18} />
+            </button>
+          )}
         </div>
       </div>
-      {state.sessionId && !inspection && (
+      {state.page === "conversation" && state.sessionId && !inspection && (
         <SessionViewTabs
           viewMode={state.viewMode === "trajectory" ? "trajectory" : "chat"}
           plugins={sessionTabPlugins(

@@ -1,6 +1,5 @@
+import { maintainedPluginBundle } from "./plugin-bundle-fixture";
 import { expect, test } from "@playwright/test";
-import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
 import { nativeBackend } from "./native-fixture";
 
 /** No development source imports: this exercises emitted Worker, Component and shim. */
@@ -8,39 +7,15 @@ test("emitted native and HTML fixture surfaces mount, act and switch without rep
   page,
 }) => {
   await nativeBackend(page);
-  let fixturePath = process.env.MICROCRAB_PLUGIN_FIXTURE_WASM;
-  if (!fixturePath) {
-    const index = JSON.parse(
-      await readFile(
-        new URL("../public/plugins/current.json", import.meta.url),
-        "utf8",
-      ),
-    );
-    const fixture = index.plugins.find(
-      (entry: { id: string }) => entry.id === "microcrab.fixture",
-    );
-    expect(
-      fixture,
-      "Build the maintained fixture, or set MICROCRAB_PLUGIN_FIXTURE_WASM to its actual Component file",
-    ).toBeTruthy();
-    fixturePath = fileURLToPath(
-      new URL(`../public/plugins/${fixture.file}`, import.meta.url),
-    );
-  }
-  const bytes = await readFile(fixturePath!);
+  await maintainedPluginBundle(page);
   await page.addInitScript(() =>
     localStorage.setItem("microcrab.ui.rightRailCollapsed", "false"),
   );
   await page.goto("/#/session/s1/plugins");
   const manager = page.getByTestId("client-plugins-manager");
   await expect(manager).toBeVisible();
-  const fixture = manager.locator('[data-plugin-id="microcrab.fixture"]');
-  if ((await fixture.count()) === 0)
-    await manager.getByTestId("plugin-upload").setInputFiles({
-      name: "surface-fixture.wasm",
-      mimeType: "application/wasm",
-      buffer: bytes,
-    });
+  await manager.locator('[data-plugin-nav-id="microcrab.fixture"]').click();
+  const fixture = manager.locator('article[data-plugin-id="microcrab.fixture"]');
   await expect(fixture).toBeVisible();
   await fixture.getByLabel("在当前会话启用").check();
   await expect(fixture).toHaveAttribute("data-status", "ready");

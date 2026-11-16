@@ -504,6 +504,9 @@ test("restoration captures its Session and disposal cancels a held real inspecti
         );
         worker.addEventListener("message", (event) => {
           if (!holding || event.data.type !== "loaded") return;
+          // Hold this one inspection receipt, not unrelated Workers started by the
+          // Session switch that the test must complete before releasing it.
+          holding = false;
           event.stopImmediatePropagation();
           held.push({ worker, data: event.data });
           notify?.();

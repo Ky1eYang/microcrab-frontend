@@ -17,7 +17,7 @@ mod bindings {
                 name: "State Viewer".into(),
                 version: env!("CARGO_PKG_VERSION").into(),
                 description: super::manifest()["description"].as_str().map(str::to_owned),
-                targets: vec![ViewTarget::Sidebar, ViewTarget::ExpandedPage],
+                targets: vec![ViewTarget::Sidebar, ViewTarget::ExpandedPage, ViewTarget::SettingPage],
                 network_origins: None,
             }
         }
@@ -30,6 +30,7 @@ mod bindings {
                 ViewTarget::ExpandedPage => "expanded-page",
                 ViewTarget::SessionTab => "session-tab",
                 ViewTarget::BlockSlot => "block-slot",
+                ViewTarget::SettingPage => "setting-page",
             };
             let output =
                 super::render(target, &super::decode(&vars), &super::decode(&ctx), request);
@@ -84,7 +85,7 @@ fn decode(input: &str) -> Value {
 fn manifest() -> Value {
     json!({"id":"microcrab.state-viewer","name":"State Viewer","version":env!("CARGO_PKG_VERSION"),
         "description":"Inspect and edit governed Session State. 查看和编辑受权限控制的会话状态。",
-        "targets":["sidebar","expanded-page"]})
+        "targets":["sidebar","expanded-page","setting-page"]})
 }
 fn fence(ctx: &Value) -> Value {
     json!([
@@ -167,8 +168,15 @@ fn render(
 ) -> Value {
     // Unsupported targets are intentionally empty. Dispatch before current(),
     // which can reset fences or reconcile mount-owned requests and receipts.
-    if !matches!(target, "sidebar" | "expanded-page") {
+    if !matches!(target, "sidebar" | "expanded-page" | "setting-page") {
         return json!({"schema_version":1,"tree":null});
+    }
+    if ctx["session_id"].as_str().is_none_or(str::is_empty) {
+        let zh = ctx["locale"].as_str().is_none_or(|locale| locale.starts_with("zh"));
+        return json!({"schema_version":1,"tree":{"type":"notice","props":{
+            "text":if zh { "需要会话：请选择或创建会话后查看和编辑会话状态。" }
+                   else { "Session required: select or create a session to inspect and edit Session State." }
+        }}});
     }
     let mut vars = current(vars, ctx);
     // Only a render transfers a cross-surface read. Delayed old completions

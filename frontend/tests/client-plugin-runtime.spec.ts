@@ -1,7 +1,11 @@
 import { test, expect } from "@playwright/test";
 import { nativeBackend } from "./native-fixture";
+import { maintainedPluginBundle } from "./plugin-bundle-fixture";
 
 test.setTimeout(90_000);
+test.beforeEach(async ({ page }) => {
+  await maintainedPluginBundle(page);
+});
 
 // These tests fetch the maintained, parent-built Rust Components. They never synthesize
 // manifests or substitute a fake Worker. The content-hash index is the artifact authority.
@@ -32,7 +36,7 @@ test("real Component inspection rejects core bytes and an unsupported binary imp
       errors.push(String(e));
     }
     const needle = new TextEncoder().encode(
-      "microcrab:client-plugin/session-state@0.2.0",
+      "microcrab:client-plugin/session-state@0.4.0",
     );
     const changed = bytes.slice();
     let replaced = false;
@@ -54,12 +58,12 @@ test("real Component inspection rejects core bytes and an unsupported binary imp
     return { imports: inspected.imports, errors };
   });
   expect(result.imports).toEqual([
-    "microcrab:client-plugin/session-state@0.2.0",
-    "microcrab:client-plugin/session-state-write@0.2.0",
-    "microcrab:client-plugin/view-types@0.2.0",
+    "microcrab:client-plugin/session-state@0.4.0",
+    "microcrab:client-plugin/session-state-write@0.4.0",
+    "microcrab:client-plugin/view-types@0.4.0",
   ]);
   expect(result.errors[0]).toContain("Component binary");
-  expect(result.errors[1]).toContain("session-state@0.2.1");
+  expect(result.errors[1]).toContain("session-state@0.4.1");
 });
 
 test("real fixture caches structure, updates variables, preprocesses deterministically and retains failure", async ({
@@ -470,9 +474,9 @@ test("real Viewer requests atomic values metadata descriptors and witness with f
     ),
   ).toBe(true);
   expect(result.imports).toEqual([
-    "microcrab:client-plugin/session-state@0.2.0",
-    "microcrab:client-plugin/session-state-write@0.2.0",
-    "microcrab:client-plugin/view-types@0.2.0",
+    "microcrab:client-plugin/session-state@0.4.0",
+    "microcrab:client-plugin/session-state-write@0.4.0",
+    "microcrab:client-plugin/view-types@0.4.0",
   ]);
 });
 

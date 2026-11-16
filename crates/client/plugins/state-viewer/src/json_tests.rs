@@ -105,7 +105,7 @@ fn surfaces_mounts_receipts_and_tree_bindings_keep_exact_identity() {
     let mut wrong = ctx("wrong"); wrong["surface_generation"] = 3.into();
     let denied = action(&snapshot(&wrong),&wrong,"save-json",save_payload(&snapshot(&a),&a,&json!({})));
     assert_eq!(denied["surfaces"]["wrong"]["status"],"error");
-    for target in ["sidebar","expanded-page"] {
+    for target in ["sidebar","expanded-page","setting-page"] {
         let tree = view::tree(target,&surface_key(&a)).to_string();
         assert!(!tree.contains("textarea")); assert!(!tree.contains("review-save")); assert!(!tree.contains("New variable"));
         assert!(tree.contains("save-json")); assert!(tree.contains("observe-json")); assert!(tree.contains(&format!("surface_views.{}.edit_context",surface_key(&a))));
@@ -114,13 +114,13 @@ fn surfaces_mounts_receipts_and_tree_bindings_keep_exact_identity() {
 #[test]
 fn supported_targets_refresh_contexts_together_and_preserve_editor_fences() {
     let mut v = snapshot(&ctx("one"));
-    for target in ["sidebar","expanded-page"] {
+    for target in ["sidebar","expanded-page","setting-page"] {
         let mut c = ctx(target); c["surface"]["target"] = target.into();
         view::derive(&mut v,&c);
     }
     inspect(&mut v,&inspection("8")).unwrap();
     view::derive(&mut v,&ctx("one"));
-    for target in ["sidebar","expanded-page"] {
+    for target in ["sidebar","expanded-page","setting-page"] {
         let mut c = ctx(target); c["surface"]["target"] = target.into();
         assert_eq!(captured(&v,&c)["witness"],inspection("8")["witness"]);
         assert_eq!(captured(&v,&c)["target"],target);
@@ -174,7 +174,7 @@ fn unsupported_targets_are_empty_before_fences_mounts_reads_or_projection() {
 }
 #[test]
 fn manifest_and_layouts_match_the_supported_inspection_surfaces() {
-    assert_eq!(manifest()["targets"], json!(["sidebar", "expanded-page"]));
+    assert_eq!(manifest()["targets"], json!(["sidebar", "expanded-page", "setting-page"]));
     let sidebar = view::tree("sidebar", "scope");
     let expanded = view::tree("expanded-page", "scope");
     assert_eq!(sidebar["children"][0]["type"], "input");
