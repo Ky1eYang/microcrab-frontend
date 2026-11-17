@@ -284,6 +284,13 @@ export function SessionRail() {
     if (!drawerActive) return;
     focusFirst(drawer.current);
     const onKey = (event: KeyboardEvent) => {
+      // A dialog opened from the drawer (search, settings) owns the keyboard.
+      const target = event.target as Element | null;
+      if (
+        target?.closest?.('[role="dialog"], [aria-modal="true"]') &&
+        !drawer.current?.contains(target)
+      )
+        return;
       if (event.key === "Escape") {
         event.preventDefault();
         closeDrawer();
@@ -447,7 +454,15 @@ export function SessionRail() {
           className="subnav-item-btn"
           data-testid="nav-history"
           title={t("rail.history")}
-          onClick={() => emit("OpenSearch")}
+          onClick={() => {
+            // The search dialog takes focus; do not leave the drawer under it,
+            // and let the dialog return focus to the header menu button.
+            if (drawerActive) {
+              setDrawerOpen(false);
+              railDrawerTrigger()?.focus();
+            }
+            emit("OpenSearch");
+          }}
         >
           <Icon name="history" size={15} />
           <span>{t("rail.history")}</span>

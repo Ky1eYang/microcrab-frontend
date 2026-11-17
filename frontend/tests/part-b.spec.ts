@@ -42,15 +42,12 @@ for (const { width, theme, locale } of [
       height: width === 390 ? 844 : 900,
     });
     await ready(page, "default", theme, locale);
-    const trigger = (
-      width === 390
-        ? page.getByRole("button", {
-            name: /搜索会话|Search conversations/,
-          })
-        : page.locator(".subnav-item-btn", {
-            hasText: /会话历史|Session history/,
-          })
-    )
+    // Under 768px the rail lives in the drawer opened from the header.
+    if (width === 390) await page.getByTestId("header-open-rail").click();
+    const trigger = page
+      .locator(".subnav-item-btn", {
+        hasText: /会话历史|Session history/,
+      })
       .locator("visible=true")
       .first();
     const dialog = page.locator(".search-dialog[role=dialog]");
@@ -100,7 +97,10 @@ for (const { width, theme, locale } of [
     // Escape closes and restores focus to the opener.
     await page.keyboard.press("Escape");
     await expect(dialog).toHaveCount(0);
-    await expect(trigger).toBeFocused();
+    // At 390 the drawer closed when Search opened; focus returns to its opener.
+    await expect(
+      width === 390 ? page.getByTestId("header-open-rail") : trigger,
+    ).toBeFocused();
   });
 
 for (const { theme, locale } of [
@@ -112,6 +112,10 @@ for (const { theme, locale } of [
   }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await ready(page, "inbox-mixed-draft", theme, locale);
+    // Narrow viewports start with the queue collapsed.
+    const header = page.locator(".queue-dock-header");
+    if ((await header.getAttribute("aria-expanded")) === "false")
+      await header.click();
     const row = page.getByTestId("queue-item").first();
     const toggle = row.getByTestId("queue-item-toggle");
     const full = row.getByTestId("queue-item-full");

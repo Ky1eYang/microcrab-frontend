@@ -49,6 +49,9 @@ function settings() {
   };
 }
 async function open(page: Page, tab = "模型服务商") {
+  // Under 768px the account card lives in the header-opened drawer.
+  const railMenu = page.getByTestId("header-open-rail");
+  if (await railMenu.isVisible()) await railMenu.click();
   await page.getByRole("button", { name: "Test User", exact: true }).click();
   await page.getByRole("button", { name: "设置", exact: true }).click();
   await page.getByRole("button", { name: tab, exact: true }).click();
