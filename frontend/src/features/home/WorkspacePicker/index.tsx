@@ -5,6 +5,11 @@ import {
   hostLocator,
   hostPreferenceScope,
 } from "../../../client/host-locators";
+import {
+  ensureBrowserSandbox,
+  probeBrowserSandbox,
+  useSandboxAvailability,
+} from "../../../client/browser-sandbox-availability";
 import { isNarrowViewport } from "../../../client/viewport";
 import { t } from "../../../i18n";
 import { projectHostTerminal } from "../../../state/host-readiness";
@@ -71,12 +76,14 @@ export function WorkspacePicker() {
   const trigger = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
   const titleId = useId();
+  const sandbox = useSandboxAvailability(state.apiBase);
   const scope = hostPreferenceScope(state.apiBase, state.authSession);
 
   useEffect(() => {
     setView("default");
     setQuery("");
     if (!open) return;
+    void probeBrowserSandbox(state.apiBase);
     // Desktop keyboards land in search; touch keeps the on-screen keyboard shut.
     if (!isNarrowViewport()) search.current?.focus({ preventScroll: true });
   }, [open, scope, state.apiBase]);
@@ -186,11 +193,30 @@ export function WorkspacePicker() {
 
   const otherRow = (flavor: "chat_only" | "browser_sandbox") => {
     const sandboxRow = flavor === "browser_sandbox";
+    const status = sandboxRow ? sandbox.state : "ready";
+    const selectable = status === "ready";
     const selected = ws.kind === flavor;
     const nameId = `${titleId}-${flavor}-name`;
     const descId = `${titleId}-${flavor}-desc`;
+    const description =
+      status === "not_ready"
+        ? t("home.picker.sandboxNotReady")
+        : status === "loading"
+          ? t("home.picker.sandboxLoading")
+          : sandbox.state === "error" && sandboxRow
+            ? t("home.picker.sandboxError", { error: sandbox.error })
+            : t(
+                sandboxRow
+                  ? "home.picker.browserSandboxDesc"
+                  : "home.picker.chatOnlyDesc",
+              );
+    const fetchRuntime = () => void ensureBrowserSandbox(state.apiBase);
     return (
-      <div className="picker-other-row" key={flavor}>
+      <div
+        className="picker-other-row"
+        key={flavor}
+        data-sandbox-state={sandboxRow ? status : undefined}
+      >
         <button
           className="workspace-menu-item picker-row"
           type="button"
@@ -198,9 +224,18 @@ export function WorkspacePicker() {
           data-picker-row=""
           data-host-flavor={flavor}
           data-active={selected}
+          data-state={status}
           aria-labelledby={nameId}
           aria-describedby={descId}
+          aria-disabled={status === "loading" || undefined}
+          aria-busy={status === "loading" || undefined}
           onClick={() => {
+            if (status === "loading") return;
+            if (!selectable) {
+              // Fetch only; the picker stays open and nothing is selected.
+              fetchRuntime();
+              return;
+            }
             void dispatch({
               type: "SelectDraftWorkspace",
               value: { kind: flavor },
@@ -222,20 +257,39 @@ export function WorkspacePicker() {
                   : "home.picker.chatOnly",
               )}
             </span>
-            <span className="picker-row-desc" id={descId}>
-              {t(
-                sandboxRow
-                  ? "home.picker.browserSandboxDesc"
-                  : "home.picker.chatOnlyDesc",
+            <span
+              className="picker-row-desc"
+              id={descId}
+              data-tone={status === "error" ? "danger" : undefined}
+            >
+              {status === "loading" && (
+                <Icon
+                  name="spinner"
+                  size={12}
+                  className="animate-spin"
+                  aria-hidden="true"
+                />
               )}
+              {description}
             </span>
           </span>
-          {selected && (
+          {selected && selectable && (
             <span className="ws-item-check">
               <GlyphIcon name="check" size={14} />
             </span>
           )}
         </button>
+        {sandboxRow && status === "error" && (
+          <button
+            type="button"
+            className="ghost-btn picker-retry"
+            data-testid="picker-sandbox-retry"
+            data-picker-row=""
+            onClick={fetchRuntime}
+          >
+            {t("home.picker.sandboxRetry")}
+          </button>
+        )}
       </div>
     );
   };
@@ -446,7 +500,7 @@ export function WorkspacePicker() {
                 {t("home.picker.otherWorkspaces")}
               </div>
               {otherRow("chat_only")}
-              {otherRow("browser_sandbox")}
+              {sandbox.state !== "hidden" && otherRow("browser_sandbox")}
             </div>
             <div className="picker-foot">
               <button

@@ -92,6 +92,22 @@ ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(
 </script></body></html>`,
     }),
   );
+  // The picker probes same-origin runtime assets; an installed manifest makes
+  // the sandbox row selectable (the attach path itself is stubbed here).
+  const hash = "c".repeat(64);
+  await page.route("**/browser-host/current.json", (route) =>
+    route.fulfill({
+      json: {
+        schema: 1,
+        kind: "browser-host",
+        wasmsh_version: "0.5.1",
+        hash,
+        entry: "supervisor.mjs",
+        base_url: `/browser-host/${hash}/`,
+        files: [],
+      },
+    }),
+  );
   // Attach opens the selected Session's socket; its first frame is the
   // subscription barrier. Closing the socket releases the subscription.
   await page.routeWebSocket(

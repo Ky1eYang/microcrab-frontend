@@ -72,3 +72,17 @@ test("recent sessions: compact relative time", () => {
   expect(shortRelativeTime(now - 3 * 3_600_000, now)).toBe("3h");
   expect(shortRelativeTime(now - 2 * 86_400_000, now)).toBe("2d");
 });
+
+import { isSandboxSupportedByBuild } from "../src/client/browser-sandbox-availability";
+
+test("sandbox build switch and JSPI capability", () => {
+  const jspi = { Suspending: function () {}, promising: function () {} };
+  expect(isSandboxSupportedByBuild(undefined, jspi)).toBe(true);
+  expect(isSandboxSupportedByBuild("1", jspi)).toBe(true);
+  expect(isSandboxSupportedByBuild("0", jspi)).toBe(false);
+  expect(isSandboxSupportedByBuild("false", jspi)).toBe(false);
+  expect(isSandboxSupportedByBuild(" FALSE ", jspi)).toBe(false);
+  expect(isSandboxSupportedByBuild(undefined, {})).toBe(false);
+  expect(isSandboxSupportedByBuild(undefined, { Suspending() {} })).toBe(false);
+  expect(isSandboxSupportedByBuild(undefined, null)).toBe(false);
+});

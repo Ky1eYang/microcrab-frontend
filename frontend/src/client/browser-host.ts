@@ -6,6 +6,76 @@ import type { ApiClient } from "./api";
 
 /** Bounded transport only: opaque payloads retain their exact route envelope.
  * Control may pass bulk chunks; each bulk producer awaits FIFO admission. */
+export interface BrowserHostManifest {
+  schema: 1;
+  kind: "browser-host";
+  wasmsh_version: string;
+  hash: string;
+  entry: string;
+  base_url: string;
+  files?: { path: string; sha256: string; size: number }[];
+}
+
+/** Same-origin manifest check shared by the attach path and the picker probe.
+ * Downloads only `current.json`, never Pyodide or the wasm payload. */
+export async function fetchBrowserHostManifest(base: string) {
+  const manifestUrl = new URL("/browser-host/current.json", base);
+  const response = await fetch(manifestUrl, {
+    credentials: "include",
+    redirect: "error",
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    const error = Error(
+      `${t("browserHost.artifactsMissing")} (HTTP ${response.status})`,
+    );
+    reportDiagnostic("browser_host", "manifest", error, response.status);
+    throw error;
+  }
+  let manifest: BrowserHostManifest;
+  try {
+    manifest = await response.json();
+  } catch {
+    throw Error(t("browserHost.artifactsMissing"));
+  }
+  if (
+    !manifest ||
+    manifest.schema !== 1 ||
+    manifest.kind !== "browser-host" ||
+    manifest.wasmsh_version !== "0.5.1" ||
+    !/^[a-f0-9]{64}$/.test(manifest.hash) ||
+    manifest.entry !== "supervisor.mjs" ||
+    manifest.base_url !== `/browser-host/${manifest.hash}/`
+  )
+    throw Error(t("browserHost.artifactsMissing"));
+  return { manifest, manifestUrl };
+}
+
+/** Fetch the manifest entry and check its size and SHA-256; returns its URL. */
+export async function verifyBrowserHostEntry(
+  manifest: BrowserHostManifest,
+  manifestUrl: URL,
+) {
+  const entry = manifest.files?.find((file) => file.path === manifest.entry);
+  if (!entry) throw Error(t("browserHost.artifactsMissing"));
+  const entryUrl = new URL(
+    manifest.entry,
+    new URL(manifest.base_url, manifestUrl),
+  );
+  const source = await fetch(entryUrl, {
+    credentials: "include",
+    redirect: "error",
+  });
+  const bytes = await source.arrayBuffer();
+  const hash = Array.from(
+    new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)),
+    (byte) => byte.toString(16).padStart(2, "0"),
+  ).join("");
+  if (!source.ok || hash !== entry.sha256 || bytes.byteLength !== entry.size)
+    throw Error(t("browserHost.integrityFailed"));
+  return entryUrl;
+}
+
 export class BrowserHostTransport {
   private control: Item[] = [];
   private data: Item[] = [];
@@ -277,52 +347,10 @@ export class BrowserConversations {
     if (flavor === "chat_only") {
       host = new ChatOnlyHostRuntime(browserId, workspaceId);
     } else {
-      const manifestUrl = new URL("/browser-host/current.json", this.api.base);
-      const response = await fetch(manifestUrl, {
-        credentials: "include",
-        redirect: "error",
-        cache: "no-store",
-      });
-      if (!response.ok) {
-        const error = Error(
-          `${t("browserHost.artifactsMissing")} (HTTP ${response.status})`,
-        );
-        reportDiagnostic("browser_host", "manifest", error, response.status);
-        throw error;
-      }
-      const manifest = await response.json();
-      if (
-        manifest.schema !== 1 ||
-        manifest.kind !== "browser-host" ||
-        manifest.wasmsh_version !== "0.5.1" ||
-        !/^[a-f0-9]{64}$/.test(manifest.hash) ||
-        manifest.entry !== "supervisor.mjs" ||
-        manifest.base_url !== `/browser-host/${manifest.hash}/`
-      )
-        throw Error(t("browserHost.artifactsMissing"));
-      const entry = manifest.files?.find(
-        (file: { path: string }) => file.path === manifest.entry,
+      const { manifest, manifestUrl } = await fetchBrowserHostManifest(
+        this.api.base,
       );
-      if (!entry) throw Error(t("browserHost.artifactsMissing"));
-      const entryUrl = new URL(
-        manifest.entry,
-        new URL(manifest.base_url, manifestUrl),
-      );
-      const source = await fetch(entryUrl, {
-        credentials: "include",
-        redirect: "error",
-      });
-      const bytes = await source.arrayBuffer();
-      const hash = Array.from(
-        new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)),
-        (byte) => byte.toString(16).padStart(2, "0"),
-      ).join("");
-      if (
-        !source.ok ||
-        hash !== entry.sha256 ||
-        bytes.byteLength !== entry.size
-      )
-        throw Error(t("browserHost.integrityFailed"));
+      const entryUrl = await verifyBrowserHostEntry(manifest, manifestUrl);
       const runtime = await import(/* @vite-ignore */ entryUrl.href);
       host = await runtime.BrowserHost.create({
         backend: this.api.base,

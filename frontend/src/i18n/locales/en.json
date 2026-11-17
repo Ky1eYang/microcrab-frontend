@@ -1610,5 +1610,9 @@
   "home.picker.allProjects": "All projects",
   "home.picker.allProjectsByName": "All projects · by name",
   "home.picker.matchCount": "{n} matches",
-  "home.picker.otherWorkspaces": "Other workspaces"
+  "home.picker.otherWorkspaces": "Other workspaces",
+  "home.picker.sandboxNotReady": "Not ready · Click to fetch",
+  "home.picker.sandboxLoading": "Fetching runtime…",
+  "home.picker.sandboxError": "Couldn’t fetch the runtime. {error}",
+  "home.picker.sandboxRetry": "Retry"
 }
