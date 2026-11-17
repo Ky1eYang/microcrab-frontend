@@ -1598,5 +1598,6 @@
   "plugins.booleanNo": "No",
   "plugins.selectHint": "Select a plugin from the list to manage switches and parameter settings",
   "notice.details": "Details",
-  "conversation.retryShort": "Retry"
+  "conversation.retryShort": "Retry",
+  "permission.willRun": "Will run"
 }

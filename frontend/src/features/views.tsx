@@ -18,6 +18,7 @@ import { citationComponents } from "./citations/FileCitation";
 import { useCitationScope, type CitationScope } from "./citations/context";
 import { stopReasonText } from "../client/stop-reason";
 import { failureText } from "../client/failure";
+import { permissionSummary, toolInputSchema } from "./permission-summary";
 import { t, activeLocale, subscribeLocale } from "../i18n";
 import { childText } from "./childPresentation";
 import { SecretCard } from "./questions/SecretCard";
@@ -1581,9 +1582,25 @@ function PermissionRequestCard({
     return () => clearTimeout(timer);
   }, [value.request_id, value.expires_at_ms]);
   const disabled = value.disabled || expired;
+  // Observers, in-flight replies and expired asks show only their status
+  // line; a pair of disabled buttons would read as clickable.
+  const actionable = !value.observer && !value.submitting && !expired;
+  const definitions = useAppSelector(
+    (state) => state.clientTools?.definitions,
+  );
+  const summary = useMemo(
+    () =>
+      value.subject?.kind === "agent_init"
+        ? null
+        : permissionSummary(
+            value.arguments,
+            toolInputSchema(definitions, value.tool),
+          ),
+    [value.arguments, value.subject?.kind, value.tool, definitions],
+  );
   return (
     <article
-      className="flow-card"
+      className="flow-card permission-card"
       data-testid="permission-request"
       data-request-id={value.request_id}
       data-status={
@@ -1608,18 +1625,35 @@ function PermissionRequestCard({
           ? value.subject.component
           : value.tool}
       </h3>
-      <p className="flow-card-meta">
-        {value.session_id !== value.parent_session_id
-          ? t("permission.childSession", { id: value.session_id })
-          : t("permission.currentSession")}{" "}
+      <p className="flow-card-meta permission-meta">
+        <span>
+          {value.session_id !== value.parent_session_id
+            ? t("permission.childSession", { id: value.session_id })
+            : t("permission.currentSession")}
+        </span>
+        <span aria-hidden="true"> · </span>
+        <span>
+          {t(
+            value.subject?.kind === "agent_init"
+              ? "permission.initializationScope"
+              : "permission.onceScope",
+          )}
+        </span>
       </p>
-      <p className="flow-card-meta">
-        {t(
-          value.subject?.kind === "agent_init"
-            ? "permission.initializationScope"
-            : "permission.onceScope",
-        )}
-      </p>
+      {summary && (
+        <section
+          className="permission-will-run"
+          data-testid="permission-will-run"
+          data-kind={summary.kind}
+          data-source={summary.source}
+          aria-label={t("permission.willRun")}
+        >
+          <div className="permission-will-run-label">
+            {t("permission.willRun")}
+          </div>
+          <pre className="permission-will-run-body">{summary.text}</pre>
+        </section>
+      )}
       {value.review && (
         <p
           className="inline-notice"
@@ -1673,36 +1707,38 @@ function PermissionRequestCard({
           dialogTitle={`${t("permission.details")} · ${value.tool}`}
         />
       </details>
-      <div className="settings-actions-row flow-card-actions">
-        <button
-          className="primary-btn"
-          type="button"
-          disabled={disabled}
-          onClick={() =>
-            dispatch({
-              type: "ReplyPermission",
-              requestId: value.request_id,
-              decision: "allow",
-            })
-          }
-        >
-          {t("permission.allowOnce")}
-        </button>
-        <button
-          className="ghost-btn"
-          type="button"
-          disabled={disabled}
-          onClick={() =>
-            dispatch({
-              type: "ReplyPermission",
-              requestId: value.request_id,
-              decision: "deny",
-            })
-          }
-        >
-          {t("permission.deny")}
-        </button>
-      </div>
+      {actionable && (
+        <div className="settings-actions-row flow-card-actions">
+          <button
+            className="ghost-btn"
+            type="button"
+            disabled={disabled}
+            onClick={() =>
+              dispatch({
+                type: "ReplyPermission",
+                requestId: value.request_id,
+                decision: "deny",
+              })
+            }
+          >
+            {t("permission.deny")}
+          </button>
+          <button
+            className="primary-btn"
+            type="button"
+            disabled={disabled}
+            onClick={() =>
+              dispatch({
+                type: "ReplyPermission",
+                requestId: value.request_id,
+                decision: "allow",
+              })
+            }
+          >
+            {t("permission.allowOnce")}
+          </button>
+        </div>
+      )}
     </article>
   );
 }

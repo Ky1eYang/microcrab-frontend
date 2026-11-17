@@ -672,6 +672,41 @@
   gap: var(--sp-2);
 }
 
+/* Permission card: deny | allow once (solid), right-aligned. */
+.permission-card .flow-card-actions {
+  justify-content: flex-end;
+}
+
+/* "Will run": what the approved call executes, before the folded JSON. */
+.permission-will-run {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+.permission-will-run-label {
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+
+.permission-will-run-body {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  max-height: 16.5em;
+  overflow-x: hidden;
+  overflow-y: auto;
+  background: var(--bg-muted);
+  border-radius: var(--r-sm);
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-code, 1.5);
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 @media (max-width: 600px) {
   .flow-card-actions > button {
     min-height: 44px;

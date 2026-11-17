@@ -125,12 +125,14 @@ test("permission Ask uses current executor lease once and child requests reply t
     page.getByRole("button", { name: /Always|总是|永久/ }),
   ).toHaveCount(0);
   await card.getByRole("button", { name: "允许本次", exact: true }).click();
+  // v0.1.18: an in-flight reply shows only its status line, no button pair.
+  await expect(card.getByTestId("permission-submitting")).toBeVisible();
   await expect(
     card.getByRole("button", { name: "允许本次", exact: true }),
-  ).toBeDisabled();
+  ).toHaveCount(0);
   await expect(
     card.getByRole("button", { name: "拒绝", exact: true }),
-  ).toBeDisabled();
+  ).toHaveCount(0);
   await expect
     .poll(
       () =>
@@ -171,12 +173,13 @@ test("permission observer sees the real request but cannot allow or deny", async
   await ready(page);
   const card = page.getByTestId("permission-request");
   await expect(card).toContainText("仅供查看，请在执行客户端回复。");
+  // Observers see the status line only; no disabled button pair.
   await expect(
     card.getByRole("button", { name: "允许本次", exact: true }),
-  ).toBeDisabled();
+  ).toHaveCount(0);
   await expect(
     card.getByRole("button", { name: "拒绝", exact: true }),
-  ).toBeDisabled();
+  ).toHaveCount(0);
   expect(
     backend.commands.filter((command) => command.method === "permission.reply"),
   ).toHaveLength(0);
@@ -291,7 +294,7 @@ test("expired Ask is disabled and a websocket disconnect removes permission auth
   );
   await expect(
     page.getByRole("button", { name: "允许本次", exact: true }),
-  ).toBeDisabled();
+  ).toHaveCount(0);
   backend.pendingPermissions.splice(0);
   backend.sockets.at(-1)!.close();
   await expect(page.getByTestId("permission-request")).toHaveCount(0);
