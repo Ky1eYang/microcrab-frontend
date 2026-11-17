@@ -1600,5 +1600,11 @@
   "notice.details": "说明",
   "conversation.retryShort": "重试",
   "permission.willRun": "将执行",
-  "tools.runningCount": "进行中：{count}"
+  "tools.runningCount": "进行中：{count}",
+  "home.recent.title": "最近会话",
+  "home.recent.scopeCurrent": "当前项目",
+  "home.recent.scopeAll": "全部项目",
+  "home.recent.empty": "当前项目还没有会话。",
+  "home.recent.viewAll": "查看全部项目的最近会话",
+  "home.recent.faulted": "已故障"
 }

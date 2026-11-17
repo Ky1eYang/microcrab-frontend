@@ -1600,5 +1600,11 @@
   "notice.details": "Details",
   "conversation.retryShort": "Retry",
   "permission.willRun": "Will run",
-  "tools.runningCount": "Running: {count}"
+  "tools.runningCount": "Running: {count}",
+  "home.recent.title": "Recent sessions",
+  "home.recent.scopeCurrent": "This project",
+  "home.recent.scopeAll": "All projects",
+  "home.recent.empty": "This project has no sessions yet.",
+  "home.recent.viewAll": "View recent sessions from all projects",
+  "home.recent.faulted": "Faulted"
 }

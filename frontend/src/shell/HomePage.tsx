@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { useAppFields } from "../state";
 import { Composer } from "../features/composer";
 import { WorkspacePicker } from "../features/home/WorkspacePicker";
+import { RecentSessions } from "../features/home/RecentSessions";
 import { t } from "../i18n";
 import "../styles/home-page.css";
 
@@ -31,6 +32,7 @@ export function HomePage() {
       <div className="home-center-stage">
         <WorkspacePicker />
         <Composer />
+        <RecentSessions />
         {state.connection === "disconnected" && (
           <p className="home-disconnected-hint">
             {t("home.backendOffline", { api: state.apiBase })}
