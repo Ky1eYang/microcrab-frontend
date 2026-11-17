@@ -19,7 +19,11 @@ import {
   isBusy,
   isSubagent,
 } from "../features/shared";
-import { usePluginDrawerViewport } from "../client/viewport";
+import {
+  useNarrowViewport,
+  usePluginDrawerViewport,
+} from "../client/viewport";
+import { setRailDrawerOpen, useRailDrawerOpen } from "./rail-drawer";
 import type { NativeExecution } from "../client/types";
 import { t } from "../i18n";
 import {
@@ -196,12 +200,29 @@ export function Header() {
           ? "busy"
           : "idle";
   const emit = (type: string, value?: unknown) => dispatch({ type, value });
+  const narrowNav = useNarrowViewport();
+  const railDrawerOpen = useRailDrawerOpen();
   return (
     <header
       className={`header-compound-root${inspection ? " child-inspection-header" : ""}`}
     >
       <div className="header-main-row">
         <div className="header-left-zone">
+          {narrowNav && (
+            <button
+              type="button"
+              className="header-menu-btn"
+              data-testid="header-open-rail"
+              title={t("rail.expand")}
+              aria-label={t("rail.expand")}
+              aria-expanded={railDrawerOpen}
+              onClick={(event) =>
+                setRailDrawerOpen(!railDrawerOpen, event.currentTarget)
+              }
+            >
+              <Icon name="menu" size={18} aria-hidden="true" />
+            </button>
+          )}
           {(() => {
             // Multi-depth crumb grammar (G1). Direct parent stays actionable;
             // deeper ancestors are disabled until multi-level nav API exists.

@@ -59,13 +59,13 @@ test.describe("narrow drawer", () => {
     page,
   }) => {
     await ready(page);
+    // v0.1.18: below 768px there is no resident icon rail; the Header menu
+    // button opens the same drawer.
     const rail = page.getByTestId("session-rail");
-    await expect(rail).toHaveCount(1);
-    await expect(rail).toHaveAttribute("data-collapsed", "true");
-    const railBox = await rail.boundingBox();
-    expect(railBox!.width).toBeLessThanOrEqual(48);
+    await expect(rail).toHaveCount(0);
 
-    const trigger = page.getByRole("button", { name: "展开侧边栏" });
+    const trigger = page.getByTestId("header-open-rail");
+    await expect(trigger).toHaveAccessibleName("展开侧边栏");
     await trigger.click();
     const drawer = page.getByRole("dialog", { name: "会话列表" });
     await expect(drawer).toBeVisible();

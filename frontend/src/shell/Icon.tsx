@@ -15,6 +15,13 @@ export function Icon({
         <rect width="7" height="5" x="3" y="16" rx="1" />
       </>
     ),
+    menu: (
+      <>
+        <path d="M4 6h16" />
+        <path d="M4 12h16" />
+        <path d="M4 18h16" />
+      </>
+    ),
     sidebar: (
       <>
         <rect width="18" height="18" x="3" y="3" rx="2" />

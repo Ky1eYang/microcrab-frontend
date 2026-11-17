@@ -56,9 +56,9 @@ for (const colorScheme of ["light", "dark"] as const) {
       for (const width of [1440, 390] as const) {
         await page.setViewportSize({ width, height: 900 });
         if (width === 390) {
-          await expect(
-            page.locator(".session-rail.collapsed-rail"),
-          ).toBeVisible();
+          // v0.1.18: no resident icon rail below 768px; the Header opens the drawer.
+          await expect(page.locator(".session-rail")).toHaveCount(0);
+          await expect(page.getByTestId("header-open-rail")).toBeVisible();
           await expect
             .poll(async () => {
               const box = await page

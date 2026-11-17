@@ -13,6 +13,11 @@ import { hostReason } from "../features/popups/RemoteConnectDialog";
 import { projectHostTerminal } from "../state/host-readiness";
 import { UserCard } from "./UserCard";
 import { GlyphIcon } from "../features/shared";
+import {
+  railDrawerTrigger,
+  setRailDrawerOpen,
+  useRailDrawerOpen,
+} from "./rail-drawer";
 import { focusFirst, trapFocus, useNarrowViewport } from "../client/viewport";
 
 const label = (s: SessionView) => s.title.trim() || s.id;
@@ -240,13 +245,13 @@ export function SessionRail() {
   const [expandedMore, setExpandedMore] = useState<Set<string>>(new Set());
   const emit = (type: string, value?: unknown) => dispatch({ type, value });
   const narrow = useNarrowViewport();
-  const [drawerOpen, setDrawerOpen] = useState(false);
+  const drawerOpen = useRailDrawerOpen();
+  const setDrawerOpen = (value: boolean) => setRailDrawerOpen(value);
   const drawer = useRef<HTMLElement>(null);
-  const trigger = useRef<HTMLButtonElement>(null);
   const drawerActive = narrow && drawerOpen;
   const closeDrawer = () => {
     setDrawerOpen(false);
-    trigger.current?.focus();
+    railDrawerTrigger()?.focus();
   };
   // Closing the drawer by any path (backdrop, Esc, navigation, widening) also
   // closes its rail menus, so their click-outside backdrop never outlives it.
@@ -305,11 +310,10 @@ export function SessionRail() {
     >
       <div className="rail-top-actions">
         <button
-          ref={trigger}
           className="rail-icon-btn"
           title={t("rail.expand")}
           aria-label={t("rail.expand")}
-          aria-expanded={narrow ? drawerOpen : false}
+          aria-expanded={false}
           onClick={toggleRail}
         >
           <Icon name="sidebar" size={18} />
@@ -739,10 +743,11 @@ export function SessionRail() {
       </div>
     </nav>
   );
+  // Below 768px there is no resident icon rail: the Header menu button
+  // opens the existing drawer (backdrop, Esc, focus trap, close on pick).
   if (narrow)
     return (
       <>
-        {collapsedRail}
         {drawerOpen && (
           <>
             <div

@@ -1205,19 +1205,36 @@
     width: 100%;
   }
 
-  .session-rail.collapsed-rail {
-    width: 48px;
-    min-width: 48px;
-    padding: var(--sp-2) var(--sp-1);
-  }
-
+  /* No resident icon rail: the main area is full width and the Header menu
+   * button opens the session drawer. */
+  .shell,
   .shell[data-left-collapsed] {
-    --left-rail-width: 48px;
+    --left-rail-width: 0px;
   }
 
-  .session-rail.collapsed-rail .rail-icon-btn {
-    width: 36px;
-    height: 36px;
+  .header-menu-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    width: 44px;
+    height: 44px;
+    margin-left: calc(-1 * var(--sp-2));
+    padding: 0;
+    border: 0;
+    border-radius: var(--r-md);
+    background: transparent;
+    color: var(--text);
+    cursor: pointer;
+  }
+
+  .header-menu-btn:hover {
+    background: var(--bg-muted);
+  }
+
+  .header-menu-btn:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: -2px;
   }
 
   .session-rail.rail-drawer {
