@@ -1069,3 +1069,62 @@ button.search-result-item:focus-visible {
 .perm-save-unsupported { flex: 1 1 100%; margin: 0; }
 /* Part B D4: reset scope note directly under Reset / Advanced. */
 .perm-reset-scope { margin: 0; }
+
+/* ── v0.1.18: readable secondary text (12 → 13px via token reference) ── */
+.tool-summary-text,
+.tool-status-label,
+.tool-accordion-group-header .group-header-left,
+.message-time-label,
+.rail-project-title,
+.session-item-time {
+  font-size: var(--fs-sm);
+}
+
+/* ── v0.1.18: touch hit areas ≥44px; visuals stay compact ───────────── */
+@media (pointer: coarse), (max-width: 767.98px) {
+  .action-icon-btn,
+  .composer-plus-btn,
+  .composer-permission-btn,
+  .composer-pill,
+  .secondary-tab-btn,
+  .rail-project-btn,
+  .session-action-icon-btn,
+  .queue-item-action-btn {
+    position: relative;
+  }
+
+  .action-icon-btn::after,
+  .composer-plus-btn::after,
+  .composer-permission-btn::after,
+  .composer-pill::after,
+  .secondary-tab-btn::after,
+  .rail-project-btn::after,
+  .session-action-icon-btn::after,
+  .queue-item-action-btn::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: max(100%, 44px);
+    height: max(100%, 44px);
+    transform: translate(-50%, -50%);
+  }
+
+  /* Pill names ellipsize themselves; let the hit area extend past the pill. */
+  .composer-pill {
+    overflow: visible;
+  }
+}
+
+/* ── v0.1.18: 16px text inputs on narrow screens (no iOS focus zoom) ── */
+@media (max-width: 767.98px) {
+  textarea,
+  input[type="text"],
+  input[type="search"],
+  input[type="url"],
+  input[type="email"],
+  input[type="password"],
+  input:not([type]) {
+    font-size: 16px;
+  }
+}

@@ -9,11 +9,21 @@ import {
   sessionInboxMutationBusy,
 } from "../../state/inbox-draft";
 import { t } from "../../i18n";
+import { isNarrowViewport } from "../../client/viewport";
 import { GlyphIcon, Icon } from "../shared";
 
 export function QueueDock() {
   const { state, dispatch } = useApp();
-  const [collapsed, setCollapsed] = useState(false);
+  // Narrow viewports hand the space to the conversation: the queue starts as
+  // a one-line summary each time a session is entered. Not persisted.
+  const [collapsedBySession, setCollapsed] = useState<{
+    sessionId: string | null | undefined;
+    value: boolean;
+  }>(() => ({ sessionId: state.sessionId, value: isNarrowViewport() }));
+  const collapsed =
+    collapsedBySession.sessionId === state.sessionId
+      ? collapsedBySession.value
+      : isNarrowViewport();
   const items = [...state.transcript.steer, ...state.transcript.queue];
   const oldest = items.reduce<(typeof items)[number] | undefined>(
     (best, item) => (!best || Number(item.id) < Number(best.id) ? item : best),
@@ -47,7 +57,9 @@ export function QueueDock() {
         className="queue-dock-header"
         aria-expanded={!collapsed}
         aria-controls="queue-dock-list"
-        onClick={() => setCollapsed((value) => !value)}
+        onClick={() =>
+          setCollapsed({ sessionId: state.sessionId, value: !collapsed })
+        }
       >
         <span className="queue-dock-header-left">
           <span className="queue-dock-badge">{items.length}</span>
