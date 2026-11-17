@@ -27,6 +27,7 @@ export function SessionViewTabs<Mode extends SessionViewMode>({
           <button
             key={mode}
             id={`${idPrefix}-tab-${mode}`}
+            data-testid={mode === "chat" ? "tab-conversation" : "tab-trace"}
             className={`secondary-tab-btn${!selectedPlugin && viewMode === mode ? " active" : ""}`}
             role="tab"
             aria-selected={!selectedPlugin && viewMode === mode}

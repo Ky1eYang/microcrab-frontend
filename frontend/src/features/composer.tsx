@@ -946,6 +946,7 @@ export function Composer({
           ) : (
             <button
               className="composer-send-arrow-btn"
+              data-testid="composer-send"
               title={offlineDraftHint ?? t("composer.send")}
               aria-label={t("composer.send")}
               type="button"

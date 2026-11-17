@@ -320,6 +320,7 @@ export function SessionRail() {
         </button>
         <button
           className="rail-icon-btn primary-icon-btn"
+          data-testid="nav-new-chat"
           title={t("rail.newConversation")}
           aria-label={t("rail.newConversation")}
           onClick={() => emit("NewChat")}
@@ -328,6 +329,7 @@ export function SessionRail() {
         </button>
         <button
           className="rail-icon-btn"
+          data-testid="nav-dashboard"
           data-active={state.page === "dashboard"}
           title={t("rail.dashboard")}
           aria-label={t("rail.dashboard")}
@@ -347,6 +349,7 @@ export function SessionRail() {
         </button>
         <button
           className="rail-icon-btn"
+          data-testid="nav-history"
           title={t("rail.search")}
           aria-label={t("rail.search")}
           onClick={() => emit("OpenSearch")}
@@ -411,6 +414,7 @@ export function SessionRail() {
       <div className="rail-new-chat-container">
         <button
           className="session-rail-new-btn"
+          data-testid="nav-new-chat"
           data-active={state.page === "home"}
           onClick={() => emit("NewChat")}
         >
@@ -421,6 +425,7 @@ export function SessionRail() {
       <div className="session-rail-subnav">
         <button
           className="subnav-item-btn"
+          data-testid="nav-dashboard"
           data-active={state.page === "dashboard"}
           title={t("rail.dashboard")}
           onClick={() => emit("OpenDashboard")}
@@ -440,6 +445,7 @@ export function SessionRail() {
         </button>
         <button
           className="subnav-item-btn"
+          data-testid="nav-history"
           title={t("rail.history")}
           onClick={() => emit("OpenSearch")}
         >

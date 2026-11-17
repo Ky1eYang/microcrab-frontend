@@ -1484,6 +1484,7 @@ export function ActionBar({
       <div className="action-leading-group">
         <button
           className="action-icon-btn"
+          data-testid="copy-message"
           title={t(
             copied
               ? "common.copied"
