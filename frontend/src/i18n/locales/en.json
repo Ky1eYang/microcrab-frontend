@@ -1606,5 +1606,9 @@
   "home.recent.scopeAll": "All projects",
   "home.recent.empty": "This project has no sessions yet.",
   "home.recent.viewAll": "View recent sessions from all projects",
-  "home.recent.faulted": "Faulted"
+  "home.recent.faulted": "Faulted",
+  "home.picker.allProjects": "All projects",
+  "home.picker.allProjectsByName": "All projects · by name",
+  "home.picker.matchCount": "{n} matches",
+  "home.picker.otherWorkspaces": "Other workspaces"
 }

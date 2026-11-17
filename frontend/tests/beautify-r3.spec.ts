@@ -192,9 +192,10 @@ test("former text glyphs are aria-hidden icons and names keep their text", async
   await expect(badge.locator("svg.glyph-icon[data-dir=down]")).toHaveCount(1);
   await badge.click();
   const active = page.locator(".workspace-menu-item[data-active=true]");
-  await expect(active).toHaveAccessibleName(/Assigned\s+离线/);
-  await expect(active).toHaveAttribute("title", "/assigned");
-  // Single-line picker retains the path as a tooltip and uses hidden chrome icons.
+  await expect(active).toHaveAccessibleName(/Assigned\s+\/assigned/);
+  await expect(active).toHaveAttribute("title", "Assigned\n/assigned");
+  // P1 rows show name and path; chrome icons stay hidden from assistive tech.
+  await expect(active.locator(".picker-row-sub")).toHaveText("/assigned");
   await expect(active.locator(".ws-project-folder-icon")).toHaveAttribute(
     "aria-hidden",
     "true",
@@ -204,5 +205,4 @@ test("former text glyphs are aria-hidden icons and names keep their text", async
     "true",
   );
   await expect(active.locator("svg.glyph-icon")).toHaveCount(1);
-  await expect(active.locator(".picker-project-status svg")).toHaveCount(1);
 });

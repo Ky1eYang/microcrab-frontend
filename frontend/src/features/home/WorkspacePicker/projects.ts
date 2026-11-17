@@ -27,7 +27,18 @@ export function recentProjects(
       (a, b) =>
         activity.get(b.id)! - activity.get(a.id)! || a.id.localeCompare(b.id),
     )
-    .slice(0, 3);
+    .slice(0, 5);
+}
+
+/** Full list order: project name in the current locale, then id. */
+export function projectsByName(projects: NativeProject[], locale?: string) {
+  return [...projects].sort(
+    (a, b) =>
+      a.name.localeCompare(b.name, locale, {
+        sensitivity: "base",
+        numeric: true,
+      }) || a.id.localeCompare(b.id),
+  );
 }
 
 export function projectAvailability(

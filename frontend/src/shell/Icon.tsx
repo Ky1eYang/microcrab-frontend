@@ -22,6 +22,19 @@ export function Icon({
         <path d="M12 16h.01" />
       </>
     ),
+    box: (
+      <>
+        <path d="M21 8 12 3 3 8v8l9 5 9-5V8Z" />
+        <path d="m3 8 9 5 9-5" />
+        <path d="M12 13v8" />
+      </>
+    ),
+    "arrow-left": (
+      <>
+        <path d="M19 12H5" />
+        <path d="m12 19-7-7 7-7" />
+      </>
+    ),
     menu: (
       <>
         <path d="M4 6h16" />

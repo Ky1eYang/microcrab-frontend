@@ -1606,5 +1606,9 @@
   "home.recent.scopeAll": "全部项目",
   "home.recent.empty": "当前项目还没有会话。",
   "home.recent.viewAll": "查看全部项目的最近会话",
-  "home.recent.faulted": "已故障"
+  "home.recent.faulted": "已故障",
+  "home.picker.allProjects": "全部项目",
+  "home.picker.allProjectsByName": "全部项目 · 按名称",
+  "home.picker.matchCount": "{n} 个匹配",
+  "home.picker.otherWorkspaces": "其他工作区"
 }

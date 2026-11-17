@@ -1,156 +1,147 @@
-/* Workspace picker cascading dropdown & flyout styles. This file owns picker
-   geometry; shared .home-dropdown-menu chrome is deliberately excluded here. */
-.home-dropdown-menu.workspace-cascading-menu {
-  top: 36px;
-  left: 0;
-  transform: none;
-  width: auto;
-  max-width: calc(100vw - 32px);
-  padding: 0;
-  background: transparent;
-  border: 0;
-  box-shadow: none;
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
+/* Workspace picker P1: one column with pinned search, a scrolling project
+   list, pinned Other workspaces and a pinned New project. This file owns
+   picker geometry; shared .home-dropdown-menu chrome comes from components. */
+
+/* Trigger: a control-like pill (folder + name + chevron). */
+.home-workspace-selector-wrap .home-workspace-badge-btn {
+  max-width: min(420px, 100%);
+  min-height: 30px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--fs-sm);
 }
 
-.workspace-primary-pane,
-.workspace-flyout-pane {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  box-shadow: var(--shadow-pop);
+.home-workspace-selector-wrap .home-workspace-badge-btn:hover,
+.home-workspace-selector-wrap .home-workspace-badge-btn[aria-expanded="true"] {
+  background: var(--bg-muted);
+}
+
+.home-workspace-selector-wrap .home-workspace-badge-btn:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.workspace-badge-icon {
+  flex: none;
+  color: var(--text-2);
+}
+
+.workspace-badge-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home-workspace-selector-wrap {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.home-dropdown-menu.workspace-picker-menu {
+  top: calc(100% + 6px);
+  left: 0;
+  width: 400px;
+  max-width: calc(100vw - 32px);
+  max-height: min(560px, 70vh, var(--picker-available-height, 70vh));
   padding: 6px;
-  box-sizing: border-box;
   display: flex;
   flex-direction: column;
+  gap: 4px;
+  overflow: hidden;
+}
+
+.picker-sheet-head,
+.picker-sheet-backdrop {
+  display: none;
+}
+
+.picker-search {
+  position: relative;
+  flex: none;
+}
+
+.picker-search-icon {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-3);
+  pointer-events: none;
+}
+
+.picker-search .settings-input {
+  width: 100%;
+  box-sizing: border-box;
+  border-radius: var(--r-sm);
+  padding: 6px 10px 6px 30px;
+  font-size: var(--fs-sm);
+}
+
+.picker-scroll {
+  flex: 1 1 auto;
   min-height: 0;
-  max-height: var(--picker-available-height, 60vh);
-}
-
-.workspace-primary-pane {
-  width: 244px;
-  flex: 0 0 auto;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  /* Always-visible scrollbar where it really overflows. */
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
 }
 
-.workspace-flyout-pane {
-  width: 288px;
-  flex: 0 0 auto;
-  gap: 6px;
+.picker-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.picker-scroll::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
 }
 
 .workspace-menu-section {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  margin-bottom: 4px;
+  gap: 1px;
   flex-shrink: 0;
 }
 
-.workspace-host-group {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+.workspace-picker-menu .dropdown-section-title {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
+  padding: 5px 8px 3px;
 }
 
-.workspace-host-toggle {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 7px 8px;
-  border: 0;
-  background: transparent;
-  border-radius: 6px;
-  cursor: pointer;
-  text-align: left;
-  color: var(--text);
-  font-size: var(--fs-sm);
-  transition: background 0.1s ease;
-}
-
-.workspace-host-toggle:hover,
-.workspace-host-toggle[data-active="true"] {
-  background: var(--bg-muted);
-}
-
-.ws-host-folder-icon,
-.ws-project-folder-icon {
-  flex-shrink: 0;
-  color: var(--text-2);
-}
-
-.ws-host-chevron {
-  margin-left: auto;
-  flex-shrink: 0;
-  color: var(--text-2);
-  transition: transform 0.15s ease;
-  transform-origin: center;
-}
-
-.ws-host-chevron.expanded {
-  color: var(--text);
-}
-
-.workspace-flyout-search .settings-input {
-  width: 100%;
-  box-sizing: border-box;
-  border-radius: 6px;
-  padding: 6px 10px;
-  font-size: var(--fs-sm);
-}
-
-.workspace-project-list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-height: 0;
-  max-height: 204px;
-  overflow-y: auto;
-  padding-right: 2px;
-}
-
-.workspace-flyout-search,
-.workspace-flyout-foot {
-  flex-shrink: 0;
-}
-
-.workspace-flyout-empty {
-  margin: 0;
-  padding: 12px 8px;
-  text-align: center;
-  font-size: var(--fs-xs);
-  color: var(--text-2);
-}
-
-.workspace-flyout-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 5px 8px 2px;
+.picker-other {
+  flex: none;
   border-top: 1px solid var(--border);
-  font-size: var(--fs-xs);
-  color: var(--text-2);
+  padding-top: 2px;
+}
+
+.picker-foot {
+  flex: none;
+  border-top: 1px solid var(--border);
+  padding-top: 4px;
 }
 
 .workspace-menu-item {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
   width: 100%;
-  padding: 7px 8px;
+  min-height: 32px;
+  padding: 4px 8px;
   border: 0;
   background: transparent;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   cursor: pointer;
   text-align: left;
   color: var(--text);
   font-size: var(--fs-sm);
-  transition: background 0.1s ease;
+  transition: background var(--dur-fast) ease;
   flex-shrink: 0;
 }
 
@@ -164,12 +155,68 @@
   font-weight: 500;
 }
 
+.workspace-picker-menu [data-picker-row]:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: -2px;
+}
+
+.ws-project-folder-icon {
+  flex-shrink: 0;
+  align-self: flex-start;
+  margin-top: 3px;
+  color: var(--text-2);
+}
+
+.picker-row-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
 .ws-item-name {
   flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.picker-row-sub {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  color: var(--text-2);
+}
+
+.picker-row-desc {
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  line-height: 1.45;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+
+.picker-row-desc > svg {
+  display: inline-block;
+  vertical-align: -2px;
+  margin-right: 4px;
+}
+
+.picker-row-desc[data-tone="danger"] {
+  color: var(--danger);
+}
+
+.workspace-picker-menu mark {
+  background: var(--bg-muted);
+  color: var(--text);
+  font-weight: 600;
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px var(--border);
 }
 
 .ws-item-check {
@@ -184,31 +231,150 @@
 .picker-project-status {
   flex-shrink: 0;
   font-size: var(--fs-xs);
+  font-weight: 400;
   color: var(--text-2);
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
 }
 
-@media (max-width: 640px) {
-  .workspace-cascading-menu {
-    flex-direction: column;
-    max-height: var(--picker-available-height, 60vh);
-    overflow-y: auto;
-    overscroll-behavior: contain;
+.picker-all-entry {
+  margin-top: 2px;
+  color: var(--text-2);
+}
+
+.picker-all-chevron {
+  flex: none;
+  color: var(--text-3);
+}
+
+.picker-all-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 32px;
+  padding: 6px 8px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+
+.picker-all-head:hover {
+  color: var(--text);
+}
+
+.picker-other-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.picker-other-row > .workspace-menu-item {
+  flex: 1;
+  min-width: 0;
+}
+
+.picker-other-row[data-sandbox-state="not_ready"] .ws-item-name,
+.picker-other-row[data-sandbox-state="loading"] .ws-item-name,
+.picker-other-row[data-sandbox-state="error"] .ws-item-name,
+.picker-other-row[data-sandbox-state="not_ready"] .ws-project-folder-icon,
+.picker-other-row[data-sandbox-state="loading"] .ws-project-folder-icon,
+.picker-other-row[data-sandbox-state="error"] .ws-project-folder-icon {
+  color: var(--text-3);
+}
+
+.picker-other-row[data-sandbox-state="loading"] > .workspace-menu-item {
+  cursor: progress;
+}
+
+.picker-retry {
+  flex: none;
+  min-height: 32px;
+  margin-right: 4px;
+  padding: 0 10px;
+  font-size: var(--fs-xs);
+}
+
+.workspace-flyout-empty {
+  margin: 0;
+  padding: 12px 8px;
+  text-align: center;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+
+@media (max-width: 767.98px) {
+  .home-workspace-selector-wrap .home-workspace-badge-btn {
+    min-height: 44px;
+    padding: 0 14px;
+    font-size: var(--fs-md);
   }
-  .workspace-primary-pane,
-  .workspace-flyout-pane {
-    width: min(300px, calc(100vw - 32px));
-    max-height: none;
-    overflow: visible;
+
+  .picker-sheet-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: var(--z-dropdown);
+    background: color-mix(in srgb, var(--text) 24%, transparent);
+  }
+
+  /* Bottom sheet: shrinks to content, about 85vh for the full list. */
+  .home-dropdown-menu.workspace-picker-menu {
+    position: fixed;
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    max-width: none;
+    max-height: 85vh;
+    max-height: 85dvh;
+    padding: 4px 12px calc(8px + env(safe-area-inset-bottom));
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
+    border-bottom: 0;
+    z-index: calc(var(--z-dropdown) + 1);
+  }
+
+  .workspace-picker-menu[data-view="all"],
+  .workspace-picker-menu[data-view="search"] {
+    height: 85vh;
+    height: 85dvh;
+  }
+
+  .picker-sheet-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 44px;
+    font-size: var(--fs-md);
+    font-weight: 500;
+    color: var(--text);
+  }
+
+  .picker-search .settings-input {
+    min-height: 44px;
+    font-size: 16px;
+  }
+
+  .workspace-menu-item,
+  .picker-all-head {
+    min-height: 44px;
+  }
+
+  .picker-retry {
+    min-height: 44px;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .workspace-host-toggle,
-  .workspace-menu-item,
-  .ws-host-chevron {
+  .workspace-menu-item {
     transition: none;
   }
 }

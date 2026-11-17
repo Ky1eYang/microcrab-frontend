@@ -29,6 +29,7 @@ test("Recent uses catalog membership and activity, excludes child-only evidence 
     "p2",
     "p1",
     "p3",
+    "p4",
   ]);
   expect(projects.map((p) => p.id)).toEqual(["p0", "p1", "p2", "p3", "p4"]);
   expect(filterProjects(projects, "TREE-2").map((p) => p.id)).toEqual(["p2"]);
@@ -101,28 +102,25 @@ ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(
     );
     await page.goto("/picker-fixture");
     await page.getByTitle("选择项目工作区").click();
-    await page.locator('[data-host-id="host-2"]').click();
-    await page.getByRole("searchbox").fill("tree-2");
-    await expect(
-      page.getByTestId("picker-host-submenu").getByTestId("home-project-item"),
-    ).toHaveCount(1);
     const search = page.getByRole("searchbox");
-    const submenu = page.getByTestId("picker-host-submenu");
+    await search.fill("tree-2");
+    const results = page.getByTestId("picker-search-results");
+    await expect(results.getByTestId("home-project-item")).toHaveCount(1);
     await search.press("ArrowDown");
-    await expect(submenu.locator('[data-project-id="p2"]')).toBeFocused();
+    await expect(results.locator('[data-project-id="p2"]')).toBeFocused();
+    await page.keyboard.press("ArrowUp");
+    await expect(search).toBeFocused();
     await search.fill("no-match");
-    await search.press("ArrowUp");
-    await expect(search).toBeFocused();
+    await expect(results.getByRole("status")).toHaveText("没有匹配的项目");
+    // With no matches, arrows continue into Other workspaces.
     await search.press("ArrowDown");
-    await expect(search).toBeFocused();
+    await expect(page.locator('[data-host-flavor="chat_only"]')).toBeFocused();
     await search.fill("");
     await search.press("ArrowUp");
-    await expect(submenu.locator('[data-project-id="p4"]')).toBeFocused();
-    await search.focus();
-    await search.press("ArrowDown");
-    await expect(submenu.locator('[data-project-id="p2"]')).toBeFocused();
+    await expect(page.getByTestId("picker-create-project")).toBeFocused();
     await page.keyboard.press("Escape");
-    await expect(page.getByTestId("picker-host-submenu")).toHaveCount(0);
+    await expect(page.getByTestId("home-project-picker")).toHaveCount(0);
+    await page.getByTitle("选择项目工作区").click();
     await expect(page.getByTestId("home-project-picker")).toBeVisible();
     await page.getByTestId("picker-create-project").click();
     await expect(page.locator("#host-project-name")).toBeVisible();
