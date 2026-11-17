@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 /* v0.1.18 UI/UX polish acceptance, driven through the Designer review
  * fixture (fixture/scenarios.ts) on the test dev server. */
@@ -6,6 +6,33 @@ async function scenario(page: Page, id: string, extra = "") {
   await page.goto(`/fixture/?scenario=${id}&theme=light&locale=zh-CN${extra}`);
   await expect(page.locator("html")).toHaveAttribute("data-fixture", "ready", {
     timeout: 20000,
+  });
+}
+
+/** Effective clickable size via elementFromPoint, including ::after hit pads. */
+async function measureHitArea(target: Locator) {
+  return target.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const cx = r.left + r.width / 2;
+    const cy = r.top + r.height / 2;
+    const hits = (x: number, y: number) => {
+      const node = document.elementFromPoint(x, y);
+      return !!node && (node === el || el.contains(node));
+    };
+    let up = 0;
+    while (up < 30 && hits(cx, r.top - up - 1)) up++;
+    let dn = 0;
+    while (dn < 30 && hits(cx, r.bottom + dn + 1)) dn++;
+    let lf = 0;
+    while (lf < 30 && hits(r.left - lf - 1, cy)) lf++;
+    let rt = 0;
+    while (rt < 30 && hits(r.right + rt + 1, cy)) rt++;
+    return {
+      visualW: Math.round(r.width),
+      visualH: Math.round(r.height),
+      hitW: Math.round(r.width + lf + rt),
+      hitH: Math.round(r.height + up + dn),
+    };
   });
 }
 
@@ -30,6 +57,34 @@ test.describe("touch (hover: none) at 390", () => {
     await expect(retry).toHaveText("重试");
     await expect(retry).toHaveAccessibleName("重试");
     expect((await retry.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  });
+
+  test("3.5 mode, model, and sessions + hit areas are at least 44px", async ({
+    page,
+  }) => {
+    await scenario(page, "default");
+    expect(
+      await page.evaluate(() => matchMedia("(pointer: coarse)").matches),
+    ).toBe(true);
+    const agent = page.getByTestId("composer-agent-pill");
+    const model = page.getByTestId("composer-model-pill");
+    await expect(agent).toBeVisible();
+    await expect(model).toBeVisible();
+    for (const control of [agent, model]) {
+      const size = await measureHitArea(control);
+      // Visual stays compact; only the invisible hit pad grows.
+      expect(size.visualH).toBeLessThan(44);
+      expect(size.hitW).toBeGreaterThanOrEqual(44);
+      expect(size.hitH).toBeGreaterThanOrEqual(44);
+    }
+
+    await page.getByTestId("header-open-rail").click();
+    const add = page.getByTestId("sessions-new-chat");
+    await expect(add).toBeVisible();
+    const size = await measureHitArea(add);
+    expect(size.visualH).toBeLessThan(44);
+    expect(size.hitW).toBeGreaterThanOrEqual(44);
+    expect(size.hitH).toBeGreaterThanOrEqual(44);
   });
 });
 

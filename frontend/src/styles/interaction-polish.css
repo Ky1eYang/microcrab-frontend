@@ -787,11 +787,19 @@
   .composer-agent-picker-wrap,
   .composer-model-picker-wrap {
     flex: 0 1 auto;
-    overflow: hidden;
+    min-width: 0;
+    /* Keep overflow visible so the 44px hit-area ::after is not clipped. */
   }
   .composer-pill {
     max-width: 100%;
+    min-width: 0;
+  }
+  /* Truncate the label, not the pill, so ellipsis still works on narrow rows. */
+  .composer-pill .model-pill-name {
+    min-width: 0;
     overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .composer-busy-actions {
     flex: 0 0 auto;
@@ -1092,7 +1100,8 @@ button.search-result-item:focus-visible {
   .secondary-tab-btn,
   .rail-project-btn,
   .session-action-icon-btn,
-  .queue-item-action-btn {
+  .queue-item-action-btn,
+  .rail-sec-action-btn {
     position: relative;
   }
 
@@ -1103,18 +1112,22 @@ button.search-result-item:focus-visible {
   .secondary-tab-btn::after,
   .rail-project-btn::after,
   .session-action-icon-btn::after,
-  .queue-item-action-btn::after {
+  .queue-item-action-btn::after,
+  .rail-sec-action-btn::after {
     content: "";
     position: absolute;
     left: 50%;
     top: 50%;
-    width: max(100%, 44px);
-    height: max(100%, 44px);
+    /* 46px so elementFromPoint / subpixel rounding still measures ≥44. */
+    width: max(100%, 46px);
+    height: max(100%, 46px);
     transform: translate(-50%, -50%);
   }
 
   /* Pill names ellipsize themselves; let the hit area extend past the pill. */
-  .composer-pill {
+  .composer-pill,
+  .composer-agent-picker-wrap,
+  .composer-model-picker-wrap {
     overflow: visible;
   }
 }
