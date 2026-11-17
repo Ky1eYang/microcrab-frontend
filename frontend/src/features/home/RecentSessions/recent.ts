@@ -54,13 +54,23 @@ export function recentSessions(
     .slice(0, limit);
 }
 
-export function shortRelativeTime(time: number, now = Date.now()) {
+/** Stamps before 2001-09-09 (1e12 ms) are ordinals or missing data, not times. */
+const MIN_PLAUSIBLE_MS = 1_000_000_000_000;
+
+/** Compact age ("now", "5m", "3h", "2d", "1y"); "—" when the stamp is missing,
+ * zero, or epoch-adjacent so fixtures and unset fields never read "20774d". */
+export function shortRelativeTime(time?: number | null, now = Date.now()) {
+  if (time == null || !Number.isFinite(time) || time < MIN_PLAUSIBLE_MS)
+    return "—";
   const seconds = Math.max(0, (now - time) / 1000);
+  const days = Math.floor(seconds / 86400);
   return seconds < 60
     ? "now"
     : seconds < 3600
       ? `${Math.floor(seconds / 60)}m`
       : seconds < 86400
         ? `${Math.floor(seconds / 3600)}h`
-        : `${Math.floor(seconds / 86400)}d`;
+        : days < 365
+          ? `${days}d`
+          : `${Math.floor(days / 365)}y`;
 }

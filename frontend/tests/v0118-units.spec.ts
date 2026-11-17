@@ -66,11 +66,19 @@ test("recent sessions: non-project workspaces match unassigned sessions of that 
 });
 
 test("recent sessions: compact relative time", () => {
-  const now = 10 * 86_400_000;
+  const now = Date.UTC(2026, 10, 17, 12);
   expect(shortRelativeTime(now - 5_000, now)).toBe("now");
   expect(shortRelativeTime(now - 5 * 60_000, now)).toBe("5m");
   expect(shortRelativeTime(now - 3 * 3_600_000, now)).toBe("3h");
   expect(shortRelativeTime(now - 2 * 86_400_000, now)).toBe("2d");
+  // P2-1: missing / ordinal / epoch stamps never render as "20774d".
+  expect(shortRelativeTime(undefined, now)).toBe("—");
+  expect(shortRelativeTime(null, now)).toBe("—");
+  expect(shortRelativeTime(0, now)).toBe("—");
+  expect(shortRelativeTime(2, now)).toBe("—");
+  expect(shortRelativeTime(Number.NaN, now)).toBe("—");
+  expect(shortRelativeTime(now - 400 * 86_400_000, now)).toBe("1y");
+  expect(shortRelativeTime(now + 60_000, now)).toBe("now");
 });
 
 import { isSandboxSupportedByBuild } from "../src/client/browser-sandbox-availability";

@@ -1,3 +1,4 @@
+import { shortRelativeTime } from "../features/home/RecentSessions/recent";
 import {
   isConversation,
   projectIdentity,
@@ -23,16 +24,7 @@ import { focusFirst, trapFocus, useNarrowViewport } from "../client/viewport";
 const label = (s: SessionView) => s.title.trim() || s.id;
 const basename = (path: string) =>
   path.replace(/\\/g, "/").replace(/\/$/, "").split("/").pop() || path;
-function relativeTime(time?: number | null) {
-  const seconds = Math.max(0, (Date.now() - (time ?? Date.now())) / 1000);
-  return seconds < 60
-    ? "now"
-    : seconds < 3600
-      ? `${Math.floor(seconds / 60)}m`
-      : seconds < 86400
-        ? `${Math.floor(seconds / 3600)}h`
-        : `${Math.floor(seconds / 86400)}d`;
-}
+const relativeTime = shortRelativeTime;
 
 function SessionRow({
   session,
