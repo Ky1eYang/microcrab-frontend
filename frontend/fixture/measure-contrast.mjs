@@ -11,7 +11,7 @@ const targets = {
   "permission-request": ["[data-testid=permission-request] *:not(svg):not(path)"],
   "round-limit-tools": ["[data-testid=round-limit-request] *:not(svg):not(path)"],
   "statistics-zero": [".dock-stat-row *, .dock-stat-row"],
-  "client-tools-error": [".client-tools-settings *:not(svg):not(path)"],
+  "client-tools-error": ["[data-testid=\"client-plugins-manager\"] *:not(svg):not(path)"],
   "settings": [".settings-dialog .settings-nav-item, .settings-dialog .settings-description, .settings-dialog .settings-row-label"],
 };
 const b = await chromium.launch();
