@@ -1125,6 +1125,7 @@ button.search-result-item:focus-visible {
   input[type="email"],
   input[type="password"],
   input:not([type]) {
-    font-size: 16px;
+    /* Component rules set 13–14px with class selectors; iOS zooms below 16px. */
+    font-size: 16px !important;
   }
 }
