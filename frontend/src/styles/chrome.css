@@ -755,6 +755,23 @@
   flex: 1;
 }
 
+/* Narrow: long toasts clamp to two lines; tap the text to read all of it. */
+@media (max-width: 767.98px) {
+  .toast-body[data-expanded="false"] {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+    cursor: pointer;
+  }
+
+  .toast-body[data-expanded="true"] {
+    max-height: 40vh;
+    overflow-y: auto;
+  }
+}
+
 .toast-close {
   background: transparent;
   border: none;

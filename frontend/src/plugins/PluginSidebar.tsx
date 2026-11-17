@@ -1,4 +1,5 @@
 import type { FeatureBlock as Block } from "../features/shared";
+import { ExpandableNotice } from "../features/ExpandableNotice";
 import { useAppSelector } from "../state";
 import { useConversationBlocks } from "../features/conversation/registry-context";
 import {
@@ -312,26 +313,34 @@ export function PluginSurface({
   const failure = error || view.error;
   if (failure)
     return (
-      <div className="client-plugin-notice" role="alert">
-        <p>{failure}</p>
-        <button
-          type="button"
-          className="ghost-btn"
-          data-testid="plugin-retry"
-          disabled={retrying}
-          onClick={() => {
-            setError(null);
-            setRetrying(true);
-            void registry
-              .restart(pluginId)
-              .catch((reason) => setError(String(reason)))
-              .finally(() => setRetrying(false));
-          }}
-        >
-          {t("plugins.retry")}
-        </button>
-        {manage}
-      </div>
+      <ExpandableNotice
+        className="client-plugin-notice"
+        role="alert"
+        tone="danger"
+        marker="none"
+        text={String(failure)}
+        action={
+          <>
+            <button
+              type="button"
+              className="ghost-btn"
+              data-testid="plugin-retry"
+              disabled={retrying}
+              onClick={() => {
+                setError(null);
+                setRetrying(true);
+                void registry
+                  .restart(pluginId)
+                  .catch((reason) => setError(String(reason)))
+                  .finally(() => setRetrying(false));
+              }}
+            >
+              {t("plugins.retry")}
+            </button>
+            {manage}
+          </>
+        }
+      />
     );
   if (view.status === "loading")
     return <p role="status">{t("plugins.loading")}</p>;
@@ -752,9 +761,13 @@ export function PluginSidebar({ children }: { children?: ReactNode }) {
         </div>
       </div>
       {plugins.error && (
-        <p className="client-plugin-notice" role="alert">
-          {plugins.error}
-        </p>
+        <ExpandableNotice
+          className="client-plugin-notice"
+          role="alert"
+          tone="danger"
+          marker="none"
+          text={String(plugins.error)}
+        />
       )}
       {active ? (
         <section

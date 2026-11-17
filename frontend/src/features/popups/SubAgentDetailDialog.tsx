@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { ExpandableNotice } from "../ExpandableNotice";
 import { useApp } from "../../state";
 import { createTranscript } from "../../client/projector";
 import { t } from "../../i18n";
@@ -25,43 +26,77 @@ export function SubAgentDetailDialog() {
   const notices = (
     <>
       {popup.loading && (
-        <p className="child-content-notice" role="status">
-          {t("child.loading")}
-        </p>
+        <ExpandableNotice
+          className="child-content-notice"
+          tone="neutral"
+          marker="none"
+          role="status"
+          text={t("child.loading")}
+        />
       )}
       {popup.error && (
-        <p className="child-content-notice" role="alert">
-          {t("child.readError", { error: popup.error })}
-        </p>
+        <ExpandableNotice
+          className="child-content-notice"
+          tone="neutral"
+          marker="none"
+          role="alert"
+          text={t("child.readError", { error: popup.error })}
+        />
       )}
       {popup.entryUnknown && <p className="child-content-notice" role="status">{t("childInput.entryUnknown")}</p>}
       {detail?.availability === "pending" && (
-        <p className="child-content-notice" role="status">
-          {t("child.pendingNotice")}
-        </p>
+        <ExpandableNotice
+          className="child-content-notice"
+          tone="neutral"
+          marker="none"
+          role="status"
+          text={t("child.pendingNotice")}
+        />
       )}
       {detail?.availability === "unavailable" && (
-        <p className="child-content-notice" role="status">
-          {t("child.unavailableNotice")}
-        </p>
+        <ExpandableNotice
+          className="child-content-notice"
+          tone="neutral"
+          marker="none"
+          role="status"
+          text={t("child.unavailableNotice")}
+        />
       )}
       {detail?.messages.some((message) => message.content_omitted) && (
-        <p className="child-content-notice" role="status">
-          {t("child.omitted")}
-        </p>
+        <ExpandableNotice
+          className="child-content-notice"
+          tone="neutral"
+          marker="none"
+          role="status"
+          text={t("child.omitted")}
+        />
       )}
       {detail?.messages_truncated && detail.next_cursor == null && (
-        <p className="child-content-notice" role="status">
-          {t("child.messagesTruncated")}
-        </p>
+        <ExpandableNotice
+          className="child-content-notice"
+          tone="neutral"
+          marker="none"
+          role="status"
+          text={t("child.messagesTruncated")}
+        />
       )}
       {detail?.executions_truncated && (
-        <p className="child-content-notice" role="status">
-          {t("child.executionsTruncated")}
-        </p>
+        <ExpandableNotice
+          className="child-content-notice"
+          tone="neutral"
+          marker="none"
+          role="status"
+          text={t("child.executionsTruncated")}
+        />
       )}
       {detail?.availability === "persisted" && !detail.messages.length && (
-        <p className="child-content-notice">{t("child.empty")}</p>
+        <ExpandableNotice
+          className="child-content-notice"
+          tone="neutral"
+          marker="none"
+          role={null}
+          text={t("child.empty")}
+        />
       )}
     </>
   );

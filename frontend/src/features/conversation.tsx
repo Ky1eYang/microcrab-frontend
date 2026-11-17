@@ -4,6 +4,7 @@ import {
 } from "./plugin-block-variants";
 import { isDirectUserSource } from "../client/input-source";
 import { CitationConversationProvider } from "./citations/context";
+import { ExpandableNotice } from "./ExpandableNotice";
 import { useClientPlugins } from "../state";
 import {
   sessionTabPlugins,
@@ -1579,13 +1580,14 @@ function ConversationList({
       >
         <div className="transcript-inner">
           {historyChanged && (
-            <p
+            <ExpandableNotice
               className="child-content-notice"
+              tone="neutral"
+              marker="none"
               role="status"
               data-testid="history-reading-changed"
-            >
-              {t("conversation.inspectionChanged")}
-            </p>
+              text={t("conversation.inspectionChanged")}
+            />
           )}
           {notices}
           {(transcript.displayCoverage === "unavailable" ||
@@ -1748,15 +1750,20 @@ function ConversationList({
             );
           })}
           {!readOnly && state.isCreatingSession ? (
-            <div className="session-waiting-banner">
-              <Icon
-                name="spinner"
-                size={16}
-                className="animate-spin"
-                strokeWidth="2.5"
-              />
-              <span>{t("conversation.connecting")}</span>
-            </div>
+            <ExpandableNotice
+              className="session-waiting-banner"
+              tone="neutral"
+              role={null}
+              marker={
+                <Icon
+                  name="spinner"
+                  size={16}
+                  className="animate-spin"
+                  strokeWidth="2.5"
+                />
+              }
+              text={t("conversation.connecting")}
+            />
           ) : !readOnly &&
             isBusy(transcript) &&
             !visible.some((b) => b.role === "assistant" && b.payload.text) ? (

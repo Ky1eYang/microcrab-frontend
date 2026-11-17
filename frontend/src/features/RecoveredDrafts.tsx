@@ -1,4 +1,5 @@
 import { useState, useSyncExternalStore } from "react";
+import { ExpandableNotice } from "./ExpandableNotice";
 import {
   discardRecoveredDrafts,
   recoveredDraftsSnapshot,
@@ -22,9 +23,13 @@ export function RecoveredDrafts() {
       onClose={() => setConfirm(true)}
     >
       <div data-testid="recovered-document-drafts">
-        <p className="settings-description">
-          {t("contentViewer.recoveredNotice")}
-        </p>
+        <ExpandableNotice
+          className="settings-description recovered-drafts-notice"
+          tone="neutral"
+          marker="none"
+          role={null}
+          text={t("contentViewer.recoveredNotice")}
+        />
         {recovery.drafts.map((draft, index) => (
           <section key={index}>
             <h3>{draft.label}</h3>

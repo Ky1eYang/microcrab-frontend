@@ -11,6 +11,7 @@ import {
   questionImageComponents,
   type QuestionImageScope,
 } from "./questions/question-images";
+import { ExpandableNotice } from "./ExpandableNotice";
 import { markdownExtensions } from "./markdown-extensions";
 import SvgBlock from "./visualizers/SvgBlock";
 import { citationDestinations } from "./citations/parser";
@@ -1678,46 +1679,58 @@ function PermissionRequestCard({
         </section>
       )}
       {value.review && (
-        <p
+        <ExpandableNotice
           className="inline-notice"
+          tone="neutral"
+          marker="none"
           role="status"
           data-testid="permission-review"
           data-phase={value.phase}
-        >
-          {t("permission.reviewSuggestion", {
+          text={t("permission.reviewSuggestion", {
             action: t(`permission.action.${value.review.action}`),
             reason: value.review.reason,
           })}
-          {value.phase === "review_grace" && (
-            <span data-testid="permission-review-countdown">
-              {t("permission.reviewCountdown", {
-                seconds: Math.max(
-                  0,
-                  Math.ceil((value.expires_at_ms - now) / 1000),
-                ),
-              })}
-            </span>
-          )}
-        </p>
+          trailing={
+            value.phase === "review_grace" && (
+              <span data-testid="permission-review-countdown">
+                {t("permission.reviewCountdown", {
+                  seconds: Math.max(
+                    0,
+                    Math.ceil((value.expires_at_ms - now) / 1000),
+                  ),
+                })}
+              </span>
+            )
+          }
+        />
       )}
       {value.observer && (
-        <p className="inline-notice" role="status">
-          {t("permission.observer")}
-        </p>
+        <ExpandableNotice
+          className="inline-notice"
+          tone="neutral"
+          marker="none"
+          role="status"
+          text={t("permission.observer")}
+        />
       )}
       {value.submitting && (
-        <p
+        <ExpandableNotice
           className="inline-notice"
+          tone="neutral"
+          marker="none"
           role="status"
           data-testid="permission-submitting"
-        >
-          {t("permission.submitting")}
-        </p>
+          text={t("permission.submitting")}
+        />
       )}
       {expired && (
-        <p className="inline-notice" data-tone="warn" role="status">
-          {t("permission.expired")}
-        </p>
+        <ExpandableNotice
+          className="inline-notice"
+          tone="warn"
+          marker="none"
+          role="status"
+          text={t("permission.expired")}
+        />
       )}
       <details className="flow-card-details">
         <summary>{t("permission.details")}</summary>
@@ -1812,14 +1825,22 @@ function QuestionAnswers({ value }: { value: PendingQuestion }) {
     <article className="flow-card">
       <h3>{t("question.title")}</h3>
       {value.observer && (
-        <p className="inline-notice" role="status">
-          {t("question.observer")}
-        </p>
+        <ExpandableNotice
+          className="inline-notice"
+          tone="neutral"
+          marker="none"
+          role="status"
+          text={t("question.observer")}
+        />
       )}
       {value.awaitingConfirmation && (
-        <p className="inline-notice" role="status">
-          {t("question.awaiting")}
-        </p>
+        <ExpandableNotice
+          className="inline-notice"
+          tone="neutral"
+          marker="none"
+          role="status"
+          text={t("question.awaiting")}
+        />
       )}
       {value.blockingMode === "deferred" ? (
         <p role="status">{t("question.deferred")}</p>

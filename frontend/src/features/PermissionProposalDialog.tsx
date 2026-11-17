@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { ExpandableNotice } from "./ExpandableNotice";
 import { useApp } from "../state";
 import { t } from "../i18n";
 import { Payload } from "./Payload";
@@ -90,7 +91,13 @@ function Proposal({ value }: { value: PermissionProposalView }) {
         <h3 id="permission-proposal-heading">
           {t("permission.proposal.title")}
         </h3>
-        <p className="inline-notice">{t("permission.proposal.independent")}</p>
+        <ExpandableNotice
+          className="inline-notice"
+          tone="neutral"
+          marker="none"
+          role={null}
+          text={t("permission.proposal.independent")}
+        />
         <p>
           {t("permission.proposal.scope", {
             session: value.session_id,
@@ -105,12 +112,22 @@ function Proposal({ value }: { value: PermissionProposalView }) {
           })}
         </p>
         {value.observer && (
-          <p className="inline-notice">{t("permission.observer")}</p>
+          <ExpandableNotice
+            className="inline-notice"
+            tone="neutral"
+            marker="none"
+            role={null}
+            text={t("permission.observer")}
+          />
         )}
         {error && (
-          <p role="alert" className="inline-notice" data-tone="danger">
-            {error}
-          </p>
+          <ExpandableNotice
+            className="inline-notice"
+            tone="danger"
+            marker="none"
+            role="alert"
+            text={error}
+          />
         )}
         <Payload
           value={{

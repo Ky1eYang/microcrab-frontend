@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { ExpandableNotice } from "../ExpandableNotice";
 import { useApp } from "../../state";
 import { t } from "../../i18n";
 import {
@@ -147,16 +148,30 @@ export function ReferencesSettings({ projectId }: { projectId: string }) {
         </h4>
         <span className="limit-source-pill">{sources.length}</span>
       </div>
-      <p className="inline-notice">{t("ownerSettings.referencesHint")}</p>
+      <ExpandableNotice
+        className="inline-notice"
+        tone="neutral"
+        marker="none"
+        role={null}
+        text={t("ownerSettings.referencesHint")}
+      />
       {error && (
-        <p role="alert" className="inline-notice" data-tone="danger">
-          {error}
-        </p>
+        <ExpandableNotice
+          className="inline-notice"
+          tone="danger"
+          marker="none"
+          role="alert"
+          text={error}
+        />
       )}
       {status && (
-        <p role="status" className="inline-notice">
-          {status}
-        </p>
+        <ExpandableNotice
+          className="inline-notice"
+          tone="neutral"
+          marker="none"
+          role="status"
+          text={status}
+        />
       )}
       <div className="project-ref-add" data-testid="project-ref-add">
         <select

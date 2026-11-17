@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
+import { ExpandableNotice } from "../features/ExpandableNotice";
 import { useAppFields, useAppStore, useClientPlugins } from "../state";
 import { t } from "../i18n";
 import { Icon } from "../shell/Icon";
@@ -326,9 +327,14 @@ export function PluginsPage({ embedded = false }: { embedded?: boolean }) {
         data-testid="client-plugins-detail"
       >
         {(error || plugins.error) && (
-          <div role="alert" className="client-plugin-notice">
-            <span>{error || plugins.error}</span>
-            {plugins.error &&
+          <ExpandableNotice
+            role="alert"
+            className="client-plugin-notice"
+            tone="danger"
+            marker="none"
+            text={String(error || plugins.error)}
+            action={
+              plugins.error &&
               !plugins.initializing &&
               !plugins.isReadyFor(state.sessionId) && (
                 <button
@@ -340,13 +346,18 @@ export function PluginsPage({ embedded = false }: { embedded?: boolean }) {
                 >
                   {t("plugins.retry")}
                 </button>
-              )}
-          </div>
+              )
+            }
+          />
         )}
         {notice && (
-          <div role="status" className="client-plugin-feedback-banner">
-            <span>{notice}</span>
-          </div>
+          <ExpandableNotice
+            role="status"
+            className="client-plugin-feedback-banner"
+            tone="info"
+            marker="none"
+            text={notice}
+          />
         )}
         {!registry && (
           <div className="client-plugins-empty-stage" role="status">
@@ -484,23 +495,29 @@ export function PluginsPage({ embedded = false }: { embedded?: boolean }) {
               </div>
 
               {activePlugin.error && (
-                <div role="alert" className="client-plugin-notice">
-                  <span>{activePlugin.error}</span>
-                  {isPluginActiveInScope(activePlugin) && (
-                    <button
-                      type="button"
-                      className="ghost-btn btn-sm"
-                      disabled={busy}
-                      onClick={() =>
-                        void run(() =>
-                          registry.restart(activePlugin.manifest.id),
-                        )
-                      }
-                    >
-                      {t("plugins.retry")}
-                    </button>
-                  )}
-                </div>
+                <ExpandableNotice
+                  role="alert"
+                  className="client-plugin-notice"
+                  tone="danger"
+                  marker="none"
+                  text={String(activePlugin.error)}
+                  action={
+                    isPluginActiveInScope(activePlugin) && (
+                      <button
+                        type="button"
+                        className="ghost-btn btn-sm"
+                        disabled={busy}
+                        onClick={() =>
+                          void run(() =>
+                            registry.restart(activePlugin.manifest.id),
+                          )
+                        }
+                      >
+                        {t("plugins.retry")}
+                      </button>
+                    )
+                  }
+                />
               )}
             </div>
 

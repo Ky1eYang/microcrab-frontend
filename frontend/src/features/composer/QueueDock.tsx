@@ -1,4 +1,5 @@
 import { userTaskInputAllowed } from "../../client/session-kind";
+import { ExpandableNotice } from "../ExpandableNotice";
 import { useState } from "react";
 import { activeSession, useApp } from "../../state";
 import { hostReadiness } from "../../state/host-readiness";
@@ -77,9 +78,14 @@ export function QueueDock() {
         </span>
       </button>
       {draftOccupied && items.length > 0 && !staged && (
-        <p className="queue-dock-note" data-testid="inbox-draft-note">
-          {t("composer.inbox.draftOccupied")}
-        </p>
+        <ExpandableNotice
+          className="queue-dock-note"
+          tone="neutral"
+          marker="none"
+          role={null}
+          data-testid="inbox-draft-note"
+          text={t("composer.inbox.draftOccupied")}
+        />
       )}
       {staged && (
         <div
@@ -374,14 +380,14 @@ export function QueueDock() {
                   )}
                 </div>
                 {mutation?.error && (
-                  <div
+                  <ExpandableNotice
                     className="inline-notice queue-item-error"
-                    data-tone={itemStatus === "unknown" ? "warn" : "danger"}
-                    data-testid="inbox-mutation-error"
+                    tone={itemStatus === "unknown" ? "warn" : "danger"}
+                    marker="none"
                     role="status"
-                  >
-                    {mutation.error}
-                  </div>
+                    data-testid="inbox-mutation-error"
+                    text={mutation.error}
+                  />
                 )}
               </div>
             );

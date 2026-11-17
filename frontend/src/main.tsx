@@ -221,6 +221,9 @@ function ToastBanner({
   const dismissRef = useRef(onDismiss);
   dismissRef.current = onDismiss;
   const [paused, setPaused] = useState(false);
+  // Narrow viewports clamp the body to two lines; tapping it reveals the full
+  // text and holds the toast open like hover does.
+  const [expanded, setExpanded] = useState(false);
   const remainingRef = useRef(4000);
   const startTimeRef = useRef(Date.now());
   const timerRef = useRef<number | null>(null);
@@ -229,6 +232,7 @@ function ToastBanner({
     remainingRef.current = 4000;
     startTimeRef.current = Date.now();
     setPaused(false);
+    setExpanded(false);
 
     if (toast.sticky) return;
 
@@ -282,7 +286,18 @@ function ToastBanner({
           }}
         />
       )}
-      <div className="toast-body">{toast.text}</div>
+      <div
+        className="toast-body"
+        data-testid="toast-body"
+        data-expanded={String(expanded)}
+        title={expanded ? undefined : toast.text}
+        onClick={() => {
+          if (!expanded) handleMouseEnter();
+          setExpanded((value) => !value);
+        }}
+      >
+        {toast.text}
+      </div>
       <button
         type="button"
         className="toast-close"

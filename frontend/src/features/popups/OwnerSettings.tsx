@@ -1,4 +1,5 @@
 import "../../styles/owner-settings.css";
+import { ExpandableNotice } from "../ExpandableNotice";
 import { PredicateEditor } from "./SessionPermissionsDialog/PredicateEditor";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useApp } from "../../state";
@@ -421,14 +422,22 @@ export function OwnerSettings({
         </p>
       )}
       {error && (
-        <p role="alert" className="inline-notice" data-tone="danger">
-          {error}
-        </p>
+        <ExpandableNotice
+          className="inline-notice"
+          tone="danger"
+          marker="none"
+          role="alert"
+          text={error}
+        />
       )}
       {status && (
-        <p role="status" className="inline-notice">
-          {status}
-        </p>
+        <ExpandableNotice
+          className="inline-notice"
+          tone="neutral"
+          marker="none"
+          role="status"
+          text={status}
+        />
       )}
       {snapshot && (
         <>
@@ -1252,7 +1261,13 @@ export function ProvidersSettings() {
   const renderProviderConfigForm = () => (
     <fieldset disabled={busy || readonly} className="settings-flat-fieldset">
       {readonly && (
-        <p className="inline-notice">{t("ownerSettings.adminReadonly")}</p>
+        <ExpandableNotice
+          className="inline-notice"
+          tone="neutral"
+          marker="none"
+          role={null}
+          text={t("ownerSettings.adminReadonly")}
+        />
       )}
       <div className="limits-grid">
         <label className="settings-form-group">
@@ -1430,14 +1445,22 @@ export function ProvidersSettings() {
     >
       <p className="settings-description">{t("ownerSettings.providersHint")}</p>
       {error && (
-        <p className="inline-notice" data-tone="danger" role="alert">
-          {error}
-        </p>
+        <ExpandableNotice
+          className="inline-notice"
+          tone="danger"
+          marker="none"
+          role="alert"
+          text={error}
+        />
       )}
       {status && (
-        <p className="inline-notice" role="status">
-          {status}
-        </p>
+        <ExpandableNotice
+          className="inline-notice"
+          tone="neutral"
+          marker="none"
+          role="status"
+          text={status}
+        />
       )}
 
       {/* Provider configuration accordion with a separate active-provider model list */}

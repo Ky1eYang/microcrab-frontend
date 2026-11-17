@@ -1669,8 +1669,16 @@
   padding-block: 3px;
 }
 
-.expandable-notice[data-expanded] .expandable-notice-lead {
+.expandable-notice[data-expandable] .expandable-notice-lead {
   cursor: pointer;
+}
+
+.expandable-notice-marker {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+  color: var(--text-3);
 }
 
 .expandable-notice-dot {
@@ -1686,8 +1694,25 @@
   background: var(--danger);
 }
 
-.expandable-notice[data-tone="neutral"] .expandable-notice-dot {
+.expandable-notice[data-tone="neutral"] .expandable-notice-dot,
+.expandable-notice[data-tone="info"] .expandable-notice-dot {
   background: var(--text-3);
+}
+
+.expandable-notice[data-tone="success"] .expandable-notice-dot {
+  background: var(--success);
+}
+
+/* Host classes such as .inline-notice keep their own box and tone border. */
+.expandable-notice.inline-notice .expandable-notice-first,
+.expandable-notice.child-content-notice .expandable-notice-first,
+.expandable-notice.queue-dock-note .expandable-notice-first,
+.expandable-notice.session-waiting-banner .expandable-notice-first,
+.expandable-notice.settings-feedback-banner .expandable-notice-first,
+.expandable-notice.settings-description .expandable-notice-first,
+.expandable-notice.client-plugin-notice .expandable-notice-first,
+.expandable-notice.client-plugin-feedback-banner .expandable-notice-first {
+  color: inherit;
 }
 
 .expandable-notice .offline-text {
@@ -1756,9 +1781,13 @@
   }
 
   .expandable-notice-lead {
-    min-height: 44px;
     align-items: center;
     padding-block: 0;
+  }
+
+  .expandable-notice[data-expandable] .expandable-notice-lead,
+  .composer-offline-banner .expandable-notice-lead {
+    min-height: 44px;
   }
 
   .expandable-notice[data-expanded="false"] .offline-text {
@@ -1772,7 +1801,7 @@
   }
 
   .expandable-notice[data-expanded="true"] .expandable-notice-lead {
-    padding-block: 12px;
+    padding-block: 10px;
     align-items: baseline;
   }
 

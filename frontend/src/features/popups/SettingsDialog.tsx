@@ -1,5 +1,6 @@
 import { ExternalSpeakersSettings } from "./ExternalSpeakersSettings";
 import { OwnerSettings, ProvidersSettings } from "./OwnerSettings";
+import { ExpandableNotice } from "../ExpandableNotice";
 import {
   browserHostOrigins,
   resetBrowserHostOrigins,
@@ -432,9 +433,13 @@ export function SettingsDialog() {
                     <ExternalSpeakersSettings scope={{ kind: "session", id: state.sessionId }} />
                   </>
                 ) : (
-                  <p className="inline-notice">
-                    {t("ownerSettings.selectSession")}
-                  </p>
+                  <ExpandableNotice
+                    className="inline-notice"
+                    tone="neutral"
+                    marker="none"
+                    role={null}
+                    text={t("ownerSettings.selectSession")}
+                  />
                 ))}
               {p.tab === "backend" && (
                 <>
@@ -656,9 +661,13 @@ export function SettingsDialog() {
                       />
                     </div>
                     {statusMessage && (
-                      <div className="settings-feedback-banner">
-                        {statusMessage}
-                      </div>
+                      <ExpandableNotice
+                        className="settings-feedback-banner"
+                        tone="neutral"
+                        marker="none"
+                        role={null}
+                        text={statusMessage}
+                      />
                     )}
                     <div className="settings-actions-row">
                       <button

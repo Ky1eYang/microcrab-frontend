@@ -907,3 +907,9 @@
     border-left: 0;
   }
 }
+
+/* ExpandableNotice hosts keep the lead and actions on one row when collapsed. */
+.expandable-notice.client-plugin-notice {
+  flex-wrap: nowrap;
+  align-items: flex-start;
+}
