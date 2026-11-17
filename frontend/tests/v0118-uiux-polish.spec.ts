@@ -43,9 +43,10 @@ test.describe("narrow 390", () => {
     const notice = page.locator(".composer-offline-banner").first();
     await expect(notice).toBeVisible();
     await expect(notice).toHaveAttribute("data-expanded", "false");
-    expect(
-      await notice.evaluate((el) => el.getBoundingClientRect().height),
-    ).toBeGreaterThanOrEqual(44);
+    // The composer reveals the banner with a short height transition.
+    await expect
+      .poll(() => notice.evaluate((el) => el.getBoundingClientRect().height))
+      .toBeGreaterThanOrEqual(44);
     const toggle = notice.locator(".expandable-notice-toggle");
     await expect(toggle).toHaveText(/说明/);
     await toggle.click();
