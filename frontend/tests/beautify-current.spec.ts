@@ -29,12 +29,21 @@ async function fitsViewport(page: Page, locator: Locator) {
 
 async function showUnsupportedToast(page: Page) {
   // Help remains explicitly unavailable; projectless Conversations are supported.
+  // Under 768px the account card lives in the drawer opened from the header.
+  const menu = page.getByTestId("header-open-rail");
+  const narrow = await menu.isVisible();
+  if (narrow) await menu.click();
   await page.locator(".user-card-btn").first().click();
   await page
     .locator(".user-card-menu")
     .getByRole("button", { name: "帮助", exact: true })
     .click();
   await expect(page.locator(".toast-body")).toHaveText("帮助内容尚未接入");
+  // Close the drawer again so later steps reach the page behind it.
+  if (narrow)
+    await page
+      .getByTestId("rail-drawer-backdrop")
+      .click({ position: { x: 380, y: 400 } });
   await expect(page.locator(".toast-container")).toHaveAttribute(
     "data-kind",
     "info",
