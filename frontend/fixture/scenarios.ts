@@ -29,6 +29,14 @@ import {
   waitText,
 } from "./driver";
 
+/* Review fixtures show realistic ages. The shared nativeSnapshot keeps its
+ * ordinal stamps (1/2) because ~38 Playwright specs order sessions against
+ * small overrides such as updated_at_ms: 3 or 99. */
+const FIXTURE_NOW = Date.now();
+Object.assign(nativeSnapshot.session, {
+  created_at_ms: FIXTURE_NOW - 2 * 3_600_000,
+  updated_at_ms: FIXTURE_NOW - 12 * 60_000,
+});
 type Page = Parameters<typeof nativeBackend>[0];
 type Backend = Awaited<ReturnType<typeof nativeBackend>>;
 export type Scenario = {
@@ -392,6 +400,18 @@ export const SCENARIOS: Record<string, Scenario> = {
     steps: async () => {
       await click(".user-card-btn");
       await clickText("body", /^(设置|Settings)$/);
+    },
+  },
+  "settings-feedback": {
+    title: "Settings › Backend › Save: long feedback banner (ExpandableNotice) and a held warn toast (2-line clamp below 768px)",
+    stage: plain,
+    steps: async () => {
+      await openAccountMenu();
+      await clickText("body", /^(设置|Settings)$/);
+      await clickText(".settings-dialog", /^(保存并连接|Save and connect)$/);
+      // Hold the toast like a hovering pointer so the review shot can see it.
+      const toast = await waitFor(".toast-container");
+      toast.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
     },
   },
 };

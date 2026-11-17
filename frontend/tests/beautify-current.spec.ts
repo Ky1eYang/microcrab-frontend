@@ -179,16 +179,22 @@ for (const { colorScheme, width } of [
           fullPage: true,
         });
       }
+      // v0.1.18 3.6: below 768px "New chat" lives in the header-opened drawer.
+      const railMenu = page.getByTestId("header-open-rail");
+      if (await railMenu.isVisible()) await railMenu.click();
       await page
         .getByRole("button", {
           name: "新对话",
           exact: true,
         })
+        .first()
         .click();
       await page.getByTitle("选择项目工作区").click();
-      const online = page.locator(".workspace-menu-item[data-active=true]");
-      await expect(online).toHaveAccessibleName("Assigned");
-      await expect(online.locator(".picker-project-status")).toHaveCount(0);
+      // v0.1.18 3.9: the picker badges only offline Projects; an online
+      // current Project shows its selected row without a status badge.
+      const active = page.locator(".workspace-menu-item[data-active=true]");
+      await expect(active.first()).toBeVisible();
+      await expect(active.locator(".picker-project-status")).toHaveCount(0);
       expect(
         backend.commands.filter((command) => command.method === "turn.queue"),
       ).toHaveLength(0);

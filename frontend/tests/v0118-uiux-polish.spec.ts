@@ -40,7 +40,7 @@ test.describe("narrow 390", () => {
     page,
   }) => {
     await scenario(page, "default");
-    const notice = page.locator(".expandable-notice").first();
+    const notice = page.locator(".composer-offline-banner").first();
     await expect(notice).toHaveAttribute("data-expanded", "false");
     expect((await notice.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     const toggle = notice.locator(".expandable-notice-toggle");
@@ -96,6 +96,51 @@ test.describe("narrow 390", () => {
     );
   });
 
+  test("P2-2 permission JSON wraps inside the card", async ({ page }) => {
+    await scenario(page, "permission-request");
+    const details = page.locator(".permission-card .flow-card-details").first();
+    await details.evaluate((el) => ((el as HTMLDetailsElement).open = true));
+    const body = details.locator(".payload-body").first();
+    await expect(body).toBeVisible();
+    expect(
+      await body.evaluate((el) => el.scrollWidth <= el.clientWidth + 1),
+    ).toBe(true);
+    const card = (await page
+      .locator(".permission-card")
+      .first()
+      .boundingBox())!;
+    const box = (await body.boundingBox())!;
+    expect(box.x + box.width).toBeLessThanOrEqual(card.x + card.width + 0.5);
+  });
+
+  test("P2-1 rail never shows epoch ages", async ({ page }) => {
+    await scenario(page, "default");
+    await page.getByTestId("header-open-rail").click();
+    const times = await page.locator(".session-item-time").allInnerTexts();
+    expect(times.length).toBeGreaterThan(0);
+    for (const time of times)
+      expect(time).toMatch(/^(now|\d{1,3}[mhd]|\d+y|—)$/);
+  });
+
+  test("P1-1 settings feedback banner and toast stay compact and reveal full text", async ({
+    page,
+  }) => {
+    await scenario(page, "settings-feedback");
+    const banner = page.locator(".settings-feedback-banner.expandable-notice");
+    await expect(banner).toBeVisible();
+    await expect(banner).toHaveAttribute("data-expanded", "false");
+    await expect(banner).toHaveAttribute("data-expandable", "true");
+    await banner.locator(".expandable-notice-toggle").click();
+    await expect(banner).toHaveAttribute("data-expanded", "true");
+    const toast = page.getByTestId("toast-body");
+    await expect(toast).toHaveAttribute("data-expanded", "false");
+    await expect(toast).toHaveCSS("-webkit-line-clamp", "2");
+    const clamped = (await toast.boundingBox())!.height;
+    await toast.click();
+    await expect(toast).toHaveAttribute("data-expanded", "true");
+    expect((await toast.boundingBox())!.height).toBeGreaterThan(clamped);
+  });
+
   test("3.6 no collapsed icon rail; header menu opens the drawer", async ({
     page,
   }) => {
@@ -106,6 +151,25 @@ test.describe("narrow 390", () => {
     await menu.click();
     await expect(menu).toHaveAttribute("aria-expanded", "true");
     await expect(page.getByTestId("nav-new-chat").first()).toBeVisible();
+  });
+});
+
+test.describe("narrow 320", () => {
+  test.use({ viewport: { width: 320, height: 720 } });
+
+  test("P1-1 queue draft note ellipsizes to one line and expands", async ({
+    page,
+  }) => {
+    await scenario(page, "inbox-mixed-draft");
+    const note = page.getByTestId("inbox-draft-note");
+    await expect(note).toHaveAttribute("data-expanded", "false");
+    await expect(note).toHaveAttribute("data-expandable", "true");
+    const text = note.locator(".offline-text");
+    await expect(text).toHaveCSS("white-space", "nowrap");
+    await expect(text).toHaveCSS("text-overflow", "ellipsis");
+    await note.locator(".expandable-notice-toggle").click();
+    await expect(note).toHaveAttribute("data-expanded", "true");
+    await expect(text).not.toHaveCSS("white-space", "nowrap");
   });
 });
 
