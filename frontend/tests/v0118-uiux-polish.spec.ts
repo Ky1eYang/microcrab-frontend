@@ -175,6 +175,29 @@ test.describe("narrow 320", () => {
     await expect(note).toHaveAttribute("data-expanded", "true");
     await expect(text).not.toHaveCSS("white-space", "nowrap");
   });
+  test("P2-4 transcript status lines are one-line expandable notices", async ({
+    page,
+  }) => {
+    await scenario(page, "transcript-notices");
+    const coverage = page.getByTestId("conversation-display-coverage");
+    const gap = page.getByTestId("conversation-history-gap");
+    for (const notice of [coverage, gap]) {
+      await expect(notice).toHaveClass(/expandable-notice/);
+      await expect(notice.locator(".offline-text")).toHaveCSS(
+        "white-space",
+        "nowrap",
+      );
+    }
+    await expect(coverage).toHaveAttribute("data-expandable", "true");
+    await expect(coverage).toHaveAttribute("data-expanded", "false");
+    await coverage.locator(".expandable-notice-toggle").click();
+    await expect(coverage).toHaveAttribute("data-expanded", "true");
+    await expect(coverage).toContainText("已恢复的思考内容可能不完整");
+    // The "load earlier" control stays a plain fold button.
+    await expect(
+      page.locator(".transcript-history-fold-btn.expandable-notice"),
+    ).toHaveCount(0);
+  });
 });
 
 test.describe("desktop 1440", () => {

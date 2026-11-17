@@ -1592,26 +1592,30 @@ function ConversationList({
           {notices}
           {(transcript.displayCoverage === "unavailable" ||
             transcript.displayCoverage === "missing") && (
-            <div
-              className="transcript-history-fold-banner"
+            <ExpandableNotice
+              className="transcript-history-fold-banner transcript-status-notice"
+              tone={
+                transcript.displayCoverage === "unavailable"
+                  ? "warn"
+                  : "neutral"
+              }
               role="status"
               data-testid="conversation-display-coverage"
-            >
-              {t(
+              text={t(
                 transcript.displayCoverage === "unavailable"
                   ? "conversation.displayUnavailable"
                   : "conversation.displayMissing",
               )}
-            </div>
+            />
           )}
           {transcript.historyGap && (
-            <div
-              className="transcript-history-fold-banner"
+            <ExpandableNotice
+              className="transcript-history-fold-banner transcript-status-notice"
+              tone="neutral"
               role="status"
               data-testid="conversation-history-gap"
-            >
-              {t("conversation.historyGap")}
-            </div>
+              text={t("conversation.historyGap")}
+            />
           )}
           {startTurn === 0 && canLoadRemote && (
             <div className="transcript-history-fold-banner">

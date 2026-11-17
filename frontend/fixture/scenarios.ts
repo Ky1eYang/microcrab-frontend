@@ -402,6 +402,22 @@ export const SCENARIOS: Record<string, Scenario> = {
       await clickText("body", /^(设置|Settings)$/);
     },
   },
+  "transcript-notices": {
+    title: "Transcript status lines: thinking archive unavailable + history gap (ExpandableNotice, ellipsis below 768px)",
+    stage: async (page) => {
+      const b = await plain(page);
+      Object.assign(b.snapshot(), { display: { high_water: 0, coverage: "unavailable" }, history_gap: true });
+      return b;
+    },
+  },
+  "transcript-display-missing": {
+    title: "Transcript status line: no recoverable thinking archive (displayMissing)",
+    stage: async (page) => {
+      const b = await plain(page);
+      Object.assign(b.snapshot(), { display: { high_water: 0, coverage: "missing" } });
+      return b;
+    },
+  },
   "settings-feedback": {
     title: "Settings › Backend › Save: long feedback banner (ExpandableNotice) and a held warn toast (2-line clamp below 768px)",
     stage: plain,

@@ -462,6 +462,22 @@
   width: 100%;
 }
 
+/* Transcript status lines (display coverage, history gap): ExpandableNotice
+ * kept centred like the fold banner; narrow widths ellipsize to one line. */
+.transcript-status-notice {
+  justify-content: center;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+}
+
+.transcript-status-notice .expandable-notice-lead {
+  flex: 0 1 auto;
+}
+
+.transcript-status-notice .expandable-notice-first {
+  color: inherit;
+}
+
 .transcript-history-fold-btn {
   display: inline-flex;
   align-items: center;
