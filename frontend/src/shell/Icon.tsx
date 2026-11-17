@@ -15,6 +15,13 @@ export function Icon({
         <rect width="7" height="5" x="3" y="16" rx="1" />
       </>
     ),
+    "alert-circle": (
+      <>
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 8v4.5" />
+        <path d="M12 16h.01" />
+      </>
+    ),
     menu: (
       <>
         <path d="M4 6h16" />

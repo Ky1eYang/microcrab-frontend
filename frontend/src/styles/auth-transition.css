@@ -33,8 +33,22 @@
   margin: 0;
   overflow-wrap: anywhere;
 }
+/* An error reads as an error: icon, faint danger wash, above the action. */
 .auth-login-error {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
   margin-top: var(--sp-4);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--danger) 7%, transparent);
+  color: var(--text);
+}
+.auth-login-error-icon {
+  flex: none;
+  margin-top: 0.2em;
+  color: var(--danger);
 }
 .auth-actions {
   display: flex;

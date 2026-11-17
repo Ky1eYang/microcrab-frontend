@@ -8,6 +8,7 @@ import {
   navigateAuth,
 } from "./client/auth";
 import { t } from "./i18n";
+import { Icon } from "./shell/Icon";
 import "./styles/auth-transition.css";
 export { authErrorMessage } from "./client/auth";
 
@@ -33,9 +34,19 @@ export function LoginPageView({
         <h1 id="auth-login-heading">{t("auth.login.title")}</h1>
         <p className="auth-description">{t("auth.login.body")}</p>
         {error ? (
-          <p className="auth-login-error" role="alert">
-            {error}
-          </p>
+          <div
+            className="auth-login-error"
+            role="alert"
+            data-testid="auth-login-error"
+          >
+            <Icon
+              name="alert-circle"
+              size={16}
+              className="auth-login-error-icon"
+              aria-hidden="true"
+            />
+            <span>{error}</span>
+          </div>
         ) : null}
         <form
           action="/api/auth/login"
