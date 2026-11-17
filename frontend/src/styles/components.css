@@ -3450,6 +3450,43 @@
   pointer-events: auto;
 }
 
+/* Touch devices cannot hover: keep the failed turn's daily actions visible. */
+@media (hover: none) {
+  .message-turn-container:has([data-testid="operation-failure"])
+    .message-action-bar {
+    opacity: 1;
+    pointer-events: auto;
+    transform: none;
+  }
+}
+
+/* Failed model requests carry their recovery action inside the error block. */
+.operation-failure-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+}
+
+.operation-failure-retry {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-height: 32px;
+  padding: 0 var(--sp-3);
+}
+
+.operation-failure-retry svg {
+  width: 14px;
+  height: 14px;
+}
+
+@media (max-width: 767.98px), (pointer: coarse) {
+  .operation-failure-retry {
+    min-height: 44px;
+  }
+}
+
 .assistant-action-bar {
   align-self: flex-start;
   margin: 6px 0 0 4px;

@@ -61,6 +61,7 @@ import {
   SubagentAccordionGroup,
   ToolAccordionGroup,
   answerTokenUsage,
+  retryEligible,
   type ToolGroupPresentation,
 } from "./views";
 import {
@@ -345,10 +346,11 @@ function ConversationActionBar({
       retryId={
         !readOnly &&
         retryOperationId &&
-        blocks.some(
+        blocks.some((block) => retryEligible(block, retryOperationId)) &&
+        // A failure block renders its own labelled Retry inline.
+        !blocks.some(
           (block) =>
-            block.operationId === retryOperationId &&
-            ["error", "cancelled"].includes(block.stream ?? ""),
+            !!block.payload.failure && retryEligible(block, retryOperationId),
         )
           ? retryOperationId
           : undefined

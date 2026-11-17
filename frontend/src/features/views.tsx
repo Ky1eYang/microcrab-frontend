@@ -1081,6 +1081,73 @@ export function blockRenderKey(block: FeatureBlock, locale: string): string {
 }
 /** The registry version is this block's subscription boundary. A contentKey is
  * optional for standalone render fixtures; the production list never stamps text. */
+/** A failed or cancelled block that the backend marked retryable carries its
+ * own always-visible, labelled Retry (not hover-revealed). */
+export function retryEligible(
+  block: FeatureBlock,
+  retryOperationId: string | null | undefined,
+) {
+  return (
+    !!retryOperationId &&
+    block.operationId === retryOperationId &&
+    ["error", "cancelled"].includes(block.stream ?? "")
+  );
+}
+
+function InlineRetry({ block }: { block: FeatureBlock }) {
+  const retryOperationId = useAppSelector((state) => state.retryOperationId);
+  if (!retryEligible(block, retryOperationId) || !retryOperationId) return null;
+  return (
+    <div className="operation-failure-actions">
+      <RetryButton retryId={retryOperationId} labelled />
+    </div>
+  );
+}
+
+export function RetryButton({
+  retryId,
+  labelled = false,
+}: {
+  retryId: string;
+  labelled?: boolean;
+}) {
+  const dispatch = useAppDispatch();
+  const disabledReason = useAppSelector((state) =>
+    !state.capabilities?.methods.includes("turn.retry") ||
+    state.transcript.sessionStatus === "busy" ||
+    state.transcript.inboxActive ||
+    state.compactInflight ||
+    state.retryPending ||
+    state.historyMutationPending ||
+    state.isCreatingSession
+      ? "conversation.retryUnavailable"
+      : null,
+  );
+  const disabled = disabledReason !== null;
+  const label = labelled ? t("conversation.retryShort") : t("conversation.retry");
+  return (
+    <button
+      type="button"
+      className={
+        labelled
+          ? "ghost-btn operation-failure-retry"
+          : "action-icon-btn action-retry-btn"
+      }
+      title={
+        disabled && labelled ? t("conversation.retryUnavailable") : t("conversation.retry")
+      }
+      aria-label={label}
+      data-testid="retry-model-request"
+      data-operation-id={retryId}
+      disabled={disabled}
+      onClick={() => dispatch({ type: "RetryTurn", value: retryId })}
+    >
+      <Icon name="refresh" />
+      {labelled && <span>{label}</span>}
+    </button>
+  );
+}
+
 export const BlockView = memo(function BlockView({
   block: fallback,
   readOnly = false,
@@ -1200,6 +1267,9 @@ export const BlockView = memo(function BlockView({
             <div style={{ whiteSpace: "pre-wrap" }}>
               {failureText(block.payload.failure)}
             </div>
+            {!readOnly && block.operationId && (
+              <InlineRetry block={block} />
+            )}
           </div>
         ) : kind === "reasoning" ? (
           <Think
@@ -1447,27 +1517,7 @@ export function ActionBar({
             <Icon name="undo" />
           </button>
         )}
-        {retryId && (
-          <button
-            className="action-icon-btn action-retry-btn"
-            title={t("conversation.retry")}
-            aria-label={t("conversation.retry")}
-            data-testid="retry-model-request"
-            data-operation-id={retryId}
-            disabled={
-              !state.capabilities?.methods.includes("turn.retry") ||
-              state.sessionStatus === "busy" ||
-              state.inboxActive ||
-              state.compactInflight ||
-              state.retryPending ||
-              state.historyMutationPending ||
-              state.isCreatingSession
-            }
-            onClick={() => dispatch({ type: "RetryTurn", value: retryId })}
-          >
-            <Icon name="refresh" />
-          </button>
-        )}
+        {retryId && <RetryButton retryId={retryId} />}
       </div>
       <div className="action-trailing-info">
         {tokens && (
