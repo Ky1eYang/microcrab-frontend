@@ -764,6 +764,10 @@
     line-clamp: 2;
     overflow: hidden;
     cursor: pointer;
+    /* Clip at the second line: overflow clips at the padding edge, so the
+     * bottom spacing moves outside the clipped box. */
+    padding-bottom: 0;
+    margin-bottom: 10px;
   }
 
   .toast-body[data-expanded="true"] {
