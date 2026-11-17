@@ -160,8 +160,12 @@ test("separate chronological tool groups keep consistent headers without turn-to
   await page.goto("/#session/s1");
   const groups = page.locator(".tool-accordion-group-header");
   await expect(groups).toHaveCount(2);
-  await expect(groups.nth(0)).toHaveText("本组工具调用 1 次 · 本轮进行中");
-  await expect(groups.nth(1)).toHaveText("本组工具调用 2 次 · 本轮进行中");
+  // v0.1.18: active state is a spinner glyph with a readable (sr-only) name.
+  await expect(groups.nth(0)).toHaveText("本组工具调用 1 次本轮进行中");
+  await expect(groups.nth(1)).toHaveText("本组工具调用 2 次本轮进行中");
+  await expect(
+    groups.nth(0).locator('.tool-group-glyph[data-status="running"]'),
+  ).toHaveCount(1);
   await expect(page.getByTestId("tool-turn-count")).toHaveCount(0);
   await expect(page.getByTestId("tool-row")).toHaveCount(3);
 });

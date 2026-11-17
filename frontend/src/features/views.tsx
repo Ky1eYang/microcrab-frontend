@@ -740,14 +740,36 @@ export function ToolAccordionGroup({
       : statuses.length && outcomes.succeeded === statuses.length
         ? "succeeded"
         : "mixed";
-  const outcomeParts = (
-    [
-      ["failed", "tools.failedCount"],
-      ["cancelled", "tools.cancelledCount"],
-      ["interrupted", "tools.interruptedCount"],
-      ["unknown", "tools.unknownCount"],
-    ] as const
-  ).filter(([status]) => outcomes[status]);
+  // Header glyph counts (spinner = active, ✕ failed, ⊘ cancelled, ·
+  // unknown). Zero-count kinds are not drawn; each glyph has a readable name.
+  const activeCount = statuses.filter(isActiveToolStatus).length;
+  const glyphs = [
+    ...(running
+      ? [
+          {
+            status: "running" as const,
+            count: activeCount,
+            label: activeCount
+              ? t("tools.runningCount", { count: activeCount })
+              : t("conversation.toolTurnActive"),
+          },
+        ]
+      : []),
+    ...(
+      [
+        ["failed", "tools.failedCount"],
+        ["cancelled", "tools.cancelledCount"],
+        ["interrupted", "tools.interruptedCount"],
+        ["unknown", "tools.unknownCount"],
+      ] as const
+    )
+      .filter(([status]) => outcomes[status])
+      .map(([status, key]) => ({
+        status,
+        count: outcomes[status] ?? 0,
+        label: t(key, { count: outcomes[status] ?? 0 }),
+      })),
+  ];
   const title = t(
     grouped
       ? partial
@@ -772,32 +794,32 @@ export function ToolAccordionGroup({
       >
         <span className="group-header-left">
           <span className="tool-group-title tool-group-seg">{title}</span>
-          {running && (
+          {glyphs.length > 0 && (
             <span
-              className="tool-group-seg tool-group-active"
+              className="tool-group-glyphs"
+              data-testid="tool-group-outcomes"
               data-expanded={expanded}
             >
-              <span className="tool-group-sep" aria-hidden="true">
-                {" · "}
-              </span>
-              {t("conversation.toolTurnActive")}
-            </span>
-          )}
-          {outcomeParts.length > 0 && (
-            <span
-              className="tool-group-outcomes"
-              data-testid="tool-group-outcomes"
-            >
-              {outcomeParts.map(([status, key]) => (
+              {glyphs.map(({ status, count, label }) => (
                 <span
                   key={status}
-                  className="tool-group-seg"
+                  className="tool-group-glyph"
                   data-status={status}
+                  title={label}
                 >
-                  <span className="tool-group-sep" aria-hidden="true">
-                    {" · "}
+                  <span
+                    className="tool-status-glyph"
+                    data-status={status}
+                    aria-hidden="true"
+                  >
+                    <Icon name={TOOL_STATUS_ICON[status]} size={12} />
                   </span>
-                  {t(key, { count: outcomes[status] ?? 0 })}
+                  {count > 0 && (
+                    <span className="tool-group-glyph-count" aria-hidden="true">
+                      {count}
+                    </span>
+                  )}
+                  <span className="sr-only">{label}</span>
                 </span>
               ))}
             </span>

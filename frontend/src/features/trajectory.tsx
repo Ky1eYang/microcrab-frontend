@@ -9,7 +9,11 @@ import {
   presentationIdentityChanged,
 } from "./conversation/presentationIdentity";
 import { terminalSummary } from "./trajectoryStopReason";
-import { toolDisplayStatus } from "./tool-status";
+import {
+  TOOL_STATUS_ICON,
+  toolDisplayStatus,
+  type ToolDisplayStatus,
+} from "./tool-status";
 import { measuredDuration } from "./trajectoryTiming";
 import {
   useInternalAssistantAudit,
@@ -255,6 +259,21 @@ function statusOf(block: FeatureBlock) {
   }
   if (block.kind === "error") return "error";
   return "done";
+}
+
+/** Same glyph vocabulary as the conversation tool rows. Plain completed
+ * prose/user rows get no glyph; tool success only from an explicit fact. */
+function trajectoryGlyph(item: TrajectoryItem): ToolDisplayStatus | null {
+  const status = item.status;
+  if (["error", "failed"].includes(status)) return "failed";
+  if (status === "cancelled") return "cancelled";
+  if (["running", "thinking", "pending"].includes(status)) return "running";
+  if (["unknown", "awaiting-result"].includes(status)) return "unknown";
+  if (item.block.tool) {
+    const display = toolDisplayStatus(item.block.tool.status);
+    return display === "succeeded" ? "succeeded" : display;
+  }
+  return null;
 }
 
 function statusLabel(status: string) {
@@ -1360,6 +1379,24 @@ export function TrajectoryView({
                       }
                       onClick={() => select(item.block.id)}
                     >
+                      <span
+                        className="trajectory-entry-glyph tool-status-glyph"
+                        data-testid="trajectory-status-glyph"
+                        data-status={trajectoryGlyph(item) ?? "none"}
+                      >
+                        {trajectoryGlyph(item) && (
+                          <>
+                            <Icon
+                              name={TOOL_STATUS_ICON[trajectoryGlyph(item)!]}
+                              size={14}
+                              aria-hidden="true"
+                            />
+                            <span className="sr-only">
+                              {statusLabel(item.status)}
+                            </span>
+                          </>
+                        )}
+                      </span>
                       <span className="trajectory-entry-kind">
                         <TrajectoryTitle item={item} />
                       </span>

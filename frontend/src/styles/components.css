@@ -5045,10 +5045,10 @@
   width: 100%;
   height: 32px;
   display: grid;
-  grid-template-columns: minmax(0, clamp(92px, 25%, 172px)) minmax(0, 1fr) 68px;
+  grid-template-columns: 18px minmax(0, clamp(92px, 25%, 172px)) minmax(0, 1fr) 68px;
   align-items: center;
-  gap: 12px;
-  padding: 0 16px;
+  gap: 10px;
+  padding: 0 16px 0 12px;
   border: 0;
   border-left: 2px solid transparent;
   background: transparent;
@@ -5059,6 +5059,22 @@
 
 .trajectory-entry:hover {
   background: var(--bg-muted);
+}
+
+/* Failures read without the timeline: faint danger wash, legible text. */
+.trajectory-entry[data-status="error"],
+.trajectory-entry[data-status="failed"] {
+  background: color-mix(in srgb, var(--danger) 7%, transparent);
+}
+
+.trajectory-entry[data-status="error"]:hover,
+.trajectory-entry[data-status="failed"]:hover {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+.trajectory-entry-glyph {
+  width: 18px;
+  margin-right: 0;
 }
 
 .trajectory-entry[data-selected="true"] {

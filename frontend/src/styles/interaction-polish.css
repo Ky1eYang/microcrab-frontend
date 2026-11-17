@@ -444,6 +444,34 @@
   color: var(--danger);
 }
 
+/* Tool group header: "N tool calls" + glyph counts, no long outcome prose. */
+.tool-group-glyphs {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-left: var(--sp-1);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.tool-group-glyph {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.tool-group-glyph .tool-status-glyph {
+  width: 12px;
+  height: 12px;
+  margin-right: 0;
+}
+
+.tool-group-glyph[data-status="failed"] {
+  color: var(--danger);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .tool-status-glyph svg,
   .perm-spinner,

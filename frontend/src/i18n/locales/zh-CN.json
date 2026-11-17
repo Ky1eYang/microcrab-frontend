@@ -1599,5 +1599,6 @@
   "plugins.selectHint": "从左侧列表选择插件以管理开关与参数设置",
   "notice.details": "说明",
   "conversation.retryShort": "重试",
-  "permission.willRun": "将执行"
+  "permission.willRun": "将执行",
+  "tools.runningCount": "进行中：{count}"
 }
