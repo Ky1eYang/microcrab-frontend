@@ -992,14 +992,17 @@
   word-break: normal;
 }
 
-/* Part A P2 #9 at narrow widths: permission JSON keeps its structure. Long paths and
- * commands scroll sideways instead of jumping to column 0 or splitting mid-word.
- * The full value is also available through the payload's copy and expand dialog buttons. */
+/* Narrow permission JSON (v0.1.18 P2-2): a sideways-scrolling block read as
+ * clipped on 390 because touch scrollbars are invisible. Keep the line
+ * structure and indentation, and wrap long paths/commands inside the card.
+ * The payload's copy and expand dialog buttons still show the raw value. */
 @media (max-width: 640px) {
   .flow-card-details .payload .payload-body {
-    white-space: pre;
-    overflow-wrap: normal;
-    overflow-x: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: normal;
+    overflow-x: hidden;
+    max-width: 100%;
     padding-bottom: var(--sp-1);
   }
 }
