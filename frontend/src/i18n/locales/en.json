@@ -1596,5 +1596,6 @@
   "plugins.providesTools": "Provides tools",
   "plugins.booleanYes": "Yes",
   "plugins.booleanNo": "No",
-  "plugins.selectHint": "Select a plugin from the list to manage switches and parameter settings"
+  "plugins.selectHint": "Select a plugin from the list to manage switches and parameter settings",
+  "notice.details": "Details"
 }

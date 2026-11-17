@@ -1596,5 +1596,6 @@
   "plugins.providesTools": "插件是否提供工具",
   "plugins.booleanYes": "是",
   "plugins.booleanNo": "否",
-  "plugins.selectHint": "从左侧列表选择插件以管理开关与参数设置"
+  "plugins.selectHint": "从左侧列表选择插件以管理开关与参数设置",
+  "notice.details": "说明"
 }

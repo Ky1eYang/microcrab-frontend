@@ -168,7 +168,12 @@ test.describe("beautify 0.1.8", () => {
     const banner = page.locator(".composer-offline-banner");
     await expect(banner).toBeVisible();
     await expect(banner).toHaveCSS("color", await tokenColor(page, "--text-2"));
-    await expect(banner.locator(".offline-icon")).toHaveCount(1);
+    // v0.1.18: status color lives on an 8px dot instead of a warning icon.
+    await expect(banner.locator(".expandable-notice-dot")).toHaveCount(1);
+    await expect(banner.locator(".expandable-notice-dot")).toHaveCSS(
+      "background-color",
+      await tokenColor(page, "--warn"),
+    );
     await expect(banner).not.toContainText("⚠️");
 
     // Rail warn appears after an explicit disconnect sets host_connected=false.

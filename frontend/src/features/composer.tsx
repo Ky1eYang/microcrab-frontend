@@ -1,5 +1,6 @@
 import { userTaskInputAllowed } from "../client/session-kind";
 import { Icon as PermissionIcon } from "../shell/Icon";
+import { ExpandableNotice } from "./ExpandableNotice";
 import { QueueDock } from "./composer/QueueDock";
 import { ComposerSurface } from "./composer/ComposerSurface";
 import {
@@ -542,67 +543,58 @@ export function Composer({
         (state.agentInitRetryRequired ||
           state.autoCompactionRetryAvailable ||
           state.sessionRecoveryUnknown) && (
-          <div
+          <ExpandableNotice
             className="composer-offline-banner"
             role="status"
             data-testid="session-recovery-notice"
-          >
-            <div className="composer-offline-left">
-              <Icon
-                name="warning"
-                size={16}
-                className="offline-icon"
-                aria-hidden="true"
-              />
-              <span className="offline-text">
-                {t(
-                  state.sessionRecoveryUnknown
-                    ? "sessionRecovery.unknown"
-                    : state.agentInitRetryRequired
-                      ? "sessionRecovery.initNotice"
-                      : "sessionRecovery.autoNotice",
-                )}
-              </span>
-            </div>
-            {state.sessionRecoveryUnknown ? (
-              <button
-                type="button"
-                className="composer-offline-reconnect-btn"
-                disabled={
-                  !ready || !isHostReady || state.sessionRecoveryPending
-                }
-                onClick={() => dispatch({ type: "CheckSessionRecovery" })}
-              >
-                {t("sessionRecovery.checkStatus")}
-              </button>
-            ) : state.agentInitRetryRequired ? (
-              <button
-                type="button"
-                className="composer-offline-reconnect-btn"
-                data-testid="retry-agent-init"
-                disabled={!ready || !isHostReady || busy || session?.archived}
-                onClick={() => dispatch({ type: "RetryAgentInit" })}
-              >
-                {t("sessionRecovery.retryInit")}
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="composer-offline-reconnect-btn"
-                data-testid="retry-auto-compaction"
-                disabled={
-                  !ready ||
-                  !isHostReady ||
-                  busy ||
-                  session?.archived ||
-                  state.transcript.sessionStatus !== "idle"
-                }
-                onClick={() => dispatch({ type: "RetryAutoCompaction" })}
-              >
-                {t("sessionRecovery.retryAuto")}
-              </button>
+            text={t(
+              state.sessionRecoveryUnknown
+                ? "sessionRecovery.unknown"
+                : state.agentInitRetryRequired
+                  ? "sessionRecovery.initNotice"
+                  : "sessionRecovery.autoNotice",
             )}
-          </div>
+            action={
+              state.sessionRecoveryUnknown ? (
+                <button
+                  type="button"
+                  className="composer-offline-reconnect-btn"
+                  disabled={
+                    !ready || !isHostReady || state.sessionRecoveryPending
+                  }
+                  onClick={() => dispatch({ type: "CheckSessionRecovery" })}
+                >
+                  {t("sessionRecovery.checkStatus")}
+                </button>
+              ) : state.agentInitRetryRequired ? (
+                <button
+                  type="button"
+                  className="composer-offline-reconnect-btn"
+                  data-testid="retry-agent-init"
+                  disabled={!ready || !isHostReady || busy || session?.archived}
+                  onClick={() => dispatch({ type: "RetryAgentInit" })}
+                >
+                  {t("sessionRecovery.retryInit")}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="composer-offline-reconnect-btn"
+                  data-testid="retry-auto-compaction"
+                  disabled={
+                    !ready ||
+                    !isHostReady ||
+                    busy ||
+                    session?.archived ||
+                    state.transcript.sessionStatus !== "idle"
+                  }
+                  onClick={() => dispatch({ type: "RetryAutoCompaction" })}
+                >
+                  {t("sessionRecovery.retryAuto")}
+                </button>
+              )
+            }
+          />
         )}
       <ComposerImages
         images={state.composerImages}

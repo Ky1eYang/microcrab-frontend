@@ -1642,30 +1642,148 @@
 }
 
 .composer-offline-banner {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-2);
   padding: var(--sp-2) var(--sp-3);
   background: transparent;
   border-bottom: 1px solid var(--border);
-  border-left: 2px solid var(--warn);
   border-radius: 0;
   font-size: var(--fs-xs);
   color: var(--text-2);
 }
 
-.composer-offline-left {
+/* Generic one-line status notice (ExpandableNotice). The status color lives
+ * only on the 8px dot; the full original text expands below the lead line. */
+.expandable-notice {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--sp-2);
+  min-width: 0;
   color: var(--text-2);
 }
 
-.composer-offline-left .offline-icon {
+.expandable-notice-lead {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  flex: 1 1 auto;
+  min-width: 0;
+  padding-block: 3px;
+}
+
+.expandable-notice[data-expanded] .expandable-notice-lead {
+  cursor: pointer;
+}
+
+.expandable-notice-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--warn);
+  transform: translateY(-1px);
+}
+
+.expandable-notice[data-tone="danger"] .expandable-notice-dot {
+  background: var(--danger);
+}
+
+.expandable-notice[data-tone="neutral"] .expandable-notice-dot {
+  background: var(--text-3);
+}
+
+.expandable-notice .offline-text {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow-wrap: anywhere;
+}
+
+.expandable-notice-first {
+  color: var(--text);
+}
+
+.expandable-notice-more {
+  display: block;
+  margin-top: var(--sp-1);
+}
+
+.expandable-notice-more[hidden] {
+  display: none;
+}
+
+.expandable-notice-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex: none;
+}
+
+.expandable-notice-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 24px;
+  padding: 0 var(--sp-1);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
   color: var(--text-2);
-  flex-shrink: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.expandable-notice-toggle:hover {
+  color: var(--text);
+  background: var(--bg-muted);
+}
+
+.expandable-notice-toggle svg {
+  transform: rotate(90deg);
+  transition: transform var(--dur-fast) ease;
+}
+
+.expandable-notice-toggle[aria-expanded="true"] svg {
+  transform: rotate(-90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .expandable-notice-toggle svg {
+    transition: none;
+  }
+}
+
+@media (max-width: 767.98px) {
+  .expandable-notice {
+    align-items: center;
+  }
+
+  .expandable-notice-lead {
+    min-height: 44px;
+    align-items: center;
+    padding-block: 0;
+  }
+
+  .expandable-notice[data-expanded="false"] .offline-text {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .expandable-notice[data-expanded="true"] {
+    align-items: flex-start;
+  }
+
+  .expandable-notice[data-expanded="true"] .expandable-notice-lead {
+    padding-block: 12px;
+    align-items: baseline;
+  }
+
+  .expandable-notice-toggle,
+  .expandable-notice .composer-offline-reconnect-btn {
+    min-height: 44px;
+  }
+
+  .expandable-notice[data-expanded="true"] .expandable-notice-actions {
+    align-self: flex-start;
+  }
 }
 
 .composer-offline-reconnect-btn {
