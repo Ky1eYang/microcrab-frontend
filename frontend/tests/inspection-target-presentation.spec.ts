@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { nativeBackend } from "./native-fixture";
 import { stateInspection } from "./state-inspection-fixture";
+import { maintainedPluginBundle } from "./plugin-bundle-fixture";
 
 for (const width of [1440, 390]) {
   for (const theme of ["light", "dark"]) {
@@ -9,6 +10,9 @@ for (const width of [1440, 390]) {
     }) => {
       await page.setViewportSize({ width, height: 1000 });
       await nativeBackend(page);
+      // Native Payload/CodeMirror coverage uses the retained Rust behavioral fixture.
+      // The shipped Zig iframe has separate real-Worker theme and editing gates.
+      await maintainedPluginBundle(page);
       await page.addInitScript(
         (theme) => localStorage.setItem("microcrab.ui.theme", theme),
         theme,

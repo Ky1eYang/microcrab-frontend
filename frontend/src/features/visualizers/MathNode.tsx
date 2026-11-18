@@ -3,7 +3,9 @@ import { safeMath } from "./policy";
 const LazyMath = lazy(() =>
   import("./math-engine").catch(() => ({
     default: ({ raw }: { source: string; raw: string; display: boolean }) => (
-      <>{raw}</>
+      <span className="notranslate" translate="no">
+        {raw}
+      </span>
     ),
   })),
 );
@@ -17,24 +19,33 @@ export function MathNode({
   raw: string;
   display: boolean;
 }) {
-  // Single-dollar prose/currency is intentionally conservative: numeric-leading and plain words stay raw.
-  const closed = display
+  const isDisplay = display || (/^\${2,}/.test(raw) && /\${2,}\s*$/.test(raw));
+  const trimmed = source.trim();
+  const closed = isDisplay
     ? /^\${2,}/.test(raw) &&
       /\${2,}\s*$/.test(raw) &&
       raw.trim().split("$$").length >= 3
     : raw.startsWith("$") && raw.endsWith("$");
-  const admitted =
-    closed &&
-    safeMath(source) &&
-    (display ||
+  const validSingle =
+    !isDisplay &&
+    (source.includes("\\") ||
       (!/^\s*\d/.test(source) &&
         /[\\=^_+*/-]/.test(source) &&
         !/^\s|\s$/.test(source)));
+  const admitted = closed && safeMath(trimmed) && (isDisplay || validSingle);
   return admitted ? (
-    <Suspense fallback={raw}>
-      <LazyMath source={source} raw={raw} display={display} />
+    <Suspense
+      fallback={
+        <span className="notranslate" translate="no">
+          {raw}
+        </span>
+      }
+    >
+      <LazyMath source={trimmed} raw={raw} display={isDisplay} />
     </Suspense>
   ) : (
-    <>{raw}</>
+    <span className="notranslate" translate="no">
+      {raw}
+    </span>
   );
 }

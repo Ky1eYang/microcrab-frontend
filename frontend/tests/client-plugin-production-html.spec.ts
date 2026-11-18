@@ -1,6 +1,7 @@
 import { maintainedPluginBundle } from "./plugin-bundle-fixture";
 import { expect, test } from "@playwright/test";
 import { nativeBackend } from "./native-fixture";
+import { selectSidebarPlugin } from "./plugin-sidebar-selection";
 
 /** No development source imports: this exercises emitted Worker, Component and shim. */
 test("emitted native and HTML fixture surfaces mount, act and switch without replacing the conversation", async ({
@@ -15,9 +16,13 @@ test("emitted native and HTML fixture surfaces mount, act and switch without rep
   const manager = page.getByTestId("client-plugins-manager");
   await expect(manager).toBeVisible();
   await manager.locator('[data-plugin-nav-id="microcrab.fixture"]').click();
-  const fixture = manager.locator('article[data-plugin-id="microcrab.fixture"]');
+  const fixture = manager.locator(
+    'article[data-plugin-id="microcrab.fixture"]',
+  );
   await expect(fixture).toBeVisible();
-  await fixture.getByLabel("在当前会话启用").check();
+  const enabled = fixture.getByLabel("在当前会话启用");
+  await enabled.click();
+  await expect(enabled).toBeChecked();
   await expect(fixture).toHaveAttribute("data-status", "ready");
   await page.goto("/#/session/s1");
   const message = page
@@ -29,9 +34,7 @@ test("emitted native and HTML fixture surfaces mount, act and switch without rep
   );
   const route = page.url();
   const sidebar = page.getByTestId("client-plugin-sidebar");
-  await sidebar
-    .getByRole("tab", { name: "Component fixture", exact: true })
-    .click();
+  await selectSidebarPlugin(sidebar, "Component fixture");
   await sidebar.getByRole("button", { name: "Increment", exact: true }).click();
   await expect(sidebar.getByText("1", { exact: true })).toBeVisible();
   await sidebar.getByRole("button", { name: "Use HTML", exact: true }).click();

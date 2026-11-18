@@ -1,3 +1,8 @@
+import {
+  PluginAnswerVariants,
+  useAnswerVariantActions,
+} from "./plugin-block-variants";
+import { isDirectUserSource } from "../client/input-source";
 import { CitationConversationProvider } from "./citations/context";
 import { useClientPlugins } from "../state";
 import {
@@ -12,7 +17,7 @@ import {
   useConversationBlocks,
   useIsolatedConversationRegistry,
 } from "./conversation/registry-context";
-import { RoundLimitPrompt } from "./RoundLimitPrompt";
+import { InteractionParticipation, RoundLimitPrompt } from "./RoundLimitPrompt";
 import { CompactionCommand } from "./CompactionCommand";
 import { SubAgentDetailDialog } from "./popups/SubAgentDetailDialog";
 import {
@@ -246,20 +251,26 @@ function ConversationActionBar({
     : blocks.filter(
         (block) => block.kind === "reasoning" && block.payload.text.trim(),
       );
+  const variantActions = useAnswerVariantActions(answer);
   let timestamp: number | null | undefined;
   for (const block of blocks)
     timestamp = block.endedMs ?? block.startedMs ?? timestamp;
   return (
     <ActionBar
       user={user}
-      text={
-        user
-          ? first.payload.text
-          : answer.map((block) => block.payload.text).join("\n\n")
+      text={user ? first.payload.text : variantActions.text}
+      pluginActions={
+        user || readOnly ? undefined : variantActions.pluginActions
       }
+      pluginActionScope={variantActions.actionScope}
       timestamp={user ? (first.startedMs ?? first.endedMs) : timestamp}
       revertId={
-        user && !readOnly && !first.temporary ? first.messageId : undefined
+        user &&
+        isDirectUserSource(first.payload.source) &&
+        !readOnly &&
+        !first.temporary
+          ? first.messageId
+          : undefined
       }
       retryId={
         !readOnly &&
@@ -476,7 +487,11 @@ export function Conversation(props: ConversationProps = {}) {
   const registry = props.transcript ? local : store.conversation;
   const locale = useAppSelector((state) => state.resolvedLocale);
   return (
-    <CitationConversationProvider transcript={props.transcript} sessionId={props.sessionId} readOnly={props.readOnly}>
+    <CitationConversationProvider
+      transcript={props.transcript}
+      sessionId={props.sessionId}
+      readOnly={props.readOnly}
+    >
       <ConversationRegistryProvider registry={registry} locale={locale}>
         <ConversationList {...props} registry={registry} />
       </ConversationRegistryProvider>
@@ -525,9 +540,7 @@ function ConversationList({
   const blocks = useMemo(
     () =>
       orderedCards(
-        registry
-          .blocks()
-          .filter((block) => block.payload.source !== "framework"),
+        [...registry.blocks()],
         readOnly ? [] : transcript.pendingQuestions,
         readOnly ? null : state.compactOperation,
         viewId ?? "",
@@ -762,24 +775,68 @@ function ConversationList({
     // The anchor was measured before disclosure. Preserve that same node/offset
     // after the body mounts instead of replacing it with the toggled row.
     if (!following.current) restoreReadingAnchor();
+    else followLatest();
     captureReadingAnchor(true);
   });
+  const followLatest = () => {
+    const host = scroll.current;
+    if (!host || host.clientHeight === 0 || !following.current) return;
+    for (const body of host.querySelectorAll<HTMLElement>(
+      '.think-card[data-expanded="true"][data-streaming="true"] .think-content',
+    ))
+      body.scrollTop = body.scrollHeight;
+    host.scrollTop = host.scrollHeight;
+    previousScrollTop.current = host.scrollTop;
+  };
   useLayoutEffect(() => {
     const host = scroll.current;
     const inner = host?.querySelector(".transcript-inner");
     if (!host || !inner) return;
-    const observer = new ResizeObserver(() => {
+    const sync = () => {
       if (host.clientHeight === 0) return;
-      if (following.current) host.scrollTop = host.scrollHeight;
+      if (following.current) followLatest();
       else {
         bottomIntentUntil.current = 0;
         restoreReadingAnchor();
       }
       captureReadingAnchor(true);
-    });
+    };
+    const observer = new ResizeObserver(sync);
     observer.observe(inner);
-    return () => observer.disconnect();
-  }, [presentationScopeKey]);
+    const observed = new WeakSet<Element>();
+    const observeThinking = () => {
+      // The capped scroll host stops resizing at 480px. Observe its actual
+      // Markdown instead, including delayed code/media layout changes.
+      for (const content of inner.querySelectorAll(
+        ".think-content > .markdown-body",
+      )) {
+        if (observed.has(content)) continue;
+        observed.add(content);
+        observer.observe(content);
+      }
+    };
+    observeThinking();
+    let frame: number | undefined;
+    const changed = () => {
+      if (frame !== undefined) return;
+      // Registry content notifications precede the subscribed piece's commit.
+      // Read the rendered content on the next frame without rerendering the list.
+      frame = requestAnimationFrame(() => {
+        frame = undefined;
+        observeThinking();
+        sync();
+      });
+    };
+    const unsubscribe = registry
+      .blocks()
+      .filter((block) => block.kind === "reasoning")
+      .map((block) => registry.subscribe(block.id, changed));
+    return () => {
+      observer.disconnect();
+      unsubscribe.forEach((dispose) => dispose());
+      if (frame !== undefined) cancelAnimationFrame(frame);
+    };
+  }, [presentationScopeKey, structureRevision, stick]);
   const pauseForReading = () => {
     pauseRevision.current++;
     bottomIntentUntil.current = 0;
@@ -1353,6 +1410,8 @@ function ConversationList({
           // are handled separately and never count as a bottom gesture.
           if (event.target === event.currentTarget)
             bottomIntentUntil.current = performance.now() + 1500;
+          else if ((event.target as HTMLElement).matches(".think-content"))
+            pauseForReading();
         }}
         onTouchStart={(event) => {
           touchY.current = event.touches[0]?.clientY ?? null;
@@ -1405,9 +1464,17 @@ function ConversationList({
           }
         }}
         onScroll={(e) => {
+          if (e.target !== e.currentTarget) return;
           const el = e.currentTarget;
-          const moved = el.scrollTop !== previousScrollTop.current;
-          const movingUp = el.scrollTop < previousScrollTop.current;
+          // Growth can deliver scroll before ResizeObserver pins the new bottom.
+          // A gap is a layout fact, not a new reading gesture. Also account for
+          // passive clamping when content shrinks below the old scroll position.
+          const priorTop = Math.min(
+            previousScrollTop.current,
+            Math.max(0, el.scrollHeight - el.clientHeight),
+          );
+          const moved = el.scrollTop !== priorTop;
+          const movingUp = el.scrollTop < priorTop;
           previousScrollTop.current = el.scrollTop;
           if (movingUp && el.scrollTop <= 48) void loadOlder();
           const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
@@ -1426,7 +1493,7 @@ function ConversationList({
             !movingUp &&
             performance.now() < bottomIntentUntil.current;
           if (userBottom) bottomIntentUntil.current = 0;
-          const nextFollow = atBottom && (following.current || userBottom);
+          const nextFollow = userBottom || (following.current && !movingUp);
           if (following.current && !nextFollow) pauseRevision.current++;
           following.current = nextFollow;
           setStick(following.current);
@@ -1521,31 +1588,35 @@ function ConversationList({
                   data-history-id={key}
                   data-canonical-messages={canonicalMessages(flat)}
                 >
-                  {chunk.items.map((item) => (
-                    <div
-                      key={groupKeys.get(item) ?? item.blocks[0].id}
-                      className="assistant-piece-anchor"
-                      data-interaction-key={
-                        item.type === "single"
-                          ? blockKey(item.blocks[0])
-                          : undefined
-                      }
-                      data-history-id={groupKeys.get(item) ?? item.blocks[0].id}
-                    >
-                      {renderPiece(
-                        item,
-                        undefined,
-                        readOnly,
-                        toolPresentation(item),
-                      )}
-                    </div>
-                  ))}
-                  <ConversationActionBar
-                    blocks={flat}
-                    historyView={transcript.historyView}
-                    readOnly={readOnly}
-                    retryOperationId={state.retryOperationId}
-                  />
+                  <PluginAnswerVariants blocks={flat} readOnly={readOnly}>
+                    {chunk.items.map((item) => (
+                      <div
+                        key={groupKeys.get(item) ?? item.blocks[0].id}
+                        className="assistant-piece-anchor"
+                        data-interaction-key={
+                          item.type === "single"
+                            ? blockKey(item.blocks[0])
+                            : undefined
+                        }
+                        data-history-id={
+                          groupKeys.get(item) ?? item.blocks[0].id
+                        }
+                      >
+                        {renderPiece(
+                          item,
+                          undefined,
+                          readOnly,
+                          toolPresentation(item),
+                        )}
+                      </div>
+                    ))}
+                    <ConversationActionBar
+                      blocks={flat}
+                      historyView={transcript.historyView}
+                      readOnly={readOnly}
+                      retryOperationId={state.retryOperationId}
+                    />
+                  </PluginAnswerVariants>
                 </div>
               );
             }
@@ -1556,11 +1627,13 @@ function ConversationList({
                 className="message-turn-container user-turn"
                 key={key}
                 id={anchor}
-                data-message-source="user"
+                data-message-source={
+                  isDirectUserSource(b.payload.source) ? "user" : "carrier"
+                }
                 data-history-id={key}
                 data-canonical-messages={canonicalMessages(item.blocks)}
               >
-                {userLabel && (
+                {userLabel && isDirectUserSource(b.payload.source) && (
                   <span className="muted" data-testid="parent-input-label">
                     {userLabel}
                   </span>
@@ -1633,6 +1706,7 @@ function ConversationList({
               onScrollToBottom={toBottom}
               tooltip={t("conversation.scrollLatest")}
             />
+            {!readOnly && !footer && <InteractionParticipation />}
             {!readOnly && !footer && !!state.roundLimitRequests?.length && (
               <div className="composer-stack">
                 <RoundLimitPrompt />
@@ -1663,7 +1737,11 @@ function ConversationList({
     </div>
   );
 }
-export const ConversationPage = memo(function ConversationPage({ active = true }: { active?: boolean }) {
+export const ConversationPage = memo(function ConversationPage({
+  active = true,
+}: {
+  active?: boolean;
+}) {
   const plugins = useClientPlugins();
   const selected = useAppSelector((state) =>
     JSON.stringify({

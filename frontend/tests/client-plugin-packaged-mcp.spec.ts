@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { nativeBackend } from "./native-fixture";
+import { selectSidebarPlugin } from "./plugin-sidebar-selection";
 
 // This suite uses the emitted application and its actual immutable plugin assets.
 // No source imports, injected registry, guest mock or rewritten plugin index.
@@ -54,7 +55,7 @@ async function openManager(page: Page, session: boolean, hash: string) {
     ).toBeVisible();
     const sidebar = page.getByTestId("client-plugin-sidebar");
     await expect(sidebar).toBeVisible();
-    await sidebar.locator('[id="plugin-tab-microcrab.mcp-bridge"]').click();
+    await selectSidebarPlugin(sidebar, "MCP bridge");
     const observation = sidebar.getByTestId("plugin-webview");
     await expect(observation).toHaveAttribute("data-status", "ready");
     await expect(
@@ -187,9 +188,13 @@ test("packaged Zig MCP manager saves transient credentials once, tests its host 
         "retained",
       );
       await expect(frame.getByTestId("server-endpoint")).toHaveValue(endpoint);
-      await expect.poll(() => frame.locator("html").evaluate((root) =>
-        root.scrollHeight <= root.clientHeight + 1,
-      )).toBe(true);
+      await expect
+        .poll(() =>
+          frame
+            .locator("html")
+            .evaluate((root) => root.scrollHeight <= root.clientHeight + 1),
+        )
+        .toBe(true);
       await expect(webview).toHaveAttribute("data-fit-content", "true");
       expect(await webview.getAttribute("srcdoc")).toBe(source);
     }
@@ -271,7 +276,7 @@ test("packaged Zig MCP configures without a Session while its conversation sideb
   await page.goto("/#/session/s1");
   const sidebar = page.getByTestId("client-plugin-sidebar");
   await expect(sidebar).toBeVisible();
-  await sidebar.locator('[id="plugin-tab-microcrab.mcp-bridge"]').click();
+  await selectSidebarPlugin(sidebar, "MCP bridge");
   const webview = sidebar.getByTestId("plugin-webview");
   await expect(webview).toHaveAttribute("data-status", "ready");
   const history = webview.contentFrame();

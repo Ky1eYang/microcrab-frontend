@@ -1,8 +1,10 @@
+import { childTurnPath, validateChildOperationId, validateChildTurnOperation, type ChildTurnScope, type ChildTurnRequest, type ChildTurnOperation } from "./child-turns";
+import { speakerPath, validateSpeakerSnapshot, validateSpeakerOperation, validateSpeakerUpdate, validateSpeakerKey, validSpeakerIdentity, type SpeakerScope, type SpeakerSnapshot, type SpeakerUpdate, type SpeakerKey, type SpeakerOperationResponse } from "./external-speakers";
 import { questionImagePath, type QuestionImageRequest } from "./question-images";
 import { boundedCitationBlob, citationPath, CITATION_TIMEOUT_MS, type CitationRequest } from "./citations";
 import { validateExecutionHistory } from "./execution-history";
 import {
-  validateSettingsSnapshot,
+  normalizeSettingsSnapshot,
   validateReferences,
   validatePublicProvider,
 } from "./settings";
@@ -93,6 +95,11 @@ const SESSION_METHODS = new Set([
   "client_tools.unbind",
   "client_tools.prepare",
   "client_tools.output",
+  "client_tools.arguments",
+  "client_tools.secret",
+  "client_tools.secret_operation",
+  "client_tools.decision",
+  "client_tools.takeover",
   "executions.read",
   "executions.cancel",
 ]);
@@ -183,6 +190,8 @@ const MUTATIONS = new Set([
   "executions.cancel",
   "client_tools.result",
   "client_tools.prepare",
+  "client_tools.secret",
+  "client_tools.takeover",
   "host.relay_attach",
 ]);
 function commandTimeout(method: string): number {
@@ -282,8 +291,9 @@ export class ApiClient {
     conversationId: string,
     owner: string,
     flavor: import("./types").ConversationHostFlavor,
+    forceTakeover = false,
   ) {
-    return this.browserHosts.connect(conversationId, owner, flavor);
+    return this.browserHosts.connect(conversationId, owner, flavor, forceTakeover);
   }
   private hostEpoch = 0;
   private relayRelease: Promise<unknown> = Promise.resolve();
@@ -459,7 +469,7 @@ export class ApiClient {
           {
             existing_project_id: result.existing_project_id,
             descriptor: result.descriptor,
-            pairing_token_consumed: true,
+            pairing_token_consumed: result.pairing_token_consumed !== false,
           },
         );
       acquiredRelay =
@@ -624,6 +634,7 @@ export class ApiClient {
       relay_release?: HostRelayRelease;
       status?: string;
       existing_project_id?: string;
+      pairing_token_consumed?: boolean;
       ready?: boolean;
       connected?: boolean;
       readiness?: NativeHostStateDetails["readiness"];
@@ -726,6 +737,7 @@ export class ApiClient {
         relay_release?: HostRelayRelease;
         status?: string;
         existing_project_id?: string;
+        pairing_token_consumed?: boolean;
         ready?: boolean;
         connected?: boolean;
         readiness?: NativeHostStateDetails["readiness"];
@@ -1397,7 +1409,7 @@ export class ApiClient {
           "session.settings.set",
         ].includes(method)
       )
-        validateSettingsSnapshot(value);
+        return normalizeSettingsSnapshot(value) as T;
       if (["project.references.get", "project.references.set"].includes(method))
         validateReferences(value);
       if (
@@ -1442,12 +1454,14 @@ export class ApiClient {
     signal?: AbortSignal,
     binary = false,
     executorLease?: string,
+    sensitive = false,
+    readOnlyRequest = false,
   ): Promise<T> {
     const controller = new AbortController();
     const abort = () => controller.abort(signal?.reason);
     signal?.addEventListener("abort", abort, { once: true });
     if (signal?.aborted) abort();
-    const mutation = method !== "GET";
+    const mutation = method !== "GET" && !readOnlyRequest;
     let status: number | undefined;
     let finishAuthReceipt: (() => void) | undefined;
     let timedOut = false;
@@ -1582,7 +1596,7 @@ export class ApiClient {
               mutation,
             );
       if (controller.signal.aborted && !timedOut) silenceDiagnostic(failure);
-      else reportDiagnostic("http", method, failure, status);
+      else if (!sensitive) reportDiagnostic("http", method, failure, status);
       throw failure;
     } finally {
       clearTimeout(timer);
@@ -1590,6 +1604,88 @@ export class ApiClient {
       this.httpPending.delete(controller);
       finishAuthReceipt?.();
     }
+  }
+  async enterChild(scope: ChildTurnScope, signal: AbortSignal): Promise<import("./types").NativeChildDetail> {
+    if (this.httpPending.size + this.pending.size >= MAX_PENDING)
+      throw new CommandError("overloaded", "Too many pending requests");
+    const path = childTurnPath(scope).replace(/\/turns$/, "/enter");
+    const value = await this.http<import("./types").NativeChildDetail>(this.url(path), "POST", "{}", 15000,
+      "application/json", crypto.randomUUID(), undefined, signal);
+    if (value.parent_session_id !== scope.parentId || value.id !== scope.childId || !Array.isArray(value.messages) || !["persisted", "pending", "unavailable"].includes(value.availability))
+      throw new CommandError("invalid_result", "child.enter: detail identity or shape mismatch", false, true);
+    return value;
+  }
+  async submitChildTurn(scope: ChildTurnScope, request: ChildTurnRequest, owner: string, signal: AbortSignal): Promise<ChildTurnOperation> {
+    validateChildOperationId(request.operation_id);
+    if (this.httpPending.size + this.pending.size >= MAX_PENDING)
+      throw new CommandError("overloaded", "Too many pending requests");
+    const value = await this.http<unknown>(this.url(childTurnPath(scope)), "POST", JSON.stringify(request), 15000,
+      "application/json", request.operation_id, undefined, signal);
+    try { validateChildTurnOperation(value, scope, request.operation_id, owner); }
+    catch (error) { if (error instanceof CommandError) error.outcomeUnknown = true; throw error; }
+    return value;
+  }
+  async getChildTurnOperation(scope: ChildTurnScope, operationId: string, owner: string, signal: AbortSignal): Promise<ChildTurnOperation> {
+    validateChildOperationId(operationId);
+    if (this.httpPending.size + this.pending.size >= MAX_PENDING)
+      throw new CommandError("overloaded", "Too many pending requests");
+    const value = await this.http<unknown>(this.url(childTurnPath(scope) + `/${operationId}`), "GET", undefined, 15000,
+      "application/json", crypto.randomUUID(), undefined, signal);
+    validateChildTurnOperation(value, scope, operationId, owner);
+    return value;
+  }
+  /** Owner settings only: never pass credentials through command observation or AppState. */
+  private async speakerRequest<T>(scope: SpeakerScope, verb: "GET" | "PUT" | "POST", body: unknown, signal: AbortSignal, key = false): Promise<T> {
+    if (this.httpPending.size + this.pending.size >= MAX_PENDING)
+      throw new CommandError("overloaded", "Too many pending requests");
+    return this.http<T>(this.url(speakerPath(scope) + (key ? "/key" : "")), verb,
+      body === undefined ? undefined : JSON.stringify(body), 15000,
+      "application/json", crypto.randomUUID(), undefined, signal, false, undefined, true, key);
+  }
+  async getExternalSpeakers(scope: SpeakerScope, signal: AbortSignal): Promise<SpeakerSnapshot> {
+    const value = await this.speakerRequest<unknown>(scope, "GET", undefined, signal);
+    validateSpeakerSnapshot(value);
+    return value;
+  }
+  async putExternalSpeakers(scope: SpeakerScope, update: SpeakerUpdate, signal: AbortSignal): Promise<SpeakerOperationResponse> {
+    validateSpeakerUpdate(scope, update);
+    try {
+      const value = await this.speakerRequest<unknown>(scope, "PUT", update, signal);
+      try {
+        validateSpeakerOperation(value, update.operation_id);
+      } catch (error) {
+        if (error instanceof CommandError) error.outcomeUnknown = true;
+        throw error;
+      }
+      return value;
+    } catch (error) {
+      // Even a misbehaving endpoint must not echo an authored secret into UI or diagnostics.
+      if (error instanceof CommandError) {
+        let message = error.message;
+        for (const binding of Object.values(update.speakers))
+          if (binding.action === "set" && binding.key.kind === "custom")
+            message = message.replaceAll(binding.key.value, "[redacted]");
+        throw new CommandError(error.code, message, error.retryable, error.outcomeUnknown);
+      }
+      throw error;
+    }
+  }
+  async getExternalSpeakerOperation(scope: SpeakerScope, operationId: string, signal: AbortSignal): Promise<SpeakerOperationResponse> {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(operationId))
+      throw new CommandError("invalid_request", "external-speakers.operation_id: expected canonical UUID");
+    if (this.httpPending.size + this.pending.size >= MAX_PENDING)
+      throw new CommandError("overloaded", "Too many pending requests");
+    const value = await this.http<unknown>(this.url(speakerPath(scope) + `/operations/${operationId}`), "GET", undefined,
+      15000, "application/json", crypto.randomUUID(), undefined, signal, false, undefined, true);
+    validateSpeakerOperation(value, operationId);
+    return value;
+  }
+  async revealExternalSpeakerKey(scope: SpeakerScope, identity: string, signal: AbortSignal): Promise<SpeakerKey> {
+    if (!validSpeakerIdentity(identity)) throw new CommandError("invalid_request", "external-speakers.identity: invalid identity");
+    const value = await this.speakerRequest<unknown>(scope, "POST", { identity }, signal, true);
+    validateSpeakerKey(value);
+    if (value.identity !== identity) throw new CommandError("invalid_result", "external-speakers.key: identity mismatch");
+    return value;
   }
   async readCitation(request: CitationRequest, signal: AbortSignal): Promise<Blob> {
     if (this.httpPending.size + this.pending.size >= MAX_PENDING)
@@ -1599,10 +1695,9 @@ export class ApiClient {
   }
   async readQuestionImage(
     request: QuestionImageRequest,
-    leaseId: string,
+    leaseId: string | undefined,
     signal: AbortSignal,
   ): Promise<Blob> {
-    if (!leaseId) throw new CommandError("executor_required", "Question image requires an active executor lease");
     if (this.httpPending.size + this.pending.size >= MAX_PENDING)
       throw new CommandError("overloaded", "Too many pending requests");
     const blob = await this.http<Blob>(this.url(questionImagePath(request)), "GET", undefined,

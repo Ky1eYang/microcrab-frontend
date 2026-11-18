@@ -426,7 +426,7 @@ test("real worker receives canonical artifact identities while short discovery f
   );
 });
 
-test("inventory preserves legacy frozen artifact schemas while new catalogs use short references", async ({
+test("inventory preserves old short and legacy frozen schemas while new catalogs use short references", async ({
   page,
 }) => {
   await nativeBackend(page);
@@ -438,6 +438,8 @@ test("inventory preserves legacy frozen artifact schemas while new catalogs use 
     const { ClientPlugins } = await import(pluginsPath);
     const { initialState } = await import(modelPath);
     const { PLUGIN_META_TOOL_DEFINITION } = await import(hubPath);
+    const fixturePath = "/tests/plugin-short-schema-fixture.ts";
+    const { previousShortArtifactSchema } = await import(fixturePath);
     const plugins = new ClientPlugins(() => {
       throw Error("No API calls expected");
     });
@@ -469,6 +471,7 @@ test("inventory preserves legacy frozen artifact schemas while new catalogs use 
       dispose() {},
     };
     const legacy = structuredClone(PLUGIN_META_TOOL_DEFINITION);
+    legacy.parameters = structuredClone(previousShortArtifactSchema);
     legacy.parameters.properties.artifact.pattern = "^[a-f0-9]{64}$";
     state.clientTools = {
       definitions: [legacy],
@@ -489,6 +492,48 @@ test("inventory preserves legacy frozen artifact schemas while new catalogs use 
       );
       const unchangedCatalog =
         JSON.stringify(state.clientTools) === JSON.stringify(originalCatalog);
+      state.clientTools = {
+        ...state.clientTools,
+        catalog_digest: "frozen-prior-short",
+        definitions: [
+          {
+            ...PLUGIN_META_TOOL_DEFINITION,
+            parameters: structuredClone(previousShortArtifactSchema),
+          },
+        ],
+      };
+      const priorCatalog = JSON.stringify(state.clientTools);
+      plugins.sync(state);
+      const priorShort = await plugins.preprocess(
+        input,
+        "prior-short-operation",
+        state.sessionId,
+        () => true,
+      );
+      const unchangedPriorCatalog =
+        JSON.stringify(state.clientTools) === priorCatalog;
+      const unknownSchema = structuredClone(previousShortArtifactSchema);
+      unknownSchema.additionalProperties = true;
+      state.clientTools = {
+        ...state.clientTools,
+        catalog_digest: "unknown-modified-short",
+        definitions: [
+          { ...PLUGIN_META_TOOL_DEFINITION, parameters: unknownSchema },
+        ],
+      };
+      plugins.sync(state);
+      const modifiedUnknown = await plugins.preprocess(
+        input,
+        "modified-unknown-operation",
+        state.sessionId,
+        () => true,
+      );
+      const preparedPriorShort = await plugins.preprocess(
+        input,
+        "prior-short-operation",
+        state.sessionId,
+        () => true,
+      );
       state.clientTools = {
         ...state.clientTools,
         catalog_digest: "explicit-new-catalog",
@@ -525,6 +570,10 @@ test("inventory preserves legacy frozen artifact schemas while new catalogs use 
       );
       return {
         old,
+        priorShort,
+        preparedPriorShort,
+        modifiedUnknown,
+        unchangedPriorCatalog,
         frozenOld,
         current,
         unknown,
@@ -541,6 +590,10 @@ test("inventory preserves legacy frozen artifact schemas while new catalogs use 
       .value[0].artifact;
   expect(artifact(actual.old)).toBe(actual.full);
   expect(actual.frozenOld).toEqual(actual.old);
+  expect(artifact(actual.priorShort)).toBe(actual.full.slice(0, 16));
+  expect(actual.preparedPriorShort).toEqual(actual.priorShort);
+  expect(artifact(actual.modifiedUnknown)).toBe(actual.full);
+  expect(actual.unchangedPriorCatalog).toBe(true);
   expect(artifact(actual.current)).toBe(actual.full.slice(0, 16));
   expect(artifact(actual.unknown)).toBe(actual.full);
   expect(artifact(actual.draft)).toBe(actual.full.slice(0, 16));

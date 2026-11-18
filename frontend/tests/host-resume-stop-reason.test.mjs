@@ -5,6 +5,7 @@ import { replayDisplayObservations } from "../src/client/projector.ts";
 import { timedTrajectoryBlocks } from "../src/features/trajectoryTiming.ts";
 import { ApiClient } from "../src/client/api.ts";
 import { AppStore } from "../src/state/store.ts";
+import { LIMIT_FIELDS } from "../src/client/settings.ts";
 import { wireFailure, failureText } from "../src/client/failure.ts";
 import { terminalSummary } from "../src/features/trajectoryStopReason.ts";
 import {
@@ -36,6 +37,25 @@ let fail = false;
 globalThis.fetch = async (url, options = {}) => {
   calls.push({ url: String(url), options });
   if (fail) throw Error("network unavailable");
+  if (new URL(String(url)).pathname.endsWith("/settings")) {
+    const limits = Object.fromEntries(
+      LIMIT_FIELDS.map((field) => [field, 1048576]),
+    );
+    const effective = { limits };
+    return new Response(
+      JSON.stringify({
+        revision: 0,
+        applied_revision: 0,
+        overrides: {},
+        effective,
+        desired_effective: effective,
+        sources: {},
+        constraints: { limits },
+        application: "defaults_saved",
+        reason: null,
+      }),
+    );
+  }
   return response();
 };
 class RelaySocket {
@@ -71,6 +91,7 @@ function readyStore(api) {
   Object.assign(store, {
     api,
     hostAttempt: 0,
+    defaultsRead: 0,
     approvedDocumentLeaves: new WeakSet(),
     lifecycle: 1,
     state: {
@@ -121,7 +142,16 @@ test("same-ready resume/select/create send no Host lifecycle HTTP request", asyn
   await store.resumeProject("p1", "resume_project:bootstrap");
   await store.dispatch({ type: "SelectKnownProject", value: "p1" });
   await store.dispatch({ type: "CreateSessionInProject", value: "p1" });
-  assert.deepEqual(calls, []);
+  assert.deepEqual(
+    calls.map((call) => new URL(call.url).pathname),
+    [
+      "/api/v1/settings",
+      "/api/v1/projects/p1/settings",
+      "/api/v1/settings",
+      "/api/v1/projects/p1/settings",
+    ],
+  );
+  assert.ok(calls.every((call) => call.options.method === "GET"));
 });
 
 test("grpc observation, network failure and project switch never disconnect previous route", async () => {

@@ -11,6 +11,7 @@ export const LIMIT_FIELDS = [
   "max_tool_calls_per_round",
   "max_context_bytes",
   "max_tool_output_bytes",
+  "max_tool_image_bytes",
   "max_output_tokens",
   "interaction_timeout_ms",
   "max_pending_executions",
@@ -22,6 +23,7 @@ export const LIMIT_FIELDS = [
   "output_buffer_bytes",
   "sleep_max_ms",
 ] as const;
+export const DEFAULT_TOOL_IMAGE_BYTES = 1024 * 1024;
 export type LimitField = (typeof LIMIT_FIELDS)[number];
 export type Limits = Record<LimitField, number>;
 export interface AutoCompactionPolicy {
@@ -267,20 +269,34 @@ export function validateSettingsSnapshot(
     throw Error("settings.reason: expected string or null");
   for (const field of LIMIT_FIELDS)
     safeInteger(
-      (value.effective.limits as Record<string, unknown>)?.[field],
+      field === "max_tool_image_bytes" && (value.effective.limits as Record<string, unknown>)?.[field] === undefined
+        ? DEFAULT_TOOL_IMAGE_BYTES
+        : (value.effective.limits as Record<string, unknown>)?.[field],
       `settings.effective.limits.${field}`,
     );
   safeInteger(value.applied_revision, "settings.applied_revision");
   for (const field of LIMIT_FIELDS) {
     safeInteger(
-      (value.desired_effective.limits as Record<string, unknown>)?.[field],
+      field === "max_tool_image_bytes" && (value.desired_effective.limits as Record<string, unknown>)?.[field] === undefined
+        ? DEFAULT_TOOL_IMAGE_BYTES
+        : (value.desired_effective.limits as Record<string, unknown>)?.[field],
       `settings.desired_effective.limits.${field}`,
     );
     safeInteger(
-      (value.constraints.limits as Record<string, unknown>)?.[field],
+      field === "max_tool_image_bytes" && (value.constraints.limits as Record<string, unknown>)?.[field] === undefined
+        ? DEFAULT_TOOL_IMAGE_BYTES
+        : (value.constraints.limits as Record<string, unknown>)?.[field],
       `settings.constraints.limits.${field}`,
     );
   }
+}
+/** Legacy omission selects the canonical 1MiB image default; never alter the wire snapshot or sparse overrides. */
+export function normalizeSettingsSnapshot(value: unknown): SettingsSnapshot {
+  validateSettingsSnapshot(value);
+  const view = structuredClone(value);
+  for (const limits of [view.effective.limits, view.desired_effective.limits, view.constraints.limits])
+    if (limits.max_tool_image_bytes === undefined) limits.max_tool_image_bytes = DEFAULT_TOOL_IMAGE_BYTES;
+  return view;
 }
 export function validateProviderConfig(
   value: unknown,

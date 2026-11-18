@@ -33,7 +33,9 @@ export function recentProjects(
 export function projectAvailability(
   project: NativeProject,
   observed: AppState["hostConnection"],
-): "online" | "offline" | "unknown" {
+  terminal?: "binding_mismatch" | "host_preflight_unsupported",
+): "online" | "offline" | "unknown" | "binding_mismatch" | "host_preflight_unsupported" {
+  if (terminal) return terminal;
   if (observed?.projectId === project.id) {
     if (typeof observed.connected === "boolean")
       return observed.connected ? "online" : "offline";

@@ -29,11 +29,14 @@ export default function MathEngine({
   }, [source, display]);
   return html ? (
     <span
-      className="visual-math"
+      className="visual-math notranslate"
+      translate="no"
       data-testid="math-preview"
       dangerouslySetInnerHTML={{ __html: html }}
     />
   ) : (
-    <>{raw}</>
+    <span className="notranslate" translate="no">
+      {raw}
+    </span>
   );
 }

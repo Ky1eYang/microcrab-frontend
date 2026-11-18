@@ -49,6 +49,8 @@ export interface PluginContext {
   history_generation?: number;
   /** Observational host samples; never execution/deadline authority. */
   host_time_ms?: number;
+  /** Host-owned HTTP budget captured for this invocation; never guest-selected. */
+  host_http_timeout_ms?: number;
   host_monotonic_ms?: number;
   invocation_id?: string;
   tool_invocation?: PluginToolIdentity;
@@ -144,6 +146,20 @@ export interface BlockSlot {
   view_state?: Json;
   tree?: PluginNode;
 }
+export interface BlockTextVariant {
+  block_id: string;
+  variant_id: string;
+  source_digest: string;
+  history_revision: string;
+  label: string;
+  status: "pending" | "completed" | "skipped" | "error" | "cancelled";
+  text: string;
+  default_display: "inline" | "after";
+  reason?: "same_language" | "no_prose" | "unchanged";
+  error?: string;
+  retry_action?: string;
+  force_action?: string;
+}
 export interface PluginToolIdentity {
   invocation_id: string;
   session_id: string;
@@ -191,6 +207,11 @@ export interface PluginResult {
   rewritten_input?: string;
   turn_variables?: VariablesChange;
   block_slots?: BlockSlot[];
+  block_variants?: BlockTextVariant[];
+  /** Remove only exact already-certified variants owned by this plugin. */
+  remove_block_variants?: { block_id: string; variant_id: string }[];
+  /** Remove only exact already-certified slots owned by this plugin. */
+  remove_block_slots?: { block_id: string; slot_id: string }[];
   tree?: PluginNode;
   view_output?: PluginRenderOutput;
 }
@@ -266,6 +287,8 @@ export interface PluginRegistryAPI {
   ): Promise<void>;
   isEnabled(pluginId: string, sessionId?: string | null): boolean;
   setPriority(pluginId: string, priority: number): Promise<void>;
+  getHttpRequestTimeout(pluginId: string): number;
+  setHttpRequestTimeout(pluginId: string, timeoutMs: number): Promise<void>;
   setSession(
     sessionId: string | null,
     snapshots?: { sessions?: Json[]; projects?: Json[] },
@@ -320,6 +343,10 @@ export interface PluginRegistryAPI {
   ): Promise<SubmitResult>;
   observe(phase: string, payload: Json): void;
   getBlockSlots(blockId: string): readonly (BlockSlot & { pluginId: string })[];
+  getBlockVariants(
+    blockId: string,
+    sourceText?: string,
+  ): readonly (BlockTextVariant & { pluginId: string })[];
   dispose(): void;
 }
 export const LIMITS = {

@@ -1,3 +1,4 @@
+import { expectedPluginVariables } from "./input-inventory-expectation";
 import { expect, test } from "@playwright/test";
 import type { NativeInbox } from "../src/client/types";
 import { nativeBackend } from "./native-fixture";
@@ -89,7 +90,10 @@ test("normal idle Send carries activation after Host recovery and observes the e
   );
   expect(sent.params).toEqual({
     operation_id: expect.any(String),
-    input: { parts: [{ type: "text", text: "new explicit idle input" }] },
+    input: {
+      parts: [{ type: "text", text: "new explicit idle input" }],
+      variables: expectedPluginVariables(true),
+    },
     activate_if_idle: true,
   });
   await expect(composer).toHaveValue("new explicit idle input");

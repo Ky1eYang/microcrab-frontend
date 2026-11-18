@@ -1,7 +1,9 @@
+import { validateHttpRequestTimeout } from "./http-deadline";
 import { LIMITS, type InstalledPlugin } from "./types";
 export interface Preferences {
   sessions: Record<string, Record<string, boolean>>;
   tombstones: string[];
+  request_timeout_ms?: Record<string, number>;
 }
 export function ownRecordValue<T>(
   record: Record<string, T>,
@@ -56,7 +58,16 @@ export function normalizePreferences(value: unknown): Preferences {
     }
     setRecordValue(sessions, id, clean);
   }
-  return { sessions, tombstones: [...input.tombstones] };
+  const result: Preferences = { sessions, tombstones: [...input.tombstones] };
+  if (Object.hasOwn(input, "request_timeout_ms")) {
+    const timeouts = input.request_timeout_ms;
+    if (!timeouts || typeof timeouts !== "object" || Array.isArray(timeouts))
+      throw Error("Invalid plugin HTTP timeout preferences: expected a record");
+    result.request_timeout_ms = {};
+    for (const [id, value] of Object.entries(timeouts))
+      setRecordValue(result.request_timeout_ms, id, validateHttpRequestTimeout(value));
+  }
+  return result;
 }
 const ARTIFACT_REFERENCES_KEY = "artifact-references.v1";
 const ARTIFACT_REFERENCES_LIMIT = 8192;

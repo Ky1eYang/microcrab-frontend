@@ -143,7 +143,9 @@ export interface BrowserRuntime {
   close(): Promise<void>;
 }
 interface BrowserConnection {
-  host: BrowserRuntime;
+  host: BrowserRuntime | null;
+  serverOwned?: boolean;
+  participant?: boolean;
   scope: ConversationScope;
   generation: string | null;
   flavor: ConversationHostFlavor;
@@ -168,13 +170,19 @@ export class BrowserConversations {
     conversationId: string,
     owner: string,
     flavor: ConversationHostFlavor,
+    forceTakeover = false,
   ) {
     const pinned = this.flavors.get(conversationId);
     if (pinned && (pinned.owner !== owner || pinned.flavor !== flavor))
       throw Error(t("browserHost.bindingChanged"));
     this.flavors.set(conversationId, { owner, flavor });
     const current = this.hosts.get(conversationId);
-    if (current?.generation) return current;
+    if (
+      !forceTakeover &&
+      (current?.generation || current?.serverOwned || current?.participant)
+    )
+      return current;
+    if (forceTakeover && current) await this.disconnect(conversationId, false);
     const inFlight = this.connecting.get(conversationId);
     if (inFlight) return inFlight;
     const pending = this.open(
@@ -183,6 +191,7 @@ export class BrowserConversations {
       flavor,
       this.epoch,
       this.revisions.get(conversationId) ?? 0,
+      forceTakeover,
     );
     this.connecting.set(conversationId, pending);
     try {
@@ -202,7 +211,8 @@ export class BrowserConversations {
     flavor: ConversationHostFlavor,
     epoch: number,
     revision: number,
-  ) {
+    forceTakeover: boolean,
+  ): Promise<BrowserConnection> {
     const current = () =>
       epoch === this.epoch &&
       revision === (this.revisions.get(conversationId) ?? 0);
@@ -231,14 +241,17 @@ export class BrowserConversations {
       throw failure;
     }
     const binding = await this.api.command<
-      ConversationScope & { host_flavor: ConversationHostFlavor }
+      ConversationScope & {
+        host_flavor: ConversationHostFlavor;
+        server_owned?: boolean;
+      }
     >("conversation.binding", {
       conversation_id: conversationId,
       browser_id: browserId,
       workspace_id: workspaceId,
       host_flavor: flavor,
     });
-    const { host_flavor, ...scope } = binding;
+    const { host_flavor, server_owned, ...scope } = binding;
     if (!current() || host_flavor !== flavor)
       throw Error(t("browserHost.bindingChanged"));
     if (
@@ -247,6 +260,18 @@ export class BrowserConversations {
       scope.conversation_id !== conversationId
     )
       throw Error(t("browserHost.bindingChanged"));
+    if (server_owned === true) {
+      if (flavor !== "chat_only") throw Error(t("browserHost.bindingChanged"));
+      const connection: BrowserConnection = {
+        host: null,
+        scope,
+        flavor,
+        generation: null,
+        serverOwned: true,
+      };
+      this.hosts.set(conversationId, connection);
+      return connection;
+    }
     let frameOwner: BrowserConnection | undefined;
     let host: BrowserRuntime;
     if (flavor === "chat_only") {
@@ -342,7 +367,9 @@ export class BrowserConversations {
         throw Error(t("browserHost.bindingChanged"));
       const attached = await this.api.command<{
         scope: ConversationScope;
-        connection_generation: string;
+        connection_generation?: string;
+        attached?: boolean;
+        server_owned?: boolean;
         ready: boolean;
         host_flavor: ConversationHostFlavor;
       }>("conversation.attach", {
@@ -350,6 +377,7 @@ export class BrowserConversations {
         descriptor,
         lease_generation: host.lease,
         host_flavor: flavor,
+        force_takeover: forceTakeover,
       });
       if (
         !current() ||
@@ -358,6 +386,23 @@ export class BrowserConversations {
         attached.host_flavor !== flavor ||
         attached.scope.binding_id !== scope.binding_id
       )
+        throw Error(t("browserHost.bindingChanged"));
+      if (attached.attached === false) {
+        await host.close();
+        if (!current() || this.hosts.get(conversationId) !== connection)
+          throw Error(t("browserHost.bindingChanged"));
+        const participant: BrowserConnection = {
+          host: null,
+          scope,
+          flavor,
+          generation: null,
+          serverOwned: attached.server_owned === true,
+          participant: attached.server_owned !== true,
+        };
+        this.hosts.set(conversationId, participant);
+        return participant;
+      }
+      if (!attached.connection_generation)
         throw Error(t("browserHost.bindingChanged"));
       connection.generation = attached.connection_generation;
       return connection;
@@ -388,7 +433,11 @@ export class BrowserConversations {
     frame: unknown;
   }) {
     const connection = this.hosts.get(value.conversation_id);
-    if (!connection) return;
+    if (
+      !connection?.host ||
+      connection.generation !== value.connection_generation
+    )
+      return;
     // The authenticated Server envelope owns routing. Preserve its exact token
     // on the reply instead of rebinding old work to a later generation.
     connection.generation = value.connection_generation;
@@ -414,11 +463,11 @@ export class BrowserConversations {
     const connection = this.hosts.get(id);
     this.hosts.delete(id);
     if (!connection) return;
-    if (detach)
+    if (detach && connection.host)
       await this.api
         .command("conversation.detach", { conversation_id: id })
         .catch(() => {});
-    await connection.host.close();
+    await connection.host?.close();
   }
   async close() {
     this.epoch++;

@@ -23,6 +23,7 @@ export class RoundLimitController {
     private lease: () => string | null,
     /** Re-attach the session; the attachment carries the current pending set. */
     private reconcile: () => Promise<void> = async () => {},
+    private canInteract: () => boolean = () => !!this.lease(),
   ) {}
   private rememberSettled(id: string) {
     this.settled.add(id);
@@ -31,7 +32,7 @@ export class RoundLimitController {
   }
   project() {
     const state = this.state();
-    const executor = state.connection === "ws" && !!this.lease();
+    const executor = state.connection === "ws" && this.canInteract();
     this.publish({
       roundLimitRequests: [...this.requests.values()]
         .filter(
@@ -116,7 +117,7 @@ export class RoundLimitController {
     )
       throw Error(t("roundLimit.stale"));
     if (this.submitting.has(requestId)) return;
-    if (state.connection !== "ws" || !lease)
+    if (state.connection !== "ws" || !this.canInteract())
       throw Error(t("roundLimit.observer"));
     const generation = this.generation;
     this.submitting.add(requestId);
@@ -128,10 +129,10 @@ export class RoundLimitController {
         decision: string;
       }>(
         "round_limit.reply",
-        { request_id: requestId, lease_id: lease, decision },
+        { request_id: requestId, ...(lease ? { lease_id: lease } : {}), decision },
         parent,
       );
-      if (result.request_id !== requestId || result.decision !== decision)
+      if (result.request_id !== requestId || !["continue", "stop"].includes(result.decision))
         throw new CommandError(
           "invalid_result",
           t("roundLimit.stale"),
@@ -144,6 +145,17 @@ export class RoundLimitController {
       this.requests.delete(requestId);
     } catch (error) {
       unknown = error instanceof CommandError && error.outcomeUnknown;
+      if (unknown) {
+        const receipt = await this.api.request<{ request_id: string; decision: string }>(
+          "client_tools.decision", { kind: "round_limit", request_id: requestId }, parent).catch(() => null);
+        if (generation === this.generation && this.state().sessionId === parent &&
+            receipt?.request_id === requestId && ["continue", "stop"].includes(receipt.decision)) {
+          unknown = false;
+          this.rememberSettled(requestId);
+          this.requests.delete(requestId);
+          return;
+        }
+      }
       if (generation !== this.generation || this.state().sessionId !== parent)
         return;
       await this.reconcile().catch(() => {});

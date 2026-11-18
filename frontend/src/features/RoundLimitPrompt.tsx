@@ -1,3 +1,5 @@
+import { useState } from "react";
+import type { ClientBinding } from "../client/client-tool-controller";
 import { useApp } from "../state";
 import { t } from "../i18n";
 import type { RoundLimitRequestView } from "../client/types";
@@ -28,6 +30,34 @@ function labels(request: RoundLimitRequestView) {
         continueLabel: "roundLimit.continue",
       };
   }
+}
+
+export function InteractionParticipation() {
+  const { state, dispatch } = useApp();
+  const [takingOver, setTakingOver] = useState(false);
+  const binding = state.clientTools as ClientBinding | null;
+  const participant = state.connection === "ws" && binding?.role === "participant" && binding.can_interact === true;
+  const hostParticipant = state.hostConnection?.browserParticipant &&
+    state.hostConnection.conversationId === state.sessionId && state.hostConnection.hostFlavor === "browser_sandbox";
+  const takeover = async (type: string) => {
+    if (takingOver) return;
+    setTakingOver(true);
+    try { await dispatch({ type }); } finally { setTakingOver(false); }
+  };
+  if (!participant && !hostParticipant) return null;
+  return (
+    <div className="composer-stack inline-notice" data-testid="interaction-participant">
+      <p>{t("interaction.participant")}</p>
+      <div className="settings-actions-row">
+        {participant && <button type="button" className="ghost-btn"
+          disabled={takingOver || state.transcript.sessionStatus !== "idle"}
+          onClick={() => void takeover("TakeOverClientTools")}>{t("interaction.takeoverExecutor")}</button>}
+        {hostParticipant && <button type="button" className="ghost-btn"
+          disabled={takingOver || state.transcript.sessionStatus !== "idle"}
+          onClick={() => void takeover("TakeOverBrowserHost")}>{t("interaction.takeoverHost")}</button>}
+      </div>
+    </div>
+  );
 }
 
 export function RoundLimitPrompt() {

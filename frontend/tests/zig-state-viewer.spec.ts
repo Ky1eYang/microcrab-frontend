@@ -1,3 +1,4 @@
+import { selectSidebarPlugin } from "./plugin-sidebar-selection";
 import { expect, test, type Page } from "@playwright/test";
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync } from "node:fs";
@@ -74,7 +75,7 @@ async function openExpanded(page: Page) {
   const sidebar = page.getByTestId("client-plugin-sidebar");
   if (!(await sidebar.isVisible()))
     await page.locator(".header-right-toggle-btn").click();
-  await sidebar.getByRole("tab", { name: "State Viewer", exact: true }).click();
+  await selectSidebarPlugin(sidebar, "State Viewer");
   await sidebar.getByTestId("plugin-expand").click();
   const webview = page
     .getByTestId("expanded-plugin-page")
@@ -684,3 +685,154 @@ for (const outcome of ["applied", "rejected", "conflict"] as const) {
     await screenshot(page, `edit-${outcome}-receipt.png`);
   });
 }
+
+for (const locale of ["en", "zh-CN"] as const) {
+  test(`real Zig Worker Secret metadata remains value-readonly with authorized deletion (${locale})`, async ({
+    page,
+  }) => {
+    await nativeBackend(page);
+    await page.addInitScript(
+      (value) => localStorage.setItem("microcrab.ui.locale", value),
+      locale,
+    );
+    await zigBundle(page);
+    let revision = 1;
+    let deleted = false;
+    const snapshot = () => {
+      const inspection = stateInspection(
+        { owned: "ordinary visible value", SECRET_TOKEN: "{{secret:SECRET_TOKEN}}" },
+        {
+          owned: { visibility: "visible", persistence: "persisted" },
+          SECRET_TOKEN: { visibility: "secret", persistence: "ephemeral" },
+          ...(!deleted
+            ? { SECRET_METADATA_ONLY: { visibility: "secret", persistence: "ephemeral" } }
+            : {}),
+        },
+        String(revision),
+      );
+      inspection.descriptors.SECRET_TOKEN = {
+        kind: "custom",
+        editable: false,
+        owner_editable: false,
+        deletable: true,
+      };
+      if (!deleted) {
+        inspection.descriptors.SECRET_METADATA_ONLY = {
+          kind: "custom",
+        editable: false,
+        owner_editable: false,
+        deletable: true,
+        };
+      }
+      return inspection;
+    };
+    await page.route("**/api/v1/sessions/s1/state/inspection", (route) =>
+      route.fulfill({ json: snapshot() }),
+    );
+    const writes: Record<string, any>[] = [];
+    await page.route("**/api/v1/sessions/s1/variables", (route) => {
+      const body = route.request().postDataJSON();
+      writes.push(body);
+      expect(Object.keys(body).sort()).toEqual(["change", "expected", "operation_id"]);
+      expect(body.change).toEqual({ remove: ["SECRET_METADATA_ONLY"] });
+      expect(body.expected).toEqual(snapshot().witness);
+      expect(body.operation_id).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+      );
+      expect(JSON.stringify(body)).not.toContain("{{secret:");
+      const before = snapshot().witness;
+      deleted = true;
+      revision++;
+      return route.fulfill({
+        json: {
+          operation_id: body.operation_id,
+          status: "applied",
+          boundary: "next_state_patch",
+          commit: { before, after: snapshot().witness, changed: true },
+        },
+      });
+    });
+    const webview = await openExpanded(page);
+    const frame = webview.contentFrame();
+    const secret = frame.locator('[data-key="SECRET_TOKEN"].var-card');
+    const metadataOnly = frame.locator('[data-key="SECRET_METADATA_ONLY"].var-card');
+    const label = locale === "en" ? "Secret" : "机密";
+    const preview = locale === "en" ? "Secret value is not readable" : "机密值不可读取";
+    for (const card of [secret, metadataOnly]) {
+      await expect(card).toBeVisible();
+      await expect(card.locator(".card-badges")).toContainText(label);
+      await expect(card.locator(".badge-locked")).toContainText(
+        locale === "en" ? "Read Only" : "只读受保护",
+      );
+      await expect(card.locator(".val-preview")).toHaveText(preview);
+      await expect(card.locator(".op-edit")).toBeDisabled();
+      await expect(card.locator(".op-del")).toBeEnabled();
+    }
+    await expect(frame.locator("#vars-list")).not.toContainText("{{secret:");
+    await expect(frame.locator("#summary")).toContainText(
+      locale === "en" ? "3 fields (2 read-only)" : "共 3 个字段 (2 个只读)",
+    );
+    await frame.locator("#search").fill("{{secret:");
+    await expect(frame.locator(".var-card")).toHaveCount(0);
+    await frame.locator("#search").fill("secret_metadata");
+    await expect(metadataOnly).toBeVisible();
+    await expect(secret).toHaveCount(0);
+    await frame.locator("#search").fill("");
+    // Ordinary descriptor-governed values still open their normal editor.
+    await frame.locator('[data-key="owned"] .op-edit').click();
+    await expect(frame.locator("#modal-val")).toHaveValue('"ordinary visible value"');
+    await frame.locator("#modal-cancel").click();
+    expect(writes).toEqual([]);
+    await metadataOnly.locator(".op-del").click();
+    await expect(frame.locator("#delete-msg")).toContainText("SECRET_METADATA_ONLY");
+    await frame.locator("#delete-confirm").click();
+    await expect(metadataOnly).toHaveCount(0);
+    await expect(secret.locator(".val-preview")).toHaveText(preview);
+    await expect(frame.locator("#delete-modal")).not.toHaveClass(/open/);
+    expect(writes).toHaveLength(1);
+  });
+}
+
+test("real Zig Worker rechecks Secret deletion descriptor after confirmation opens", async ({
+  page,
+}) => {
+  await nativeBackend(page);
+  await zigBundle(page);
+  let deletable = true;
+  let reads = 0;
+  const snapshot = () => {
+    const inspection = stateInspection(
+      {},
+      { SECRET_METADATA_ONLY: { visibility: "secret", persistence: "ephemeral" } },
+      deletable ? "1" : "2",
+    );
+    inspection.descriptors.SECRET_METADATA_ONLY = {
+      kind: "custom", editable: false, owner_editable: false, deletable,
+    };
+    return inspection;
+  };
+  await page.route("**/api/v1/sessions/s1/state/inspection", (route) => {
+    reads++;
+    return route.fulfill({ json: snapshot() });
+  });
+  const writes: unknown[] = [];
+  await page.route("**/api/v1/sessions/s1/variables", (route) => {
+    writes.push(route.request().postDataJSON());
+    return route.fulfill({ status: 403, json: { error: { code: "unexpected_write", message: "Revoked descriptor must not dispatch" } } });
+  });
+  const webview = await openExpanded(page);
+  const frame = webview.contentFrame();
+  const card = frame.locator('[data-key="SECRET_METADATA_ONLY"].var-card');
+  await expect(card.locator(".op-del")).toBeEnabled();
+  await card.locator(".op-del").click();
+  await expect(frame.locator("#delete-modal")).toHaveClass(/open/);
+  deletable = false;
+  const beforeReads = reads;
+  // Trigger the existing refresh action while preserving the open confirmation.
+  await frame.locator("#btn-refresh").evaluate((button: HTMLButtonElement) => button.click());
+  await expect.poll(() => reads).toBeGreaterThan(beforeReads);
+  await expect(card.locator(".op-del")).toBeDisabled();
+  await frame.locator("#delete-confirm").click();
+  await expect(frame.locator("#delete-modal")).toHaveClass(/open/);
+  expect(writes).toEqual([]);
+});

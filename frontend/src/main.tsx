@@ -8,6 +8,8 @@ import { PluginWorkspaceDialog } from "./plugins/PluginWorkspaceDialog";
 import { PluginSubmitNotice } from "./plugins/PluginSidebar";
 import { PluginsPage } from "./plugins/PluginsPage";
 import { ExpandedPluginPage } from "./plugins/ExpandedPluginPage";
+import "./features/action-menu.css";
+import "./features/plugin-block-variants.css";
 import "./styles/client-plugins.css";
 import "./styles/plugins.css";
 import { PermissionProposalDialog } from "./features/PermissionProposalDialog";

@@ -618,6 +618,7 @@ const EVENT_NAMES = {
   "permission.settled": true,
   "round_limit.requested": true,
   "round_limit.settled": true,
+  "client_tools.lease_changed": true,
   "client_tool.requested": true,
   "client_tool.prepared": true,
   "client_tool.paused": true,

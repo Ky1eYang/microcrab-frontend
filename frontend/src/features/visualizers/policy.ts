@@ -10,149 +10,263 @@ export const LIMITS = {
 const bytes = (s: string) => new TextEncoder().encode(s).length;
 const record = (v: unknown): v is Record<string, any> =>
   !!v && typeof v === "object" && !Array.isArray(v);
-function keys(v: unknown, allowed: string[]): asserts v is Record<string, any> {
-  if (!record(v) || Object.keys(v).some((k) => !allowed.includes(k)))
-    throw Error("Unsupported option");
-}
-/** Deliberately small, data-only chart schema. No formatter, resource or HTML surfaces. */
-export function chartOption(source: string): Record<string, any> | null {
+export function chartOptionDiagnostic(source: string): {
+  option: Record<string, any> | null;
+  error?: string;
+} {
   try {
-    if (bytes(source) > LIMITS.bytes) return null;
-    const value = JSON.parse(source);
+    if (bytes(source) > LIMITS.bytes) {
+      return { option: null, error: "visual.error.budgetExceeded" };
+    }
+    let value: any;
+    try {
+      value = JSON.parse(source);
+    } catch {
+      return { option: null, error: "visual.error.invalidJson" };
+    }
+    if (!record(value)) {
+      return { option: null, error: "visual.error.unsupported" };
+    }
+
     let nodes = 0;
-    const visit = (v: any, depth = 0) => {
-      if (++nodes > 24000 || depth > LIMITS.depth) throw Error("Budget");
-      if (
-        typeof v === "string" &&
-        (v.length > 2000 ||
-          /[<>]|(?:https?|data|javascript|file|blob):|\/\/|url\s*\(|image:\/\//i.test(
-            v,
-          ))
-      )
-        throw Error("Resource");
-      if (typeof v === "number" && (!Number.isFinite(v) || Math.abs(v) > 1e12))
-        throw Error("Number");
-      if (v && typeof v === "object")
-        Object.entries(v).forEach(([k, x]) => {
-          if (["__proto__", "constructor", "prototype"].includes(k))
-            throw Error("Key");
-          visit(x, depth + 1);
-        });
-    };
-    visit(value);
-    keys(value, [
-      "title",
-      "legend",
-      "tooltip",
-      "xAxis",
-      "yAxis",
-      "series",
-      "dataZoom",
-    ]);
-    if (value.title) {
-      keys(value.title, ["text", "subtext"]);
-      if (Object.values(value.title).some((v) => typeof v !== "string"))
-        return null;
+    try {
+      const visit = (v: any, depth = 0) => {
+        if (++nodes > 24000 || depth > LIMITS.depth) throw Error("Budget");
+        if (
+          typeof v === "string" &&
+          (v.length > 2000 ||
+            /[<>]|(?:https?|data|javascript|file|blob):|\/\/|url\s*\(|image:\/\//i.test(
+              v,
+            ))
+        )
+          throw Error("Resource");
+        if (
+          typeof v === "number" &&
+          (!Number.isFinite(v) || Math.abs(v) > 1e12)
+        )
+          throw Error("Number");
+        if (v && typeof v === "object")
+          Object.entries(v).forEach(([k, x]) => {
+            if (["__proto__", "constructor", "prototype"].includes(k))
+              throw Error("Key");
+            visit(x, depth + 1);
+          });
+      };
+      visit(value);
+    } catch (e: any) {
+      if (e?.message === "Resource" || e?.message === "Key") {
+        return { option: null, error: "visual.error.unsafeContent" };
+      }
+      return { option: null, error: "visual.error.budgetExceeded" };
     }
-    if (value.legend) {
-      keys(value.legend, ["show", "data"]);
-      if (value.legend.show != null && typeof value.legend.show !== "boolean")
-        return null;
-      if (
-        value.legend.data &&
-        (!Array.isArray(value.legend.data) ||
-          value.legend.data.length > 64 ||
-          value.legend.data.some((v: any) => typeof v !== "string"))
-      )
-        return null;
+
+    // Compatibility may omit passive unsupported styling, never authored data.
+    // Reject the complete preview before sanitizing if its bounded projection
+    // would lose series, points, categories, axes or zoom controls.
+    if (Array.isArray(value.series) && value.series.length > LIMITS.series)
+      return { option: null, error: "visual.error.budgetExceeded" };
+    let pointCount = 0;
+    if (Array.isArray(value.series)) {
+      for (const series of value.series) {
+        if (
+          !record(series) ||
+          !["line", "bar", "scatter", "pie"].includes(series.type) ||
+          !Array.isArray(series.data)
+        )
+          return { option: null, error: "visual.error.unsupported" };
+        pointCount += series.data.length;
+        if (pointCount > LIMITS.points)
+          return { option: null, error: "visual.error.budgetExceeded" };
+        if (
+          series.data.some(
+            (point: any) =>
+              !(
+                point === null ||
+                typeof point === "number" ||
+                (Array.isArray(point) &&
+                  point.length === 2 &&
+                  point.every((item: any) => typeof item === "number")) ||
+                (record(point) &&
+                  typeof point.name === "string" &&
+                  typeof point.value === "number")
+              ),
+          )
+        )
+          return { option: null, error: "visual.error.unsupported" };
+      }
     }
-    if (value.tooltip) {
-      keys(value.tooltip, ["show", "trigger"]);
-      if (value.tooltip.show != null && typeof value.tooltip.show !== "boolean")
-        return null;
+    for (const axis of [value.xAxis, value.yAxis]) {
+      if (Array.isArray(axis) && axis.length > 2)
+        return { option: null, error: "visual.error.budgetExceeded" };
+      for (const entry of Array.isArray(axis)
+        ? axis
+        : axis == null
+          ? []
+          : [axis]) {
+        if (!record(entry))
+          return { option: null, error: "visual.error.unsupported" };
+        if (Array.isArray(entry.data) && entry.data.length > LIMITS.points)
+          return { option: null, error: "visual.error.budgetExceeded" };
+        if (
+          entry.data !== undefined &&
+          (!Array.isArray(entry.data) ||
+            entry.data.some(
+              (item: any) => !["string", "number"].includes(typeof item),
+            ))
+        )
+          return { option: null, error: "visual.error.unsupported" };
+      }
+    }
+    if (Array.isArray(value.dataZoom)) {
+      if (value.dataZoom.length > 2)
+        return { option: null, error: "visual.error.budgetExceeded" };
       if (
-        value.tooltip.trigger &&
-        !["axis", "item", "none"].includes(value.tooltip.trigger)
+        value.dataZoom.some(
+          (zoom: any) =>
+            !record(zoom) || !["inside", "slider"].includes(zoom.type),
+        )
       )
-        return null;
-      value.tooltip = {
-        ...value.tooltip,
+        return { option: null, error: "visual.error.unsupported" };
+    }
+    const sanitized: Record<string, any> = {};
+
+    // 1. title: ignore unsupported fields, keep text and subtext
+    if (record(value.title)) {
+      const title: Record<string, string> = {};
+      if (typeof value.title.text === "string") title.text = value.title.text;
+      if (typeof value.title.subtext === "string")
+        title.subtext = value.title.subtext;
+      if (Object.keys(title).length > 0) sanitized.title = title;
+    }
+
+    // 2. legend: keep show, data
+    if (record(value.legend)) {
+      const legend: Record<string, any> = {};
+      if (typeof value.legend.show === "boolean")
+        legend.show = value.legend.show;
+      if (
+        Array.isArray(value.legend.data) &&
+        value.legend.data.length <= 64 &&
+        value.legend.data.every((v: any) => typeof v === "string")
+      ) {
+        legend.data = value.legend.data;
+      }
+      if (Object.keys(legend).length > 0) sanitized.legend = legend;
+    }
+
+    // 3. tooltip: keep show, trigger
+    if (record(value.tooltip)) {
+      const tooltip: Record<string, any> = {
         renderMode: "richText",
         confine: true,
       };
-    }
-    for (const axis of [value.xAxis, value.yAxis])
-      if (axis) {
-        keys(axis, ["type", "name", "data", "min", "max"]);
-        if (axis.type && !["category", "value"].includes(axis.type))
-          return null;
-        if (axis.name != null && typeof axis.name !== "string") return null;
-        for (const k of ["min", "max"])
-          if (axis[k] != null && typeof axis[k] !== "number") return null;
-        if (
-          axis.data &&
-          (!Array.isArray(axis.data) ||
-            axis.data.length > LIMITS.points ||
-            axis.data.some(
-              (x: any) => !["string", "number"].includes(typeof x),
-            ))
-        )
-          return null;
+      if (typeof value.tooltip.show === "boolean")
+        tooltip.show = value.tooltip.show;
+      if (["axis", "item", "none"].includes(value.tooltip.trigger)) {
+        tooltip.trigger = value.tooltip.trigger;
       }
-    if (
-      !Array.isArray(value.series) ||
-      !value.series.length ||
-      value.series.length > LIMITS.series
-    )
-      return null;
-    let points = 0;
-    for (const series of value.series) {
-      keys(series, ["name", "type", "data", "stack", "smooth"]);
-      if (
-        !["line", "bar", "scatter", "pie"].includes(series.type) ||
-        !Array.isArray(series.data)
-      )
-        return null;
-      if (
-        (series.name != null && typeof series.name !== "string") ||
-        (series.stack != null && typeof series.stack !== "string") ||
-        (series.smooth != null && typeof series.smooth !== "boolean")
-      )
-        return null;
-      points += series.data.length;
-      if (points > LIMITS.points) return null;
-      for (const point of series.data) {
-        if (point === null || typeof point === "number") continue;
+      sanitized.tooltip = tooltip;
+    }
+
+    // 4. xAxis and yAxis: support single object or array (e.g. dual Y axes), ignore extra fields
+    const sanitizeAxis = (axisInput: any) => {
+      if (!axisInput) return undefined;
+      const cleanSingle = (a: any) => {
+        const cleaned: Record<string, any> = {};
+        if (a.type && ["category", "value"].includes(a.type))
+          cleaned.type = a.type;
+        if (typeof a.name === "string") cleaned.name = a.name;
+        if (typeof a.min === "number") cleaned.min = a.min;
+        if (typeof a.max === "number") cleaned.max = a.max;
         if (
+          Array.isArray(a.data) &&
+          a.data.length <= LIMITS.points &&
+          a.data.every((x: any) => ["string", "number"].includes(typeof x))
+        ) {
+          cleaned.data = a.data;
+        }
+        return cleaned;
+      };
+
+      if (Array.isArray(axisInput)) {
+        return axisInput.map(cleanSingle);
+      }
+      return cleanSingle(axisInput);
+    };
+
+    const cleanXAxis = sanitizeAxis(value.xAxis);
+    if (cleanXAxis) sanitized.xAxis = cleanXAxis;
+    const cleanYAxis = sanitizeAxis(value.yAxis);
+    if (cleanYAxis) sanitized.yAxis = cleanYAxis;
+
+    // 5. series: mandatory, sanitize each series and its data
+    if (!Array.isArray(value.series) || value.series.length === 0) {
+      return { option: null, error: "visual.error.missingSeries" };
+    }
+    const cleanSeriesList: any[] = [];
+    for (const s of value.series) {
+      const cleanedSeries: Record<string, any> = {
+        type: s.type,
+        animation: false,
+        progressive: 0,
+      };
+      if (typeof s.name === "string") cleanedSeries.name = s.name;
+      if (typeof s.stack === "string") cleanedSeries.stack = s.stack;
+      if (typeof s.smooth === "boolean") cleanedSeries.smooth = s.smooth;
+      if (typeof s.yAxisIndex === "number")
+        cleanedSeries.yAxisIndex = s.yAxisIndex;
+      if (typeof s.xAxisIndex === "number")
+        cleanedSeries.xAxisIndex = s.xAxisIndex;
+      if (typeof s.symbolSize === "number")
+        cleanedSeries.symbolSize = s.symbolSize;
+
+      const cleanData: any[] = [];
+      for (const point of s.data) {
+        if (point === null || typeof point === "number") {
+          cleanData.push(point);
+        } else if (
           Array.isArray(point) &&
           point.length === 2 &&
-          point.every((x) => typeof x === "number")
-        )
-          continue;
-        keys(point, ["name", "value"]);
-        if (typeof point.name !== "string" || typeof point.value !== "number")
-          return null;
+          point.every((x: any) => typeof x === "number")
+        ) {
+          cleanData.push(point);
+        } else if (
+          record(point) &&
+          typeof point.name === "string" &&
+          typeof point.value === "number"
+        ) {
+          cleanData.push({ name: point.name, value: point.value });
+        }
       }
-      Object.assign(series, { animation: false, progressive: 0 });
+      cleanedSeries.data = cleanData;
+      cleanSeriesList.push(cleanedSeries);
     }
-    if (value.dataZoom) {
-      if (!Array.isArray(value.dataZoom) || value.dataZoom.length > 2)
-        return null;
-      for (const zoom of value.dataZoom) {
-        keys(zoom, ["type", "start", "end"]);
-        if (!["inside", "slider"].includes(zoom.type)) return null;
-        for (const k of ["start", "end"])
-          if (
-            zoom[k] != null &&
-            (typeof zoom[k] !== "number" || zoom[k] < 0 || zoom[k] > 100)
-          )
-            return null;
-      }
+
+    sanitized.series = cleanSeriesList;
+
+    // 6. dataZoom: keep type, start, end
+    if (Array.isArray(value.dataZoom)) {
+      const cleanZooms = value.dataZoom.map((z: any) => {
+        const cleanZ: Record<string, any> = { type: z.type };
+        if (typeof z.start === "number" && z.start >= 0 && z.start <= 100)
+          cleanZ.start = z.start;
+        if (typeof z.end === "number" && z.end >= 0 && z.end <= 100)
+          cleanZ.end = z.end;
+        return cleanZ;
+      });
+      if (cleanZooms.length > 0) sanitized.dataZoom = cleanZooms;
     }
-    return { ...value, animation: false };
+
+    sanitized.animation = false;
+    return { option: sanitized };
   } catch {
-    return null;
+    return { option: null, error: "visual.error.unsupported" };
   }
+}
+
+/** Deliberately small, data-only chart schema. No formatter, resource or HTML surfaces. */
+export function chartOption(source: string): Record<string, any> | null {
+  return chartOptionDiagnostic(source).option;
 }
 export function safeMermaid(source: string): boolean {
   return (

@@ -1,3 +1,5 @@
+import { isDirectUserSource } from "../client/input-source";
+import type { NativeInputSource } from "../client/types";
 import type { NativeWireError } from "../client/failure";
 import { useEffect, useRef, type SVGProps } from "react";
 import type { Block, HistoryPosition, PreviewIdentity } from "../client/types";
@@ -23,6 +25,7 @@ export interface FeatureBlock {
   startedMs?: number | null;
   endedMs?: number | null;
   payload: {
+    source?: NativeInputSource;
     failure?: NativeWireError;
     text: string;
     bytes?: number[] | string;
@@ -84,7 +87,7 @@ export function latestUser(t: any): FeatureBlock | undefined {
       (b) =>
         lower(b.role) === "user" &&
         !b.temporary &&
-        b.payload.source !== "framework" &&
+        isDirectUserSource(b.payload.source) &&
         !b.messageId.startsWith("local_") &&
         !isReverted(t, b.messageId),
     );

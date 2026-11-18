@@ -22,7 +22,9 @@ async function mount(
   text: string,
   rich: { streaming: boolean } | null = { streaming: false },
 ) {
-  page.on("pageerror", (error) => console.error("Visual fixture page error:", error.message));
+  page.on("pageerror", (error) =>
+    console.error("Visual fixture page error:", error.message),
+  );
   await page.addInitScript(() => {
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
@@ -81,6 +83,35 @@ test("data-only chart admission rejects executable/resource surfaces and bounded
     chartOption('{"series":' + "[".repeat(20) + "0" + "]".repeat(20) + "}"),
   ).toBeNull();
   expect(safeMath("\\href{https://evil.test}{x}")).toBe(false);
+});
+
+test("chart admission preserves complete data or rejects the entire preview", () => {
+  const series = { type: "line", data: [1] };
+  for (const patch of [
+    { series: Array.from({ length: LIMITS.series + 1 }, () => series) },
+    { series: [{ type: "line", data: [1, "invalid", 2] }] },
+    {
+      series: [
+        { type: "line", data: Array(2001).fill(0) },
+        { type: "bar", data: Array(2000).fill(1) },
+      ],
+    },
+    { yAxis: [{}, {}, {}] },
+    { xAxis: { data: Array(LIMITS.points + 1).fill("A") } },
+    { dataZoom: Array.from({ length: 3 }, () => ({ type: "inside" })) },
+  ])
+    expect(
+      chartOption(JSON.stringify({ series: [series], ...patch })),
+    ).toBeNull();
+  const axes = chartOption(
+    JSON.stringify({
+      yAxis: [{}, { name: "Secondary", type: "value" }],
+      series: [{ ...series, yAxisIndex: 1, unsupportedStyle: "passive" }],
+    }),
+  );
+  expect(axes?.yAxis).toEqual([{}, { name: "Secondary", type: "value" }]);
+  expect(axes?.series[0]).toMatchObject({ data: [1], yAxisIndex: 1 });
+  expect(axes?.series[0]).not.toHaveProperty("unsupportedStyle");
 });
 
 test("Mermaid source admission locks configuration, directives, HTML and complexity", () => {
@@ -214,6 +245,8 @@ test("ECharts retains container and interactions through updates and invalid rec
     "data-valid",
     "false",
   );
+  await expect(page.getByTestId("code-block")).toContainText("{invalid");
+  await expect(page.getByTestId("echarts-error")).toBeVisible();
   await update(page, { text: fence("echarts", spec) });
   await expect(page.getByTestId("echarts-preview")).toHaveAttribute(
     "data-valid",

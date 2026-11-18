@@ -11,7 +11,7 @@ for (const width of [1440, 390]) {
   }) => {
     await page.setViewportSize({ width, height: 1000 });
     await nativeBackend(page);
-  await maintainedPluginBundle(page);
+    await maintainedPluginBundle(page);
     await page.route("**/api/v1/sessions/s1/state/inspection", (route) =>
       route.fulfill({
         json: stateInspection(
@@ -101,8 +101,12 @@ for (const width of [1440, 390]) {
     await expect(manager.getByRole("alert")).toContainText(
       "缺少插件 WIT 元数据",
     );
-    const viewer = manager.locator('article[data-plugin-id="microcrab.state-viewer"]');
-    await manager.locator('[data-plugin-nav-id="microcrab.state-viewer"]').click();
+    const viewer = manager.locator(
+      'article[data-plugin-id="microcrab.state-viewer"]',
+    );
+    await manager
+      .locator('[data-plugin-nav-id="microcrab.state-viewer"]')
+      .click();
     const bytes = await readFile(
       process.env.MICROCRAB_TEST_VIEWER_CORE_WASM ??
         "../target/wasm32-unknown-unknown/release/microcrab_client_plugin_state_viewer.wasm",
@@ -134,7 +138,8 @@ for (const width of [1440, 390]) {
         exact: true,
       }),
     ).toBeVisible({ timeout: 20000 });
-    await viewer.getByLabel("在当前会话启用").check();
+    await viewer.getByLabel("在当前会话启用").click();
+    await expect(viewer.getByLabel("在当前会话启用")).toBeChecked();
     await expect(viewer).toHaveAttribute("data-status", "ready");
     await page.screenshot({
       path: `test-results/visual/client-plugin-workspace-manager-${width}.png`,

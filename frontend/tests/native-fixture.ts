@@ -5,7 +5,10 @@ import type {
   PermissionRequest,
   RoundLimitRequest,
 } from "../src/client/types";
-import type { ClientBinding } from "../src/client/client-tool-controller";
+import type {
+  ClientBinding,
+  ClientInvocation,
+} from "../src/client/client-tool-controller";
 import { LIMIT_FIELDS } from "../src/client/settings";
 export const nativeSnapshot: NativeSnapshot = {
   session: {
@@ -473,6 +476,7 @@ export async function nativeBackend(
       "client_tools.result",
       "client_tools.prepare",
       "client_tools.unbind",
+      "client_tools.arguments",
     );
   function attachNativeHost(
     id: string,
@@ -744,7 +748,10 @@ export async function nativeBackend(
           },
         ],
       });
-    if (/\/projects\/[^/]+\/agents$/.test(path) && verb === "GET") {
+    if (
+      /\/(?:projects|conversations)\/[^/]+\/agents$/.test(path) &&
+      verb === "GET"
+    ) {
       if (options.catalogFailure)
         return reject(500, "catalog_failed", "Catalog unavailable");
       const catalog = {
@@ -863,6 +870,22 @@ export async function nativeBackend(
         next_cursor: null,
         limit: 100,
       });
+    if (
+      path.startsWith("/api/v1/sessions/s1/children/") &&
+      path.endsWith("/enter") &&
+      verb === "POST"
+    ) {
+      const child = children.find(
+        (child) => child.id === decodeURIComponent(path.split("/").at(-2)!),
+      );
+      if (!child || child.interaction !== "persistent")
+        return reject(
+          409,
+          "child_entry_unavailable",
+          "Child is not a persistent conversation",
+        );
+      return reply(child);
+    }
     if (path.startsWith("/api/v1/sessions/s1/children/") && verb === "GET") {
       const child = children.find(
         (child) => child.id === decodeURIComponent(path.split("/").at(-1)!),
@@ -987,6 +1010,22 @@ export async function nativeBackend(
         );
         return;
       }
+      const flavor = command.params.host_flavor;
+      if (flavor !== "chat_only" && flavor !== "browser_sandbox") {
+        socket.send(
+          JSON.stringify({
+            v: 1,
+            type: "result",
+            request_id: command.request_id,
+            ok: false,
+            error: {
+              code: "invalid_params",
+              message: "Unsupported Host flavor",
+            },
+          }),
+        );
+        return;
+      }
       socket.send(
         JSON.stringify({
           v: 1,
@@ -999,6 +1038,8 @@ export async function nativeBackend(
             conversation_id: command.params.conversation_id,
             binding_id: "11111111-1111-4111-8111-111111111111",
             backend_id: "22222222-2222-4222-8222-222222222222",
+            host_flavor: flavor,
+            server_owned: flavor === "chat_only",
           },
         }),
       );
@@ -1059,6 +1100,7 @@ export async function nativeBackend(
         if (options.attachDelayMs) setTimeout(establish, options.attachDelayMs);
         else establish();
       }
+      let clientToolsBound = false;
       socket.onMessage(async (raw) => {
         const command = JSON.parse(String(raw));
         // Test-only route metadata: the wire carries no Session id; authority is
@@ -1129,8 +1171,49 @@ export async function nativeBackend(
             break;
           }
           case "client_tools.bind":
+            clientToolsBound =
+              !!options.clientTools &&
+              command.params.catalog_digest ===
+                options.clientTools.catalog_digest;
             data = options.clientTools;
             break;
+          case "client_tools.arguments": {
+            const binding = options.clientTools;
+            const call = binding?.pending.find(
+              (item) =>
+                item.invocation_id === command.params.invocation_id &&
+                item.parent_session_id === sessionId &&
+                ["pending", "paused"].includes(item.status),
+            );
+            if (
+              !clientToolsBound ||
+              meta.closed ||
+              binding?.role !== "executor" ||
+              !binding.lease_id ||
+              command.params.lease_id !== binding.lease_id ||
+              !call
+            ) {
+              socket.send(
+                JSON.stringify({
+                  v: 1,
+                  type: "result",
+                  request_id: command.request_id,
+                  ok: false,
+                  error: {
+                    code: "executor_required",
+                    message:
+                      "Current bound executor and exact pending invocation required",
+                  },
+                }),
+              );
+              return;
+            }
+            data = {
+              invocation_id: call.invocation_id,
+              arguments: structuredClone(call.arguments),
+            };
+            break;
+          }
           case "client_tools.prepare": {
             const call = options.clientTools?.pending.find(
               (call) => call.invocation_id === command.params.invocation_id,
@@ -1163,6 +1246,7 @@ export async function nativeBackend(
             break;
           }
           case "client_tools.unbind":
+            clientToolsBound = false;
             data = { removed: true };
             break;
           case "display.subscribe":
@@ -1472,6 +1556,28 @@ export async function nativeBackend(
      * with no subscriber, it is a no-op when no such socket exists. Tests that
      * address an older socket on purpose send through `sessionSockets[i]`. */
     event(name: string, data: unknown, offset = 1, sessionId = "s1") {
+      // Maintain the fixture's authoritative pending set before publishing a live
+      // invocation; private fetches still require the bound exact executor lease.
+      const call = (data as { call?: ClientInvocation })?.call;
+      if (
+        name.startsWith("client_tool.") &&
+        call &&
+        options.clientTools &&
+        name !== "client_tool.cancel_requested"
+      ) {
+        options.clientTools.calls = [
+          ...options.clientTools.calls.filter(
+            (item) => item.invocation_id !== call.invocation_id,
+          ),
+          call,
+        ];
+        options.clientTools.pending = [
+          ...options.clientTools.pending.filter(
+            (item) => item.invocation_id !== call.invocation_id,
+          ),
+          ...(["pending", "paused"].includes(call.status) ? [call] : []),
+        ];
+      }
       if (name === "snapshot")
         throw Error("Whole snapshots are not wire events; use publish(view)");
       const target = committedSocket(sessionId);

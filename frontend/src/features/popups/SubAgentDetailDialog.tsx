@@ -34,6 +34,7 @@ export function SubAgentDetailDialog() {
           {t("child.readError", { error: popup.error })}
         </p>
       )}
+      {popup.entryUnknown && <p className="child-content-notice" role="status">{t("childInput.entryUnknown")}</p>}
       {detail?.availability === "pending" && (
         <p className="child-content-notice" role="status">
           {t("child.pendingNotice")}

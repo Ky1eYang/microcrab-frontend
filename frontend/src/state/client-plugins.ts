@@ -2,14 +2,9 @@ import { CommandError } from "../client/errors";
 import { failureText } from "../client/failure";
 import { isPluginDrawerViewport } from "../client/viewport";
 import { PluginRegistry } from "../plugins/registry";
-import {
-  parseToolRequest,
-  PLUGIN_META_TOOL_DEFINITION,
-} from "../plugins/tool-hub";
-import {
-  sameToolSchema,
-  type ClientToolDefinition,
-} from "../client/client-tools";
+import { parseToolRequest } from "../plugins/tool-hub";
+import type { ClientToolDefinition } from "../client/client-tools";
+import { supportsShortPluginArtifacts } from "../plugins/tool-schema-compatibility";
 import type { ClientInvocation } from "../client/client-tool-controller";
 import type { HostEffect, Json, PluginRegistryAPI } from "../plugins/types";
 import type { AppState, NativePart } from "../client/types";
@@ -42,6 +37,19 @@ export class ClientPlugins {
   private ready: Promise<void> = Promise.resolve();
   private seen = new Map<string, string>();
   initializing = false;
+  syncedSession: string | null | undefined;
+  private syncRevision = 0;
+  isReadyFor(sessionId: string | null) {
+    return (
+      !this.initializing &&
+      (this.session === undefined || this.syncedSession === sessionId)
+    );
+  }
+  retrySynchronization(state: AppState) {
+    if (this.initializing || this.isReadyFor(state.sessionId)) return;
+    this.dispose();
+    this.sync(state);
+  }
   bypass = false;
   error: string | null = null;
   subscribe = (listener: () => void) => {
@@ -79,12 +87,7 @@ export class ClientPlugins {
         this.unsubscribe = this.registry.subscribe(this.publish);
         this.initializing = true;
         this.ready = this.registry.initialize().then(
-          () => {
-            if (generation === this.generation) {
-              this.initializing = false;
-              this.publish();
-            }
-          },
+          () => {},
           (error) => {
             if (generation === this.generation) {
               this.initializing = false;
@@ -98,17 +101,14 @@ export class ClientPlugins {
       }
       this.publish();
     }
-    // Only the bound catalog proves support. Old/unknown Session schemas keep
-    // full input pins until an explicit catalog refresh; drafts use the new schema.
+    // Only exact known bound schemas prove short support, including prior short16.
+    // Unknown/legacy64 schemas retain full references; drafts use short.
     this.shortArtifactReferences =
       !state.sessionId ||
       !!state.clientTools?.definitions.some(
         (definition: ClientToolDefinition) =>
           definition.name === "plugin" &&
-          sameToolSchema(
-            definition.parameters,
-            PLUGIN_META_TOOL_DEFINITION.parameters,
-          ),
+          supportsShortPluginArtifacts(definition.parameters),
       );
     const selectedTab = state.sessionPluginTab;
     const tabVisible =
@@ -182,11 +182,17 @@ export class ClientPlugins {
         this.bypass = false;
         this.error = null;
       }
+      const sessionChanged = state.sessionId !== this.session;
+      if (sessionChanged || this.syncedSession === undefined) {
+        this.initializing = true;
+        this.syncedSession = undefined;
+      }
+      const ticket = ++this.syncRevision;
       this.session = state.sessionId;
       this.summaries = summaries;
       const registry = this.registry;
       this.ready = this.ready.then(() =>
-        registry === this.registry && state.sessionId === this.session
+        registry === this.registry && ticket === this.syncRevision
           ? registry.setSession(state.sessionId, {
               sessions: state.sessions.map((session) => ({
                 id: session.id,
@@ -200,12 +206,23 @@ export class ClientPlugins {
             })
           : undefined,
       );
-      void this.ready.catch((error) => {
-        if (registry === this.registry) {
-          this.error = String(error);
-          this.publish();
-        }
-      });
+      void this.ready.then(
+        () => {
+          if (registry === this.registry && ticket === this.syncRevision) {
+            this.syncedSession = state.sessionId;
+            this.initializing = false;
+            this.publish();
+          }
+        },
+        (error) => {
+          if (registry === this.registry && ticket === this.syncRevision) {
+            this.syncedSession = undefined;
+            this.initializing = false;
+            this.error = String(error);
+            this.publish();
+          }
+        },
+      );
     }
   }
   private async effect(effect: HostEffect, generation: number): Promise<Json> {
@@ -275,9 +292,9 @@ export class ClientPlugins {
             ? payload.operation_id
             : undefined,
           error instanceof CommandError &&
-          (error.outcomeUnknown ||
-            (effect.kind === "state-change" &&
-              error.details?.operation_id !== payload.operation_id))
+            (error.outcomeUnknown ||
+              (effect.kind === "state-change" &&
+                error.details?.operation_id !== payload.operation_id))
             ? "unknown"
             : "rejected",
         );
@@ -394,10 +411,48 @@ export class ClientPlugins {
       const generation = this.generation;
       const decoration = this.decorationGeneration;
       if (!registry) return;
-      const pending = [...this.settledPending.values()];
+      const pending = [...this.settledPending.entries()].map(
+        ([key, payload]) => ({ key, payload, signature: this.seen.get(key) }),
+      );
       this.settledPending.clear();
       void this.ready
-        .then(() => {
+        .then(async () => {
+          if (
+            registry !== this.registry ||
+            generation !== this.generation ||
+            decoration !== this.decorationGeneration
+          )
+            return;
+          const prepared: {
+            key: string;
+            signature: string | undefined;
+            payload: Json;
+          }[] = [];
+          for (const entry of pending) {
+            const payload = entry.payload;
+            if (
+              !payload ||
+              typeof payload !== "object" ||
+              Array.isArray(payload) ||
+              typeof payload.text !== "string"
+            )
+              continue;
+            const digest = new Uint8Array(
+              await crypto.subtle.digest(
+                "SHA-256",
+                new TextEncoder().encode(payload.text),
+              ),
+            );
+            prepared.push({
+              ...entry,
+              payload: {
+                ...payload,
+                source_digest: [...digest]
+                  .map((byte) => byte.toString(16).padStart(2, "0"))
+                  .join(""),
+              },
+            });
+          }
           if (
             registry !== this.registry ||
             generation !== this.generation ||
@@ -406,7 +461,9 @@ export class ClientPlugins {
             return;
           let blocks: Json[] = [],
             bytes = 0;
-          for (const payload of pending) {
+          for (const entry of prepared) {
+            if (this.seen.get(entry.key) !== entry.signature) continue;
+            const payload = entry.payload;
             const size = new TextEncoder().encode(
               JSON.stringify(payload),
             ).byteLength;
@@ -593,6 +650,8 @@ export class ClientPlugins {
     this.registry = null;
     this.scope = "";
     this.session = undefined;
+    this.syncedSession = undefined;
+    this.syncRevision++;
     this.environment = "";
     this.summaries = "";
     this.shortArtifactReferences = true;

@@ -6,6 +6,7 @@ import {
   hostPreferenceScope,
 } from "../../../client/host-locators";
 import { t } from "../../../i18n";
+import { projectHostTerminal } from "../../../state/host-readiness";
 import { GlyphIcon, Icon } from "../../shared";
 import {
   filterProjects,
@@ -111,7 +112,7 @@ export function WorkspacePicker() {
 
   const renderProject = (project: NativeProject) => {
     const selected = ws.projectId === project.id;
-    const availability = projectAvailability(project, state.hostConnection);
+    const availability = projectAvailability(project, state.hostConnection, projectHostTerminal(state, project.id));
     return (
       <button
         key={project.id}
@@ -136,7 +137,7 @@ export function WorkspacePicker() {
         {availability !== "online" && (
           <span className="picker-project-status" data-status={availability}>
             <Icon
-              name={availability === "offline" ? "warning" : "info"}
+              name={availability === "unknown" ? "info" : "warning"}
               aria-hidden="true"
             />
             {t(`home.picker.${availability}`)}

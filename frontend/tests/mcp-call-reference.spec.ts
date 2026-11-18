@@ -30,7 +30,9 @@ test("plugin request parser accepts short artifacts and generic legacy calls whi
       { action: "list", artifact: "a".repeat(64) },
     ].map((request) => parseToolRequest({ ...base, ...request }).action);
     const rejected = [
-      ...[undefined, null, ["list"], ["call"], {}, 0].map((action) => ({ action })),
+      ...[undefined, null, ["list"], ["call"], {}, 0].map((action) => ({
+        action,
+      })),
       { action: "list", pin: "0123456789abcdef" },
       {
         action: "describe",
@@ -70,7 +72,7 @@ test("plugin request parser accepts short artifacts and generic legacy calls whi
       rejected,
       legacy: parseToolRequest(legacy),
       required: PLUGIN_META_TOOL_DEFINITION.parameters.required,
-      branches: PLUGIN_META_TOOL_DEFINITION.parameters.oneOf,
+      schema: PLUGIN_META_TOOL_DEFINITION.parameters,
     };
   });
   expect(actual.accepted).toEqual([
@@ -88,15 +90,12 @@ test("plugin request parser accepts short artifacts and generic legacy calls whi
     "unchanged-full-configuration-revision",
   );
   expect(actual.required).toEqual(["plugin", "action", "artifact"]);
-  expect(actual.branches).toContainEqual({
-    properties: {
-      action: { enum: ["call"] },
-      server: false,
-      tool: false,
-      config_pin: false,
-      schema_pin: false,
-    },
-    required: ["pin"],
+  expect(actual.schema).not.toHaveProperty("oneOf");
+  expect(actual.schema.additionalProperties).toBe(false);
+  expect(Object.values(actual.schema.properties)).not.toContain(false);
+  expect(actual.schema.properties.pin).toEqual({
+    type: "string",
+    pattern: "^[a-f0-9]{16}$",
   });
 });
 test("MCP short references bind exact targets and reject stale schemas, config and worker scope", async ({
@@ -159,12 +158,79 @@ test("MCP short references bind exact targets and reject stale schemas, config a
       await registry.initialize();
       await registry.setSession(session);
       await registry.setEnabled(id, session, true);
-      await registry.render(id, "sidebar");
+      const settings = {
+        surface_id: "short-reference-settings",
+        target: "setting-page" as const,
+      };
+      await registry.render(id, "setting-page", false, settings);
       const configure = async (server: string, endpoint: string) => {
-        registry.setVariable(id, "id", server);
-        registry.setVariable(id, "endpoint", endpoint);
-        registry.setVariable(id, "enabled", "true");
-        await registry.action(id, "save-config");
+        const state = () =>
+          registry.view(id, "setting-page", settings).viewState as
+            | {
+                busy?: boolean;
+                error?: string;
+                servers?: {
+                  id: string;
+                  endpoint: string;
+                  enabled: boolean;
+                  config_pin: string;
+                }[];
+              }
+            | undefined;
+        const previousPin = state()?.servers?.find(
+          (row) => row.id === server,
+        )?.config_pin;
+        // Settings actions require the exact mounted surface and an explicit typed
+        // payload. Sidebar is observation-only; variable writes cannot configure it.
+        await registry.action(
+          id,
+          "save-config",
+          {
+            id: server,
+            endpoint,
+            enabled: true,
+            authorization: "",
+            clear_authorization: false,
+          },
+          settings,
+        );
+        // action() returns before the resource-configure effect completes. Observe
+        // its actual settled settings publication rather than racing tool dispatch.
+        await new Promise<void>((resolve, reject) => {
+          let unsubscribe = () => {};
+          const timer = setTimeout(() => {
+            unsubscribe();
+            reject(
+              Error(
+                "MCP configuration did not settle for the exact settings surface",
+              ),
+            );
+          }, 5000);
+          const check = () => {
+            const view = registry.view(id, "setting-page", settings);
+            const current = state();
+            const row = current?.servers?.find((entry) => entry.id === server);
+            const error =
+              view.status === "faulted" ? view.error : current?.error;
+            if (error) {
+              clearTimeout(timer);
+              unsubscribe();
+              reject(Error(error));
+            } else if (
+              !current?.busy &&
+              row?.enabled &&
+              row.endpoint === endpoint &&
+              row.config_pin &&
+              row.config_pin !== previousPin
+            ) {
+              clearTimeout(timer);
+              unsubscribe();
+              resolve();
+            }
+          };
+          unsubscribe = registry.subscribe(check);
+          check();
+        });
       };
       await configure("one", "https://short-mcp.example.test/mcp");
       await configure("unrelated", "https://unrelated-mcp.example.test/mcp");
@@ -256,16 +322,16 @@ test("MCP short references bind exact targets and reject stale schemas, config a
   expect(actual.described.call_pin).toMatch(/^[a-f0-9]{16}$/);
   expect(actual.described.schema_pin).toMatch(/^[a-f0-9]{16}$/);
   expect(actual.described.config_pin).toMatch(/^[a-f0-9]{16}$/);
-  expect(actual.malformed).toContain("16 lowercase hexadecimal");
-  expect(actual.unknown).toContain("expired");
-  expect(actual.conflict).toContain("conflicts");
+  expect(actual.malformed).toBe("Error: InvalidCallPin");
+  expect(actual.unknown).toBe("Error: ExpiredCallPin");
+  expect(actual.conflict).toBe("Error: ConflictingCallPinFields");
   expect(actual.success).toEqual({
     content: [{ type: "text", text: "accepted" }],
   });
-  expect(actual.schema).toContain("schema/configuration changed");
+  expect(actual.schema).toBe("Error: ChangedSchemaOrConfig");
   expect(actual.changed).toBe(true);
-  expect(actual.config).toContain("configuration changed");
-  expect(actual.restarted).toContain("expired");
+  expect(actual.config).toBe("Error: ChangedServerConfig");
+  expect(actual.restarted).toBe("Error: ExpiredCallPin");
   expect(methods.filter((method) => method === "tools/call")).toHaveLength(1);
   expect(methods.filter((method) => method === "tools/list")).toHaveLength(5);
   expect(unrelated).toEqual([]);

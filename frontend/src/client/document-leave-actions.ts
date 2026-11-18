@@ -50,6 +50,9 @@ export function documentLeaveSelector(
       return action.value === state.sessionId && state.page === "conversation"
         ? undefined
         : null;
+    case "CloseSubAgentDetail":
+    case "DismissPopup":
+      return state.popup.type === "subagentDetail" ? "[data-testid='child-turn-composer']" : undefined;
     case "Logout":
     case "NewChat":
     case "SelectKnownProject":

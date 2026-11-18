@@ -1,3 +1,4 @@
+import { selectSidebarPlugin } from "./plugin-sidebar-selection";
 import { stateInspection } from "./state-inspection-fixture";
 import { expect, test, type Page } from "@playwright/test";
 import { nativeBackend } from "./native-fixture";
@@ -36,15 +37,17 @@ ${source}`,
     manager.locator('article[data-plugin-id="microcrab.fixture"]'),
   ).toBeVisible();
   await manager.locator('[data-plugin-nav-id="microcrab.mcp-bridge"]').click();
-  await manager
+  const mcpEnabled = manager
     .locator('article[data-plugin-id="microcrab.mcp-bridge"]')
-    .getByLabel("在当前会话启用")
-    .uncheck();
+    .getByLabel("在当前会话启用");
+  await mcpEnabled.click();
+  await expect(mcpEnabled).not.toBeChecked();
   await manager.locator('[data-plugin-nav-id="microcrab.fixture"]').click();
-  await manager
+  const fixtureEnabled = manager
     .locator('article[data-plugin-id="microcrab.fixture"]')
-    .getByLabel("在当前会话启用")
-    .check();
+    .getByLabel("在当前会话启用");
+  await fixtureEnabled.click();
+  await expect(fixtureEnabled).toBeChecked();
   await expect(
     manager.locator('article[data-plugin-id="microcrab.fixture"]'),
   ).toHaveAttribute("data-status", "ready");
@@ -200,7 +203,9 @@ test("real Viewer renders pure values, reveals invisible values locally and pres
   await realAssets(page);
   await page.goto("/#/session/s1/plugins");
   const manager = page.getByTestId("client-plugins-manager");
-  await manager.locator('[data-plugin-nav-id="microcrab.state-viewer"]').click();
+  await manager
+    .locator('[data-plugin-nav-id="microcrab.state-viewer"]')
+    .click();
   await expect(
     manager.locator('article[data-plugin-id="microcrab.state-viewer"]'),
   ).toBeVisible();
@@ -247,13 +252,13 @@ test("real Viewer renders pure values, reveals invisible values locally and pres
   ).toHaveCount(0);
   await page.getByTestId("plugins-manage").click();
   await manager.locator('[data-plugin-nav-id="microcrab.fixture"]').click();
-  const fixture = manager.locator('article[data-plugin-id="microcrab.fixture"]');
-  await fixture.getByLabel("在当前会话启用").check();
+  const fixture = manager.locator(
+    'article[data-plugin-id="microcrab.fixture"]',
+  );
+  await fixture.getByLabel("在当前会话启用").click();
+  await expect(fixture.getByLabel("在当前会话启用")).toBeChecked();
   await manager.getByRole("button", { name: "返回", exact: true }).click();
-  await page
-    .getByTestId("client-plugin-sidebar")
-    .getByRole("tab", { name: "Component fixture", exact: true })
-    .click();
+  await selectSidebarPlugin(sidebar, "Component fixture");
   await page
     .getByTestId("client-plugin-sidebar")
     .getByRole("button", { name: "Increment", exact: true })

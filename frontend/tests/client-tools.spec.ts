@@ -83,9 +83,13 @@ function harness(
   const api = {
     request: async (method: string, params: any, session?: string) => {
       commands.push({ method, params, session });
-      return method === "client_tools.bind"
-        ? structuredClone(binding)
-        : { ...call, status: "completed", result: params.result };
+      if (method === "client_tools.bind") return structuredClone(binding);
+      if (method === "client_tools.arguments")
+        return {
+          invocation_id: params.invocation_id,
+          arguments: { todos: [] },
+        };
+      return { ...call, status: "completed", result: params.result };
     },
   } as unknown as ApiClient;
   const errors: unknown[] = [];
@@ -183,8 +187,18 @@ test("live todo executes once and immutable duplicate notifications do not repla
   const todo = { ...call, tool: "update_todo_list", arguments: { todos: [] } };
   h.controller.receive("client_tool.requested", todo);
   h.controller.receive("client_tool.requested", todo);
-  await expect.poll(() => h.commands.length).toBe(2);
-  expect(h.commands[1].params.result).toEqual({ todos: [] });
+  await expect.poll(() => h.commands.length).toBe(3);
+  expect(h.commands.map(({ method }) => method)).toEqual([
+    "client_tools.bind",
+    "client_tools.arguments",
+    "client_tools.result",
+  ]);
+  expect(h.commands[1].params).toEqual({
+    invocation_id: todo.invocation_id,
+    lease_id: "lease",
+  });
+  expect(h.commands[2].params.result).toEqual({ todos: [] });
+  expect(h.errors).toEqual([]);
 });
 test("historical audit uses explicit positions and historical provider-shaped tools", () => {
   const block = createBlock("s", "hash_content_id", "tool", "tool");
@@ -260,9 +274,13 @@ test("cancel request aborts an active external call without inventing a terminal
   const api = {
     request: async (method: string, params: any) => {
       commands.push({ method, params });
-      return method === "client_tools.bind"
-        ? structuredClone(binding)
-        : { ...externalCall, status: "cancelled" };
+      if (method === "client_tools.bind") return structuredClone(binding);
+      if (method === "client_tools.arguments")
+        return {
+          invocation_id: externalCall.invocation_id,
+          arguments: externalCall.arguments,
+        };
+      return { ...externalCall, status: "cancelled" };
     },
   } as unknown as ApiClient;
   const controller = new ClientToolController(
@@ -284,12 +302,21 @@ test("cancel request aborts an active external call without inventing a terminal
   expect(controller.binding?.pending[0]?.status).toBe("pending");
   expect(commands.map((command) => command.method)).toEqual([
     "client_tools.bind",
+    "client_tools.arguments",
   ]);
+  expect(commands[1].params).toEqual({
+    invocation_id: externalCall.invocation_id,
+    lease_id: "lease",
+  });
   release({ cancelled: true });
   await expect
     .poll(() => controller.binding?.calls[0]?.status)
     .toBe("cancelled");
-  expect(commands[1].method).toBe("client_tools.result");
+  expect(commands.map((command) => command.method)).toEqual([
+    "client_tools.bind",
+    "client_tools.arguments",
+    "client_tools.result",
+  ]);
 });
 
 test("truncated call pages recover pending questions before presentation without replay", async () => {

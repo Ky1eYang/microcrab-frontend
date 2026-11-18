@@ -1,3 +1,4 @@
+import { selectSidebarPlugin } from "./plugin-sidebar-selection";
 import { maintainedPluginBundle } from "./plugin-bundle-fixture";
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { nativeBackend } from "./native-fixture";
@@ -307,7 +308,7 @@ async function openViewer(page: Page, direct = false) {
     await page.goto("/#/session/s1");
     await page.locator(".header-right-toggle-btn").click();
     const sidebar = page.getByTestId("client-plugin-sidebar");
-    await sidebar.getByRole("tab", { name: "State Viewer", exact: true }).click();
+    await selectSidebarPlugin(sidebar, "State Viewer");
     await sidebar.getByTestId("plugin-expand").click();
   }
   const viewer = page.getByTestId("expanded-plugin-page");

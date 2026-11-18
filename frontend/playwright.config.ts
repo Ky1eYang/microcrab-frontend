@@ -6,6 +6,8 @@ if (!Number.isInteger(port) || port < 1024 || port > 65535)
 
 export default defineConfig({
   testDir: "./tests",
+  // This gate requires emitted /assets URLs and runs in the production preview config.
+  testIgnore: ["rich-visuals-production.spec.ts"],
   fullyParallel: true,
   use: {
     baseURL: `http://127.0.0.1:${port}`,

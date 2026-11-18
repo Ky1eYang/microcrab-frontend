@@ -1,3 +1,4 @@
+import { expectedPluginVariables } from "./input-inventory-expectation";
 import { expect, test } from "@playwright/test";
 import { nativeBackend, nativeSnapshot } from "./native-fixture";
 import { connectHostUI } from "./host-fixture";
@@ -454,10 +455,9 @@ test("CAS update preserves all input fields and failed inbox receipts never crea
     { snapshot: nativeSnapshot, inbox },
   );
   expect(result.calls[0].method).toBe("inbox.update");
-  expect(result.calls[0].params.input.variables).toEqual({
-    set: { a: 1 },
-    remove: [],
-  });
+  expect(result.calls[0].params.input.variables).toEqual(
+    expectedPluginVariables(false, { a: 1 }),
+  );
   expect(result.calls[0].params.input.parts).toEqual([
     input.parts[0],
     {

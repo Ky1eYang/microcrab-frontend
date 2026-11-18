@@ -18,6 +18,9 @@ test("HTML projection rejection cannot settle a correlated tool or commit its va
     });
     const instance = {
       generation: 1,
+      controllers: new Map(),
+      surfaces: new Map(),
+      network: { retireStale() {} },
       vars: { state: { count: 1 } },
       trees: new Map([
         [
@@ -31,6 +34,19 @@ test("HTML projection rejection cannot settle a correlated tool or commit its va
         ],
       ]),
     };
+    registry.plugins.set("atomic", {
+      manifest: {
+        id: "atomic",
+        name: "Atomic fixture",
+        version: "1",
+        targets: [],
+      },
+      imports: [],
+      bytes: new Uint8Array(),
+      priority: 0,
+      enabledByDefault: true,
+      status: "ready",
+    });
     registry.live.set("atomic", instance);
     const identity = { invocation_id: "atomic-tool" };
     const controller = new AbortController();

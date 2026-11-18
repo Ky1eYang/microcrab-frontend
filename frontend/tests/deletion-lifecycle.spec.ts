@@ -107,7 +107,7 @@ test("project delete closes confirmation and removes children before slow relay 
     selected: null,
     sessions: ["other"],
     projects: 0,
-    workspace: "none",
+    workspace: "chat_only",
     host: "detached",
   });
 });

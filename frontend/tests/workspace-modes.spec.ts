@@ -248,14 +248,28 @@ test("Chat Only binds explicit flavor before attach without browser execution as
       }
       let ownerFenced = false;
       try {
-        await conversations.connect("conversation", "different-owner", "chat_only");
-      } catch { ownerFenced = true; }
+        await conversations.connect(
+          "conversation",
+          "different-owner",
+          "chat_only",
+        );
+      } catch {
+        ownerFenced = true;
+      }
       if (!ownerFenced) throw Error("Cached Host crossed authenticated owner");
-      // Real route receive uses the exact authenticated generation for replies.
+      const lease = connection.host.lease;
       conversations.receive({
         conversation_id: "conversation",
-        connection_generation: "observed-generation",
-        frame: { kind: "ping", lease_generation: connection.host.lease },
+        connection_generation: "retired-generation",
+        frame: { kind: "ping", lease_generation: lease },
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const staleRouted = routed.length;
+      // Replies retain the exact generation returned by the attach receipt.
+      conversations.receive({
+        conversation_id: "conversation",
+        connection_generation: connection.generation!,
+        frame: { kind: "ping", lease_generation: lease },
       });
       await new Promise((resolve) => setTimeout(resolve, 0));
       const descriptor = await connection.host.descriptor();
@@ -267,6 +281,8 @@ test("Chat Only binds explicit flavor before attach without browser execution as
         immutable,
         reused: connection === reused,
         routed,
+        staleRouted,
+        lease,
         descriptor,
       };
     } finally {
@@ -290,14 +306,15 @@ test("Chat Only binds explicit flavor before attach without browser execution as
   expect(result.descriptor.supported_primitives).toEqual([]);
   expect((result.descriptor.info as any).capabilities).toEqual([]);
   expect(result.immutable && result.reused).toBe(true);
+  expect(result.staleRouted).toBe(0);
   expect(result.routed).toEqual([
     {
       lane: "conversation_host",
       conversation_id: "conversation",
-      connection_generation: "observed-generation",
+      connection_generation: "generation",
       frame: {
         kind: "pong",
-        lease_generation: (result.routed[0] as any).frame.lease_generation,
+        lease_generation: result.lease,
       },
     },
   ]);

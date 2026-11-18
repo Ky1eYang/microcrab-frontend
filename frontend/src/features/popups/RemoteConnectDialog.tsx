@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useApp, useAppStore } from "../../state";
 import { hostReadiness } from "../../state/host-readiness";
 import { t } from "../../i18n";
+import { hostTerminalCode } from "../../client/host-quarantine";
 import {
   hostCarrier,
   hostLocator,
@@ -18,6 +19,8 @@ const hostStatusKeys = new Set<string>([
   "unready",
   "ready",
   "suspended",
+  "binding_mismatch",
+  "host_preflight_unsupported",
 ]);
 /** Localized lazily so a live locale switch re-renders with the active dictionary. */
 export const hostStatus: Record<string, string> = new Proxy(
@@ -52,6 +55,7 @@ const hostReasonKeys = new Set<string>([
   "directory_not_allowed",
   "host_reconciliation_required",
   "binding_mismatch",
+  "host_preflight_unsupported",
   "disconnected",
   "connection_failed",
   "connection_timeout",
@@ -78,6 +82,7 @@ export function RemoteConnectDialog() {
   const creating = state.popup.type === "createProject";
   const projectId = state.popup.projectId ?? "";
   const readiness = hostReadiness(state, projectId);
+  const terminal = hostTerminalCode(readiness.status);
   const [endpoint, setEndpoint] = useState(state.popup.endpoint ?? "");
   const [recover, setRecover] = useState(false);
   const [code, setCode] = useState("");
@@ -427,6 +432,32 @@ export function RemoteConnectDialog() {
                   </div>
                 )}
               </div>
+              {terminal && (
+                <div className="host-connect-note" data-testid="host-terminal-guidance">
+                  <p>{t(readiness.status === "binding_mismatch" ? "host.readiness.bindingMismatchNotice" : "host.readiness.preflightUnsupportedNotice")}</p>
+                  <p>{t("hostDlg.terminalRecovery")}</p>
+                  <div className="host-connect-create-actions">
+                    <label htmlFor="host-compatible-project">{t("hostDlg.switchProject")}</label>
+                    <select id="host-compatible-project" className="settings-input" value="" disabled={busy}
+                      onChange={(event) => {
+                        const id = event.target.value;
+                        if (id) void dispatch({ type: "CreateSessionInProject", value: id });
+                      }}>
+                      <option value="">{t("hostDlg.selectProject")}</option>
+                      {state.projects.filter((item) => item.id !== projectId).map((item) => (
+                        <option key={item.id} value={item.id}>{item.name}</option>
+                      ))}
+                    </select>
+                    <button className="ghost-btn" disabled={busy} onClick={() => setRecover(true)}>
+                      {t("hostDlg.configureHost")}
+                    </button>
+                    <button className="ghost-btn" disabled={busy}
+                      onClick={() => void dispatch({ type: "OpenCreateProjectDialog" })}>
+                      {t("hostDlg.differentWorkspace")}
+                    </button>
+                  </div>
+                </div>
+              )}
               {connected && (
                 <div className="host-connect-create-actions">
                   <button

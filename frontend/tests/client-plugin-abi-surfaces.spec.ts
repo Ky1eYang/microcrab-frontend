@@ -221,15 +221,36 @@ test("settled rollover and history reset release block mounts while retaining ac
     const block = (batch: number, index: number) => ({
       surface_id: `block-${batch}-${index}`,
       target: "block-slot" as const,
-      block_id: `block-${batch}-${index}`,
-      slot_id: "decoration",
+      block_id: `block-${batch}-${Math.floor(index / 2)}`,
+      slot_id: index % 2 ? "fixture-after" : "fixture-before",
+      placement: index % 2 ? ("after" as const) : ("before" as const),
     });
-    const fill = (batch: number) => {
+    const fill = async (batch: number) => {
       registry.observe("settled-blocks", {
         blocks: Array.from({ length: 512 }, (_, index) => ({
-          block_id: block(batch, index).block_id,
+          block_id: `block-${batch}-${index}`,
         })),
       });
+      // Drain the real guest's first32 contributions before the next rollover.
+      await (registry as any).live.get(id).queue;
+      // This case exercises the registry's full surface cap, beyond the guest's
+      // per-phase32-block sample. Admit exact deferred metadata through apply;
+      // direct map insertion would bypass the ownership/settled checks under test.
+      for (let offset = 0; offset < 510; offset += 64)
+        (registry as any).apply(id, (registry as any).live.get(id), {
+          schema_version: 1,
+          block_slots: Array.from(
+            { length: Math.min(64, 510 - offset) },
+            (_, index) => {
+              const surface = block(batch, offset + index);
+              return {
+                block_id: surface.block_id,
+                slot_id: surface.slot_id,
+                placement: surface.placement,
+              };
+            },
+          ),
+        });
       for (let index = 0; index < 510; index++) {
         const surface = block(batch, index);
         registry.setSurfaceVisible(id, surface, true);
@@ -255,15 +276,15 @@ test("settled rollover and history reset release block mounts while retaining ac
       registry.setSurfaceVisible(id, hidden, true);
       registry.setSurfaceVisible(id, hidden, false);
       registry.setSurfaceVisible(id, active, true);
-      fill(0);
+      await fill(0);
       const initialCap = rejection();
-      fill(1);
+      await fill(1);
       // A late React cleanup must not recreate an evicted descriptor.
       registry.setSurfaceVisible(id, block(0, 0), false);
       const rolloverCap = rejection();
       registry.observe("history-reset", {});
       registry.setSurfaceVisible(id, block(1, 0), false);
-      fill(2);
+      await fill(2);
       const resetCap = rejection();
       let hiddenAction = "accepted";
       try {
@@ -334,14 +355,17 @@ for (const retirement of [
                 surface_id: "retired",
                 target: "block-slot" as const,
                 block_id: "retired-block",
-                slot_id: "slot",
+                slot_id: "fixture-after",
+                placement: "after" as const,
               };
       try {
         await registry.initialize();
         await registry.setSession("retirement");
         await registry.setEnabled(id, "retirement", true);
-        if (retirement !== "visibility")
+        if (retirement !== "visibility") {
           registry.observe("settled-block", { block_id: "retired-block" });
+          await (registry as any).live.get(id).queue;
+        }
         await registry.render(id, surface.target, false, surface);
         holding = true;
         const captured = new Promise<void>((resolve) => {
@@ -373,6 +397,17 @@ for (const retirement of [
             ],
           });
         else registry.setSurfaceVisible(id, surface, false);
+        if (retirement !== "visibility")
+          (registry as any).apply(id, (registry as any).live.get(id), {
+            schema_version: 1,
+            block_slots: [
+              {
+                block_id: "retired-block",
+                slot_id: "fixture-after",
+                placement: "after",
+              },
+            ],
+          });
         if (retirement !== "queued eviction")
           registry.setSurfaceVisible(id, surface, true);
         holding = false;

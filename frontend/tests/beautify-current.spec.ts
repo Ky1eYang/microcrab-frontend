@@ -177,14 +177,9 @@ for (const { colorScheme, width } of [
         })
         .click();
       await page.getByTitle("选择项目工作区").click();
-      const online = page.locator(
-        ".workspace-menu-item[data-active=true] .picker-project-status",
-      );
-      await expect(online).toHaveText("在线");
-      await expect(online).toHaveCSS(
-        "color",
-        await tokenColor(page, "--text-2"),
-      );
+      const online = page.locator(".workspace-menu-item[data-active=true]");
+      await expect(online).toHaveAccessibleName("Assigned");
+      await expect(online.locator(".picker-project-status")).toHaveCount(0);
       expect(
         backend.commands.filter((command) => command.method === "turn.queue"),
       ).toHaveLength(0);

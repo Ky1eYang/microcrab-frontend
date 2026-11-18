@@ -439,6 +439,7 @@ export function OwnerSettings({ scope = { kind: "user" } }: { scope?: Scope }) {
                     fields: [
                       "max_context_bytes",
                       "max_tool_output_bytes",
+                      "max_tool_image_bytes",
                       "output_buffer_bytes",
                       "max_output_tokens",
                     ],

@@ -4,6 +4,7 @@ import { useConversationBlocks } from "../features/conversation/registry-context
 import {
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -54,10 +55,12 @@ export function PluginSurface({
     "page",
     "pluginWorkspace",
   ]);
+  const ready = plugins.isReadyFor(state.sessionId);
   const settingsMount =
     target === "setting-page" ||
     surface?.surface_id.startsWith("setting-page:");
   const visible =
+    ready &&
     requestedVisible &&
     (settingsMount
       ? state.page === "plugins" && !state.pluginWorkspace
@@ -151,6 +154,24 @@ export function PluginSurface({
   );
   if (entry && !declared) return null;
   if (!registry) return <p role="status">{t("plugins.unavailable")}</p>;
+  if (!ready)
+    return (
+      <div
+        role={plugins.error ? "alert" : "status"}
+        className="client-plugin-notice"
+      >
+        <p>{plugins.error ?? t("plugins.loading")}</p>
+        {plugins.error && (
+          <button
+            type="button"
+            className="ghost-btn"
+            onClick={() => plugins.retrySynchronization(store.getSnapshot())}
+          >
+            {t("plugins.retry")}
+          </button>
+        )}
+      </div>
+    );
   const manage = (
     <button
       type="button"
@@ -203,6 +224,7 @@ export function PluginSurface({
   const outputTicket = output.current.ticket;
   const visibleNow = () => {
     const snapshot = store.getSnapshot();
+    if (!plugins.isReadyFor(snapshot.sessionId)) return false;
     const childOpen =
       snapshot.popup.type === "subagentDetail" &&
       snapshot.popup.parentId === snapshot.sessionId;
@@ -547,12 +569,14 @@ export function PluginSubmitNotice() {
 
 export function PluginSidebar({ children }: { children?: ReactNode }) {
   const plugins = useClientPlugins();
+  const store = useAppStore();
   const { state, dispatch } = useAppFields([
     "sessionId",
     "resolvedLocale",
     "rightOverlayOpen",
     "rightRailCollapsed",
   ]);
+  const ready = plugins.isReadyFor(state.sessionId);
   const narrow = usePluginDrawerViewport();
   const visible = narrow ? state.rightOverlayOpen : !state.rightRailCollapsed;
   const registry = plugins.registry;
@@ -569,61 +593,135 @@ export function PluginSidebar({ children }: { children?: ReactNode }) {
     installed.find((plugin) => plugin.manifest.id === selected) ??
     installed.find((plugin) => !plugin.providesTools) ??
     installed[0];
+  const [compact, setCompact] = useState(false);
+  const compactMode = useRef(false);
+  const restoreChooserFocus = useRef(false);
+  const chooser = useRef<HTMLDivElement>(null);
+  const measurement = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (!restoreChooserFocus.current) return;
+    restoreChooserFocus.current = false;
+    chooser.current
+      ?.querySelector<HTMLElement>('select, [role="tab"][aria-selected="true"]')
+      ?.focus();
+  }, [compact]);
+  const labels = JSON.stringify(
+    installed.map((plugin) => [plugin.manifest.id, plugin.manifest.name]),
+  );
+  useEffect(() => {
+    const container = chooser.current;
+    const strip = measurement.current;
+    if (!container || !strip) return;
+    const measure = () => {
+      const next = strip.getBoundingClientRect().width > container.clientWidth;
+      if (next === compactMode.current) return;
+      restoreChooserFocus.current = container.contains(document.activeElement);
+      compactMode.current = next;
+      setCompact(next);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(container);
+    observer.observe(strip);
+    return () => observer.disconnect();
+  }, [labels, active?.manifest.id, state.resolvedLocale]);
+  const selectPlugin = (id: string, focusTab = false) => {
+    const current = () =>
+      ready &&
+      store.getSnapshot().sessionId === state.sessionId &&
+      plugins.isReadyFor(state.sessionId);
+    if (!current() || id === selected) return;
+    if (id === active?.manifest.id) {
+      setSelected(id);
+      if (focusTab) document.getElementById(`plugin-tab-${id}`)?.focus();
+      return;
+    }
+    requestDocumentLeave(() => {
+      if (!current()) return;
+      setSelected(id);
+      if (focusTab) document.getElementById(`plugin-tab-${id}`)?.focus();
+    }, ".right-sidebar-shell");
+  };
   return (
     <div className="client-plugin-sidebar" data-testid="client-plugin-sidebar">
       <div className="client-plugin-toolbar">
-        <div
-          role="tablist"
-          aria-label={t("plugins.title")}
-          className="client-plugin-tabs"
-          onKeyDown={(event) => {
-            const index = installed.findIndex(
-              (plugin) => plugin.manifest.id === active?.manifest.id,
-            );
-            const next =
-              event.key === "Home"
-                ? 0
-                : event.key === "End"
-                  ? installed.length - 1
-                  : event.key === "ArrowRight"
-                    ? (index + 1) % installed.length
-                    : event.key === "ArrowLeft"
-                      ? (index - 1 + installed.length) % installed.length
-                      : -1;
-            const plugin = installed[next];
-            if (!plugin) return;
-            event.preventDefault();
-            if (plugin.manifest.id !== active?.manifest.id)
-              requestDocumentLeave(() => {
-                setSelected(plugin.manifest.id);
-                document
-                  .getElementById(`plugin-tab-${plugin.manifest.id}`)
-                  ?.focus();
-              }, ".right-sidebar-shell");
-          }}
-        >
-          {installed.map((plugin) => (
-            <button
-              type="button"
-              className="ghost-btn"
-              role="tab"
-              id={`plugin-tab-${plugin.manifest.id}`}
-              aria-selected={active?.manifest.id === plugin.manifest.id}
-              tabIndex={active?.manifest.id === plugin.manifest.id ? 0 : -1}
-              title={plugin.manifest.name}
+        <div className="client-plugin-chooser" ref={chooser}>
+          <div
+            className="client-plugin-tabs client-plugin-tabs-measure"
+            ref={measurement}
+            aria-hidden="true"
+            inert
+          >
+            {installed.map((plugin) => (
+              <span
+                className="ghost-btn"
+                data-selected={active?.manifest.id === plugin.manifest.id}
+                key={plugin.manifest.id}
+              >
+                {plugin.manifest.name}
+              </span>
+            ))}
+          </div>
+          {compact ? (
+            <select
+              className="client-plugin-select"
+              id="client-plugin-sidebar-chooser"
+              aria-label={t("plugins.title")}
               aria-controls="client-plugin-sidebar-panel"
-              key={plugin.manifest.id}
-              onClick={() => {
-                if (plugin.manifest.id !== active?.manifest.id)
-                  requestDocumentLeave(
-                    () => setSelected(plugin.manifest.id),
-                    ".right-sidebar-shell",
-                  );
+              value={active?.manifest.id ?? ""}
+              disabled={!ready || !active}
+              onChange={(event) => selectPlugin(event.currentTarget.value)}
+            >
+              {installed.map((plugin) => (
+                <option key={plugin.manifest.id} value={plugin.manifest.id}>
+                  {plugin.manifest.name}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <div
+              role="tablist"
+              aria-label={t("plugins.title")}
+              className="client-plugin-tabs"
+              onKeyDown={(event) => {
+                const index = installed.findIndex(
+                  (plugin) => plugin.manifest.id === active?.manifest.id,
+                );
+                const next =
+                  event.key === "Home"
+                    ? 0
+                    : event.key === "End"
+                      ? installed.length - 1
+                      : event.key === "ArrowRight"
+                        ? (index + 1) % installed.length
+                        : event.key === "ArrowLeft"
+                          ? (index - 1 + installed.length) % installed.length
+                          : -1;
+                const plugin = installed[next];
+                if (!plugin) return;
+                event.preventDefault();
+                selectPlugin(plugin.manifest.id, true);
               }}
             >
-              {plugin.manifest.name}
-            </button>
-          ))}
+              {installed.map((plugin) => (
+                <button
+                  type="button"
+                  className="ghost-btn"
+                  role="tab"
+                  id={`plugin-tab-${plugin.manifest.id}`}
+                  aria-selected={active?.manifest.id === plugin.manifest.id}
+                  disabled={!ready}
+                  tabIndex={active?.manifest.id === plugin.manifest.id ? 0 : -1}
+                  title={plugin.manifest.name}
+                  aria-controls="client-plugin-sidebar-panel"
+                  key={plugin.manifest.id}
+                  onClick={() => selectPlugin(plugin.manifest.id)}
+                >
+                  {plugin.manifest.name}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
         <div className="client-plugin-toolbar-actions">
           <button
@@ -660,9 +758,12 @@ export function PluginSidebar({ children }: { children?: ReactNode }) {
       )}
       {active ? (
         <section
-          role="tabpanel"
+          role={compact ? "region" : "tabpanel"}
           id="client-plugin-sidebar-panel"
-          aria-labelledby={`plugin-tab-${active.manifest.id}`}
+          aria-label={compact ? active.manifest.name : undefined}
+          aria-labelledby={
+            compact ? undefined : `plugin-tab-${active.manifest.id}`
+          }
           className="client-plugin-panel"
         >
           <PluginSurface

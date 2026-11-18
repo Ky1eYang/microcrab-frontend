@@ -5,25 +5,10 @@ Browser UI, WebAssembly client plugins, and browser Host resources for
 The React/TypeScript UI lives in `frontend/`; run the following commands from the
 repository root.
 
-## v0.1.17 baseline
-
-The `v0_1_17` branch tracks this Frontend source baseline and subsequent fixes.
-Release tags are not retained; version metadata remains `0.1.17`.
-It includes Chat Only/Sandbox mode selection, scoped client-plugin inventory and
-State editing, file citations, lazy rich rendering with bounded chart interactions,
-and the approved cascading workspace picker/settings redesign. npm and local Rust
-workspace packages share version `0.1.17`; dependency pins and WIT/ABI versions
-remain unchanged. Compatible Core/Client releases and separately prepared runtime
-assets are still required; the source baseline does not bundle binaries or private
-configuration.
-
-Implementation acceptance at `9b64191` recorded 128 source-browser cases,
-47 emitted-production cases and 2 production lazy-loading/budget cases passing.
-The release metadata commit separately passed the locked Rust graph check,
-three versioned plugin builds/component validation, TypeScript/Vite production
-build, 52 Host source tests, 47 emitted-production cases and 2 lazy-loading/budget
-cases. npm dependency/integrity and Rust registry/checksum graphs were unchanged.
-These records do not claim a new live Provider/SSO login.
+The UI supports Chat Only and Sandbox conversations, a workspace picker, file
+citations, scoped client plugins and rich Markdown. See the
+[visualizer contract](frontend/src/features/visualizers/README.md) for supported
+formats, limits and test commands.
 
 ## Setup and scripts
 
@@ -59,10 +44,10 @@ different backend.
 New unprojected interactive drafts default to **Chat Only**. The workspace picker
 also offers **Sandbox**, which retains the browser virtual filesystem, shell and
 Python runtime. Draft selection is remembered per backend and authenticated owner.
-Changing the mode allocates a new conversation identity; existing conversation
-Host pins are immutable. Historical browser conversations retain Sandbox through
-the Client's persisted conversation grant; projectless delegated or one-shot
-Sessions do not acquire a browser Host merely because they have no Project.
+Changing the mode allocates a new conversation identity. Existing conversations
+keep their immutable Host pins, including Sandbox for existing browser grants.
+Projectless delegated or one-shot Sessions do not acquire a browser Host merely
+because they have no Project.
 
 Chat Only uses a pure TypeScript protocol peer and loads no browser execution
 manifest, Worker or WASM. It advertises no Host tool capabilities or execution
@@ -79,6 +64,32 @@ The canonical descriptor fixture under `frontend/tests/fixtures/` is shared with
 the Client's Rust fingerprint verification; descriptor capability assertions alone
 do not certify the actual Agent model tool catalog.
 
+## Native Host mismatch recovery
+
+A `binding_mismatch` response pauses automatic connection attempts for that exact
+Project and candidate URL/directory. `host_preflight_unsupported` separately asks
+for a Bridge upgrade. The existing API error envelope remains
+`{error:{code,message,retryable,details}}`; mismatch guidance uses only closed
+Server reasons and does not infer that the Host was upgraded.
+
+These browser-local hints are partitioned by backend, authenticated owner, browser
+identity and Project. They survive reload and same-owner authentication changes;
+changing the URL or directory selects a new candidate. Only a verified compatible
+attachment clears its hint. An explicit **Connect Host** allows one new check,
+including a restored compatible Bridge at the same URL. Failed manual checks do
+not erase previous incompatibility. At most 128 recent candidate hints are retained;
+only candidate hashes and closed classifications are persisted, with an in-memory
+fallback when storage is unavailable. This is not Server binding authority.
+
+History and drafts stay available. Recovery uses existing project selection, Host
+configuration or a different workspace. The same Host workspace redirects to its
+canonical existing Project; recovery never bypasses duplicate-workspace ownership,
+rebinds a Project or deletes/archives historical Sessions. Switching the selected
+browser relay retains its existing exact route-release semantics; these hints do
+not introduce multiple simultaneous selected relays.
+
+Focused source-browser coverage: `frontend/tests/host-mismatch-isolation.spec.ts`.
+
 ## Plugins and browser Host resources
 
 UI setup/build does not prepare plugin components or browser Host runtime assets.
@@ -86,12 +97,12 @@ For the Rust tasks, use an edition-2024-capable Rust toolchain and prefetch the
 locked Cargo dependencies separately: the `cargo xtask` alias runs locked and
 offline. On Windows, the checked-in Cargo configuration expects `rust-lld.exe`.
 
-Client plugins require the toolchain's `wasm32-unknown-unknown` target and
-`wasm-tools` on `PATH`. `npm run plugins:build` installs components and discovery
-metadata under `frontend/public/plugins/`. Plugin sources and WIT are retained
-under `crates/client/plugins/`. The [plugin tool and MCP contract](docs/client-plugin-tools.md)
-describes the optional asynchronous ABI, external inventory, scoped LocalStorage
-resource grants, bounded MCP discovery, and required acceptance checks.
+For Rust plugin fixtures, install the toolchain's `wasm32-unknown-unknown` target
+and put `wasm-tools` on `PATH`. `npm run plugins:build` installs Rust fixtures and
+compatibility components under `frontend/public/plugins/`. The
+[plugin tool and MCP contract](docs/client-plugin-tools.md#build-and-acceptance)
+has the maintained Zig plugin build and staging instructions. The canonical WIT is
+in [`crates/client/plugins/wit`](crates/client/plugins/wit).
 
 For the browser Host, prepare the custom wasmsh **0.5.1** / Pyodide **0.29.3**
 distribution separately. Stock Pyodide does not provide the required wasmsh
@@ -114,12 +125,10 @@ Host source refresh is an explicit HTTPS operation against a full 40-character
 commit in the core repository. It uses the checked-in `browser-host.sources.json`
 and an allowlist in `scripts/refresh-browser-host.mjs`. Without `--write`, it only
 validates downloads; with `--write`, it replaces source files and records their
-hashes and upstream commit. It does not update runtime binaries. The ignored
-`split-project.json` is local split bookkeeping and is not required by a clone.
+hashes and upstream commit. Runtime binaries are prepared separately.
 
 Generated components, runtime assets, dependencies, build output, and private
-configuration are excluded from Git. This repository preparation does not imply
-that dependency installation, full builds, or browser integration tests passed.
+configuration are excluded from Git.
 
 ## License
 

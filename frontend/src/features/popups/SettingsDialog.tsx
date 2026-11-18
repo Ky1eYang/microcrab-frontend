@@ -1,3 +1,4 @@
+import { ExternalSpeakersSettings } from "./ExternalSpeakersSettings";
 import { OwnerSettings, ProvidersSettings } from "./OwnerSettings";
 import {
   browserHostOrigins,
@@ -416,10 +417,13 @@ export function SettingsDialog() {
               )}
               {p.tab === "session-config" &&
                 (state.sessionId ? (
-                  <OwnerSettings
-                    key={`${networkOwner}:${state.sessionId}`}
-                    scope={{ kind: "session", id: state.sessionId }}
-                  />
+                  <>
+                    <OwnerSettings
+                      key={`${networkOwner}:${state.sessionId}`}
+                      scope={{ kind: "session", id: state.sessionId }}
+                    />
+                    <ExternalSpeakersSettings scope={{ kind: "session", id: state.sessionId }} />
+                  </>
                 ) : (
                   <p className="inline-notice">
                     {t("ownerSettings.selectSession")}

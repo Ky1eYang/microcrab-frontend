@@ -58,6 +58,7 @@ AppStore.prototype.start = function() {
     browserCalls.push({id,owner,flavor});
     await gate;
     if (fail) throw Error('fixture browser runtime unavailable');
+    return {host:null,scope:{scope_version:3,scope_kind:'conversation',binding_id:'fixture-binding',conversation_id:id},flavor,generation:flavor==='chat_only'?null:'fixture-generation',serverOwned:flavor==='chat_only',participant:false};
   };
   store.api.request = async (method,params={},sessionId) => {
     calls.push({method,params,sessionId});
@@ -495,16 +496,23 @@ test("Chat Only refresh selects compatible Coding when previous Universal is abs
   expect(state.host.catalogReady).toBe(true);
 });
 
-
-test("an existing Sandbox session mode choice creates a new Chat Only conversation without detaching its pinned Host", async ({ page }) => {
+test("an existing Sandbox session mode choice creates a new Chat Only conversation without detaching its pinned Host", async ({
+  page,
+}) => {
   await mount(page, { restore: true });
   await ready(page);
-  await page.evaluate(() => (window as any).defaultBrowserFixture.selectBrowser("chat_only"));
+  await page.evaluate(() =>
+    (window as any).defaultBrowserFixture.selectBrowser("chat_only"),
+  );
   const state = await read(page);
   expect(state.sessionId).toBeNull();
   expect(state.draftId).not.toBe("restored-browser");
   expect(state.browserCalls).toEqual([
-    { id: "restored-browser", owner: "default-owner", flavor: "browser_sandbox" },
+    {
+      id: "restored-browser",
+      owner: "default-owner",
+      flavor: "browser_sandbox",
+    },
     { id: state.draftId, owner: "default-owner", flavor: "chat_only" },
   ]);
   expect(state.disconnects).toEqual([]);

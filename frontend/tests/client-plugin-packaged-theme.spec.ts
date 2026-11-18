@@ -1,3 +1,4 @@
+import { selectSidebarPlugin } from "./plugin-sidebar-selection";
 import { expect, test, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -23,7 +24,7 @@ async function openSidebar(page: Page) {
   const sidebar = page.getByTestId("client-plugin-sidebar");
   if (!(await sidebar.isVisible()))
     await page.locator(".header-right-toggle-btn").click();
-  await sidebar.getByRole("tab", { name: "State Viewer", exact: true }).click();
+  await selectSidebarPlugin(sidebar, "State Viewer");
   const webview = sidebar.getByTestId("plugin-webview");
   await expect(webview).toHaveAttribute("data-status", "ready");
   return webview;
@@ -120,6 +121,17 @@ test("assembled exact predecessor upgrades without resetting choices and manager
     previous,
   );
   await viewer.getByLabel("优先级", { exact: true }).fill("7");
+  await expect(manager).toHaveAttribute("aria-busy", "false");
+  // Pin this Session's explicit choice before changing the default for new choices.
+  await viewer.getByLabel("在当前会话启用", { exact: true }).click();
+  await expect(
+    viewer.getByLabel("在当前会话启用", { exact: true }),
+  ).not.toBeChecked();
+  await expect(manager).toHaveAttribute("aria-busy", "false");
+  await viewer.getByLabel("在当前会话启用", { exact: true }).click();
+  await expect(
+    viewer.getByLabel("在当前会话启用", { exact: true }),
+  ).toBeChecked();
   await expect(manager).toHaveAttribute("aria-busy", "false");
   await viewer.getByLabel("新会话默认启用", { exact: true }).click();
   await expect(

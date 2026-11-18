@@ -27,29 +27,45 @@ export function RightRail() {
   const [dragging, setDragging] = useState(false);
   const shell = useRef<HTMLElement>(null);
   const start = useRef({ x: 0, width: state.rightRailWidth });
-  const clamp = (requested: number) => {
-    const cap = Math.max(
-      0,
-      window.innerWidth - (state.railCollapsed ? 60 : 260) - 640,
-    );
-    return Math.round(Math.max(280, Math.min(requested, cap)));
-  };
+  const activeDrag = useRef(false);
+  const narrow = usePluginDrawerViewport();
+  const [available, setAvailable] = useState<number | null>(null);
+  const maximum = narrow
+    ? Math.floor(window.innerWidth * 0.85)
+    : Math.floor(((available ?? window.innerWidth) * 2) / 3);
+  const minimum = Math.min(280, maximum);
+  const clamp = (requested: number) =>
+    Math.max(minimum, Math.min(Math.round(requested), maximum));
+  const fittedWidth = clamp(state.rightRailWidth);
+  const [preview, setPreview] = useState<number | null>(null);
   const paint = (width: number) => {
-    if (shell.current) {
-      shell.current.style.width = `${width}px`;
-      shell.current.style.minWidth = `${width}px`;
-      shell.current.style.maxWidth = `${width}px`;
-    }
+    if (shell.current)
+      shell.current.style.setProperty("--right-rail-width", `${width}px`);
+    setPreview(width);
   };
   const clear = (width: number) => {
-    if (shell.current) {
-      shell.current.style.setProperty("--right-rail-width", `${width}px`);
-      shell.current.style.removeProperty("width");
-      shell.current.style.removeProperty("min-width");
-      shell.current.style.removeProperty("max-width");
-    }
+    paint(width);
+    setPreview(null);
   };
-  const narrow = usePluginDrawerViewport();
+  useEffect(() => {
+    const parent = shell.current?.parentElement;
+    if (!parent) return;
+    const measure = () => setAvailable(parent.clientWidth);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(parent);
+    return () => observer.disconnect();
+  }, [
+    canShowRightRail,
+    state.rightRailCollapsed,
+    state.rightOverlayOpen,
+    state.railCollapsed,
+    narrow,
+  ]);
+  useEffect(() => {
+    if (available !== null && fittedWidth !== state.rightRailWidth)
+      void dispatch({ type: "SetRightRailWidth", value: fittedWidth });
+  }, [dispatch, available, fittedWidth, state.rightRailWidth]);
   useEffect(() => {
     const fit = () => void dispatch({ type: "FitPluginRail" });
     fit();
@@ -88,7 +104,14 @@ export function RightRail() {
         return;
       }
       if (event.key !== "Escape" || event.defaultPrevented) return;
-      if (!shell.current?.contains(document.activeElement)) return;
+      const active = document.activeElement;
+      if (
+        !shell.current?.contains(active) &&
+        active !== document.body &&
+        active !== document.documentElement &&
+        !active?.matches(".header-right-toggle-btn")
+      )
+        return;
       event.preventDefault();
       closeOverlay();
     };
@@ -96,7 +119,8 @@ export function RightRail() {
     return () => document.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [overlay]);
-  if (!canShowRightRail || (narrow ? !overlay : state.rightRailCollapsed)) return null;
+  if (!canShowRightRail || (narrow ? !overlay : state.rightRailCollapsed))
+    return null;
   return (
     <>
       {overlay && (
@@ -114,7 +138,10 @@ export function RightRail() {
         data-overlay={overlay}
         aria-label="Plugins"
         style={
-          { "--right-rail-width": `${state.rightRailWidth}px` } as CSSProperties
+          {
+            "--right-rail-width": `${preview ?? fittedWidth}px`,
+            "--right-rail-max-width": `${maximum}px`,
+          } as CSSProperties
         }
         data-resizing={dragging}
       >
@@ -125,39 +152,46 @@ export function RightRail() {
           role="separator"
           aria-label={t("rail.resizePlugins")}
           aria-orientation="vertical"
-          aria-valuemin={280}
-          aria-valuenow={state.rightRailWidth}
+          aria-valuemin={minimum}
+          aria-valuemax={maximum}
+          aria-valuenow={preview ?? fittedWidth}
           tabIndex={narrow ? -1 : 0}
           onKeyDown={(event) => {
-            if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+            if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key))
+              return;
             event.preventDefault();
             const current =
-              shell.current?.getBoundingClientRect().width ??
-              state.rightRailWidth;
+              shell.current?.getBoundingClientRect().width ?? fittedWidth;
             void dispatch({
               type: "SetRightRailWidth",
-              value: clamp(current + (event.key === "ArrowLeft" ? 16 : -16)),
+              value:
+                event.key === "Home"
+                  ? minimum
+                  : event.key === "End"
+                    ? maximum
+                    : clamp(current + (event.key === "ArrowLeft" ? 16 : -16)),
             });
           }}
           onPointerDown={(e) => {
             if (e.button !== 0) return;
             e.preventDefault();
             e.stopPropagation();
+            activeDrag.current = true;
             e.currentTarget.setPointerCapture(e.pointerId);
             start.current = {
               x: e.clientX,
               width:
-                shell.current?.getBoundingClientRect().width ??
-                state.rightRailWidth,
+                shell.current?.getBoundingClientRect().width ?? fittedWidth,
             };
             setDragging(true);
           }}
           onPointerMove={(e) => {
-            if (dragging)
+            if (activeDrag.current)
               paint(clamp(start.current.width - e.clientX + start.current.x));
           }}
           onPointerUp={(e) => {
-            if (!dragging) return;
+            if (!activeDrag.current) return;
+            activeDrag.current = false;
             e.stopPropagation();
             e.currentTarget.releasePointerCapture(e.pointerId);
             setDragging(false);
@@ -168,9 +202,16 @@ export function RightRail() {
             dispatch({ type: "SetRightRailWidth", value: width });
           }}
           onPointerCancel={(e) => {
-            if (!dragging) return;
+            if (!activeDrag.current) return;
+            activeDrag.current = false;
             e.currentTarget.releasePointerCapture(e.pointerId);
-            clear(start.current.width);
+            clear(clamp(start.current.width));
+            setDragging(false);
+          }}
+          onLostPointerCapture={() => {
+            if (!activeDrag.current) return;
+            activeDrag.current = false;
+            clear(clamp(start.current.width));
             setDragging(false);
           }}
         />

@@ -1,3 +1,4 @@
+import { expectedPluginVariables } from "./input-inventory-expectation";
 import { expect, test } from "@playwright/test";
 import { nativeBackend, nativeSnapshot } from "./native-fixture";
 import { connectHostUI } from "./host-fixture";
@@ -76,7 +77,10 @@ for (const mode of ["queue", "steer"] as const) {
     );
     expect(request.params).toEqual({
       operation_id: expect.any(String),
-      input: { parts: [{ type: "text", text: `Later ${mode} input` }] },
+      input: {
+        parts: [{ type: "text", text: `Later ${mode} input` }],
+        variables: expectedPluginVariables(true),
+      },
     });
     expect(
       backend.commands.filter((command) => command.method === "turn.submit"),
@@ -254,6 +258,7 @@ for (const mode of ["queue", "steer"] as const) {
         params: {
           operation_id: expect.any(String),
           input: {
+            variables: expectedPluginVariables(),
             parts: [
               parts[0],
               {
@@ -539,6 +544,7 @@ test("inbox admission enforces auth, Host, child, pending, image and wire-size l
       params: {
         operation_id: expect.any(String),
         input: {
+          variables: expectedPluginVariables(),
           parts: [
             {
               type: "image",
@@ -647,6 +653,7 @@ for (const mode of ["queue", "steer"] as const) {
     expect(request.params).toEqual({
       operation_id: expect.any(String),
       input: {
+        variables: expectedPluginVariables(true),
         parts: [
           {
             type: "image",

@@ -1,3 +1,4 @@
+import { selectSidebarPlugin } from "./plugin-sidebar-selection";
 import { maintainedPluginBundle } from "./plugin-bundle-fixture";
 import { stateInspection } from "./state-inspection-fixture";
 import { expect, test } from "@playwright/test";
@@ -106,7 +107,7 @@ test(`expanded Viewer via ${entry} fetches full framework State and hides initia
     await page.goto("/#/session/s1");
     await page.locator(".header-right-toggle-btn").click();
     const sidebar = page.getByTestId("client-plugin-sidebar");
-    await sidebar.getByRole("tab", { name: "State Viewer", exact: true }).click();
+    await selectSidebarPlugin(sidebar, "State Viewer");
     await sidebar.getByTestId("plugin-expand").click();
   } else {
     await page.goto("/#/session/s1/plugins/microcrab.state-viewer");

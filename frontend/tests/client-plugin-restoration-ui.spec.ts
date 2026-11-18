@@ -36,26 +36,33 @@ for (const width of [1440, 390]) {
     );
     await viewer.getByRole("button", { name: "移除", exact: true }).click();
     await expect(viewer).toHaveCount(0);
+    await expect(manager).toHaveAttribute("aria-busy", "false");
     await page.reload();
     await expect(manager).toBeVisible();
     await expect(manager.getByTestId("plugins-restore-bundled")).toHaveCount(0);
     await expect(
       manager.locator('[data-plugin-nav-id="microcrab.state-viewer"]'),
     ).toHaveCount(0);
+    await expect(manager).toHaveAttribute("aria-busy", "false");
+    const upload = manager.getByTestId("plugin-upload");
+    await expect(upload).toBeEnabled();
+    await upload.setInputFiles({
+      name: "state-viewer.wasm",
+      mimeType: "application/wasm",
+      buffer: Buffer.from(bytes),
+    });
+    await expect(manager).toHaveAttribute("aria-busy", "false");
     await manager
-      .getByTestId("plugin-upload")
-      .setInputFiles({
-        name: "state-viewer.wasm",
-        mimeType: "application/wasm",
-        buffer: Buffer.from(bytes),
-      });
+      .locator('[data-plugin-nav-id="microcrab.state-viewer"]')
+      .click();
     await expect(viewer).toHaveAttribute("data-status", "disabled");
-    await viewer.getByLabel("在当前会话启用").check();
+    await viewer.getByLabel("在当前会话启用").click();
+    await expect(viewer.getByLabel("在当前会话启用")).toBeChecked();
     await expect(viewer).toHaveAttribute("data-status", "ready");
     await expect(
       viewer.getByRole("button", { name: "展开", exact: true }),
     ).toHaveCount(0);
-    await viewer.getByLabel("在当前会话启用").uncheck();
+    await viewer.getByLabel("在当前会话启用").click();
     await expect(viewer.getByLabel("在当前会话启用")).not.toBeChecked();
     await expect(manager).toHaveAttribute("aria-busy", "false");
     await page.reload();

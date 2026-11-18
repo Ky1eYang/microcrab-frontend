@@ -66,6 +66,9 @@ export function wireFailure(value: unknown): NativeWireError {
     !Array.isArray(raw.details)
   ) {
     const safe = diagnosticDetails(raw.details);
+    const source = raw.details as Record<string, unknown>;
+    if (safe.provider_code === "empty_assistant_response" && typeof source.reasoning_present === "boolean")
+      safe.reasoning_present = source.reasoning_present;
     if (
       failure.code === "limit" &&
       (typeof safe.reason !== "string" || !reasons.has(safe.reason))
@@ -99,6 +102,8 @@ export function failureBlockText(value: unknown): string {
 export function failureText(value: unknown): string {
   const failure = wireFailure(value),
     details = failure.details ?? {};
+  if (failure.code === "provider" && details.provider_code === "empty_assistant_response")
+    return t(details.reasoning_present === true ? "failure.emptyReasoningResponse" : "failure.emptyResponse");
   if (failure.code === "cancelled") {
     const reason = details.cancel_reason;
     if (typeof reason !== "string" || !cancelReasons.has(reason))

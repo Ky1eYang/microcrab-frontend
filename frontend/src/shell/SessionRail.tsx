@@ -10,6 +10,7 @@ import { useAppFields, sessionActiveTime } from "../state";
 import { Icon } from "./Icon";
 import { t } from "../i18n";
 import { hostReason } from "../features/popups/RemoteConnectDialog";
+import { projectHostTerminal } from "../state/host-readiness";
 import { UserCard } from "./UserCard";
 import { GlyphIcon } from "../features/shared";
 import { focusFirst, trapFocus, useNarrowViewport } from "../client/viewport";
@@ -224,6 +225,9 @@ export function SessionRail() {
     "filter",
     "hostConnection",
     "knownProjects",
+    "projects",
+    "apiBase",
+    "authSession",
     "menuProject",
     "menuSession",
     "page",
@@ -455,6 +459,7 @@ export function SessionRail() {
                 const project = state.knownProjects.find(
                   (p) => projectIdentity(p) === id,
                 );
+                const terminal = projectHostTerminal(state, id);
                 const path =
                   project?.path ??
                   rows[0]?.workspace?.root ??
@@ -498,7 +503,7 @@ export function SessionRail() {
                       <span className="rail-project-title" title={name}>
                         {name}
                       </span>
-                      {(project?.host_connected === false ||
+                      {(terminal || project?.host_connected === false ||
                         project?.status === "offline" ||
                         (!!rows.length &&
                           rows.every((s) => s.reachable === false))) && (
@@ -506,8 +511,9 @@ export function SessionRail() {
                           type="button"
                           className="project-host-warn"
                           data-testid="project-host-warn"
-                          aria-label={t("rail.hostOffline")}
+                          aria-label={terminal ? t(`host.status.${terminal}`) : t("rail.hostOffline")}
                           title={(() => {
+                            if (terminal) return t(`host.status.${terminal}`);
                             const conn = state.hostConnection;
                             const reason =
                               project && conn && conn.projectId === project.id

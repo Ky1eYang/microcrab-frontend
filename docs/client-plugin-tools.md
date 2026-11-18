@@ -1,8 +1,7 @@
 # Browser plugin tools and MCP bridge
 
-Status: implemented frontend contract with the generic Store adapter integrated
-and the retired hardcoded MCP catalog removed. Verification and release status
-are tracked by the superproject; no Core Session schema field is added.
+The frontend owns client plugin tools and their generic Store adapter. This
+contract adds no Core Session schema field.
 
 ## Discovery and execution
 
@@ -22,6 +21,17 @@ therefore persists as the last submitted observation and is refreshed (including
 to an empty inventory) on each new input operation. Frozen admitted input/history
 retains its original summary. The summary never grants plugin/tool/network
 authority: dispatch still checks live owner, enablement, artifact and target pins.
+
+New catalogs use one flat closed object schema for `plugin`: `plugin`, `artifact`,
+`action`, `server`, `tool`, `pin`, `arguments`, `config_pin`, `schema_pin`, `cursor`, `limit`.
+Only the first three fields are globally required; runtime action validators keep the
+same conditional requirements, mutual exclusions, exact pins and bounds. Flattening
+removes conditional `oneOf`/Boolean-false branches from the advertised schema; it is
+a compatibility mitigation, not proof of the cause of all-null arguments. Browser
+semantic checks still reject invalid action combinations before effects, potentially
+after normal permission admission. An exact recognized
+frozen short16 `oneOf` catalog still receives short inventory; unknown legacy schemas
+retain full64 compatibility. New definitions never rewrite a frozen Context epoch.
 
 A plugin's release `version` is descriptive, code-side update metadata. It does not
 identify executable bytes, authorize effects, select automatic updates, or impose a
@@ -75,9 +85,26 @@ budget. The registry also remembers bounded invocation IDs and rejects duplicate
 A nonpositive `deadline_ms` means no external invocation deadline: dispatch and
 asynchronous context checks remain live until completion or explicit cancellation,
 and no expiry timer is armed. Positive deadlines expire normally. Individual Host
-effects retain a 10-second budget capped by any positive invocation deadline;
-cancellation cleanup retains its separate one-second bound. An unbounded invocation
-does not grant unbounded network/effect execution or replay authority.
+HTTP effects use the plugin's Host-owned `request_timeout_ms` preference: default
+10000 ms, integer bounds10000–300000 ms. Plugin manager → select any plugin →
+HTTP request timeout (seconds) → Save timeout configures10–300 seconds;120 seconds
+is suggested for long requests. The preference is public Host configuration, stored
+per server origin, authenticated owner and plugin id; it survives reload, artifact
+replacement and local-data reset/removal, independently of guest KV and endpoint
+credentials. No plugin-specific Host branch or declared SettingPage is required.
+
+The optional additive JSON context field `host_http_timeout_ms` exposes the trusted
+invocation snapshot without changing WIT ABI0.4. Direct `net.http` and configured
+resource HTTP GET/POST share one registry timer. Guests must snapshot this value
+with each pending HTTP task, so their observational retention cannot expire before
+that task's original Host deadline. A preference edit affects future invocations;
+it never shortens an in-flight request. The Host uses its own captured context,
+never a guest payload or returned Worker context, as timer authority. Existing
+positive tool deadlines still cap HTTP and cancellation cleanup keeps its separate
+one-second bound. Non-HTTP effects retain10 seconds; synchronous Worker calls,
+mutation ACK observation and WebSocket limits are independent. Timeout replies retain
+`plugin host effect exceeded <effective-ms>ms deadline`. No deadline or cancellation
+permits automatic replay or grants additional endpoint/owner authority.
 
 The maintained Zig MCP Bridge declares `sidebar` and `setting-page`: Sidebar is
 observation-only, while SettingPage owns server configuration. It contributes no
@@ -86,6 +113,23 @@ Session tab or expanded page. The maintained Zig State Viewer declares only
 The Rust State Viewer behavioral fixture also declares `setting-page`. With no
 selected Session, that fixture returns an English/Chinese Session-required notice
 before any State import, using the host's flat `ctx.session_id` and `ctx.locale` fields.
+
+## Participation and private dispatch
+
+New catalogs include the first-party `request_secret` human interaction beside
+questions/todos. Registry declarations distinguish human replies from ordinary plugin
+producer work. Every authenticated same-owner bound participant may submit/decline an
+exact pending human request; only the current executor runs ordinary plugin calls or
+submits producer output. Public records retain original placeholders and sanitized
+receipts. The exact live executor retrieves resolved arguments through the private
+`client_tools.arguments` response immediately before dispatch; that value is not placed
+in application state, bind snapshots or generic history. Cancellation revokes retrieval.
+
+Secret input uses uncontrolled masked DOM fields, dedicated operation UUIDs and
+read-only operation observation after unknown acknowledgements. Public completion means
+the private write finished, not that an ephemeral value survives restart. Framework
+literal output masking does not make downstream guest memory or external endpoints a
+certified transient store; authorized guests may retain their own argument copies.
 
 ## Explicit versioned ABI
 
@@ -117,8 +161,9 @@ Their bytes, preferences and KV remain retained; startup never silently upgrades
 unsupported ABI through bundled predecessor repair. Explicit owner replacement is
 required, and no mutation is replayed to migrate an old guest.
 
-`npm run test:plugin-abi` proves real retained 0.2/0.3 Components are rejected before
-execution, then exercises newly built 0.4 Components using the actual inspector,
+From the Frontend repository root, run `npm --prefix frontend run test:plugin-abi`.
+The gate checks that real retained 0.2/0.3 Components are rejected before
+execution, then exercises built 0.4 Components using the actual inspector,
 jco instantiation, typed manifests, renders and optional tool exports. The outer
 `cargo xtask wasm zig-plugins` stages the maintained Zig guests;
 `cargo xtask wasm plugins` stages the Rust behavioral fixtures. Select and stage
@@ -235,11 +280,16 @@ defaults, argument coercions, regex execution, or remote schema fetches.
 
 ## Build and acceptance
 
-Build maintained plugins through `cargo xtask wasm zig-plugins -p state-viewer
--p mcp-bridge`, optionally selecting `--frontend-plugins` source and explicit
-`--install-dir` destination. Without installation this produces validated WIT
-Components only; actual optimization defaults to ReleaseSmall. Root Zig registrations
-own IDs/worlds/assets, with cache-generated HTML. Direct `zig build install-frontend`
+From the superproject root, build and stage the maintained Zig plugins with:
+
+```sh
+cargo xtask wasm zig-plugins -p state-viewer -p mcp-bridge --install-dir microcrab-frontend/frontend/public/plugins
+```
+
+Use `--frontend-plugins PATH` to select a different Zig checkout. Omit
+`--install-dir` for a build and validation without installation. Optimization
+defaults to ReleaseSmall. Zig registrations own IDs, worlds and assets, with
+cache-generated HTML. Direct `zig build install-frontend`
 aggregates both approved public directories; an explicit destination replaces these
 defaults. Installation preserves unrelated entries/defaults, verifies immutable bytes,
 and atomically merges one bounded pointer per destination under locks. Explicit
@@ -258,6 +308,6 @@ argument validation. `frontend/tests/client-plugin-tool-hub.spec.ts` exercises
 LocalStorage/grant isolation, artifact replacement, revocation, incremental live
 SSE, a maintained real component/worker asynchronous invocation, two-server MCP
 handshake/pagination/calls, schema/config pins, invalid arguments, cancellation,
-no replay, and frozen input caching. The maintained runtime suite verifies retained
-ABI0.2 visual guests. TypeScript checks and a production frontend build remain
-required consumers. Build/compile/test acceptance does not imply deployment.
+no replay, and frozen input caching. Run the ABI gate above for retained-component
+rejection. Run `npm run check` and `npm run build` from the Frontend repository
+root to check TypeScript and build the production application.

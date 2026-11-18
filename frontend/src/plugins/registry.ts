@@ -1,3 +1,4 @@
+import { HTTP_REQUEST_TIMEOUT, validateHttpRequestTimeout } from "./http-deadline";
 import {
   authorizeKind,
   binaryImports,
@@ -13,6 +14,7 @@ import {
   validateProjection,
   resolveViewState,
   validateBlockSlot,
+  validateBlockTextVariant,
   writePath,
 } from "./schema";
 import {
@@ -24,6 +26,7 @@ import {
 import {
   LIMITS,
   type BlockSlot,
+  type BlockTextVariant,
   type HostEffectHandler,
   type InstalledPlugin,
   type Json,
@@ -64,7 +67,7 @@ interface Live {
   eventTimes: number[];
   queue: Promise<unknown>;
   queued: number;
-  controllers: Set<AbortController>;
+  controllers: Map<AbortController, string | undefined>;
   network: PluginNetwork;
   resources: PluginResources;
   ready: boolean;
@@ -92,6 +95,20 @@ export class PluginRegistry implements PluginRegistryAPI {
   private listeners = new Set<() => void>();
   private snapshot: readonly InstalledPlugin[] = [];
   private preferences: Preferences = { sessions: {}, tombstones: [] };
+  private preferenceWrites: Promise<void> = Promise.resolve();
+  private updatePreferences(update: (draft: Preferences) => void): Promise<void> {
+    const operation = this.preferenceWrites.then(async () => {
+      this.assertActive();
+      const draft = structuredClone(this.preferences);
+      update(draft);
+      await this.store.savePreferences(draft);
+      this.assertActive();
+      this.preferences = draft;
+    });
+    this.preferenceWrites = operation.catch(() => {});
+    return operation;
+  }
+  private resultContexts = new WeakMap<PluginResult, PluginContext>();
   private pending = new Map<number, Pending>();
   private cleanupTools = new Map<
     string,
@@ -131,6 +148,38 @@ export class PluginRegistry implements PluginRegistryAPI {
   private disposed = false;
   private initialized?: Promise<void>;
   private slots = new Map<string, BlockSlot & { pluginId: string }>();
+  private variants = new Map<string, BlockTextVariant & { pluginId: string }>();
+  getBlockVariants(blockId: string, sourceText?: string): readonly (BlockTextVariant & { pluginId: string })[] {
+    const source = this.settled.get(blockId)?.payload;
+    if (!source || typeof source !== "object" || Array.isArray(source) ||
+        (sourceText !== undefined && source.text !== sourceText)) return [];
+    return [...this.variants.values()].filter((variant) =>
+      variant.block_id === blockId && this.isEnabled(variant.pluginId) &&
+      this.plugins.get(variant.pluginId)?.status === "ready" &&
+      variant.source_digest === source.source_digest &&
+      variant.history_revision === source.history_revision);
+  }
+  private variantBytes(variants = this.variants): number {
+    return new TextEncoder().encode(JSON.stringify([...variants.values()])).byteLength;
+  }
+  private retireVariantSurfaces(blockId: string, pluginId?: string, variantId?: string): void {
+    for (const [id, instance] of this.live) {
+      if (pluginId !== undefined && pluginId !== id) continue;
+      for (const [key, mount] of instance.surfaces) {
+        if (mount.descriptor.target === "block-slot" && mount.descriptor.block_id === blockId &&
+            (variantId === undefined || mount.descriptor.slot_id === variantId)) {
+          instance.surfaces.delete(key);
+          instance.trees.delete(key);
+          for (const [controller, surfaceId] of instance.controllers)
+            if (surfaceId === key) {
+              controller.abort(new Error("block variant retired"));
+              instance.controllers.delete(controller);
+            }
+        }
+      }
+      instance.network.retireStale();
+    }
+  }
   private settled = new Map<string, { payload: Json; bytes: number }>();
   private settledBytes = 0;
   private historyGeneration = 0;
@@ -323,11 +372,8 @@ export class PluginRegistry implements PluginRegistryAPI {
     generation: number,
     surface?: PluginSurfaceDescriptor,
   ): PluginContext {
-    const mount = surface
-      ? [...this.live.values()]
-          .find((live) => live.generation === generation)
-          ?.surfaces.get(surface.surface_id)
-      : undefined;
+    const entry = [...this.live.entries()].find(([, live]) => live.generation === generation);
+    const mount = surface ? entry?.[1].surfaces.get(surface.surface_id) : undefined;
     return {
       schema_version: 1,
       server_origin: new URL(this.options.serverOrigin).origin,
@@ -336,6 +382,7 @@ export class PluginRegistry implements PluginRegistryAPI {
       instance_generation: generation,
       ...this.environment,
       history_generation: this.historyGeneration,
+      host_http_timeout_ms: entry ? this.getHttpRequestTimeout(entry[0]) : HTTP_REQUEST_TIMEOUT.defaultMs,
       host_time_ms: Date.now(),
       host_monotonic_ms: performance.now(),
       ...(surface
@@ -566,25 +613,26 @@ export class PluginRegistry implements PluginRegistryAPI {
     this.assertActive();
     this.plugins.set(id, p);
     this.artifactReferences.set(id, referenceAvailable ? artifact : null);
-    this.preferences.tombstones = this.preferences.tombstones.filter(
-      (x) => x !== id,
-    );
-    if (invocation?.sessionId !== undefined && invocation.sessionId !== null) {
-      let choices = ownRecordValue(
-        this.preferences.sessions,
-        invocation.sessionId,
+    await this.updatePreferences((draft) => {
+      draft.tombstones = draft.tombstones.filter(
+        (x) => x !== id,
       );
-      if (!choices) {
-        choices = {};
-        setRecordValue(
-          this.preferences.sessions,
+      if (invocation?.sessionId !== undefined && invocation.sessionId !== null) {
+        let choices = ownRecordValue(
+          draft.sessions,
           invocation.sessionId,
-          choices,
         );
+        if (!choices) {
+          choices = {};
+          setRecordValue(
+            draft.sessions,
+            invocation.sessionId,
+            choices,
+          );
+        }
+        setRecordValue(choices, id, p.enabledByDefault);
       }
-      setRecordValue(choices, id, p.enabledByDefault);
-    }
-    await this.store.savePreferences(this.preferences);
+    });
     this.assertActive();
     this.publish();
     if (
@@ -601,11 +649,12 @@ export class PluginRegistry implements PluginRegistryAPI {
     await this.store.remove(id);
     this.plugins.delete(id);
     this.artifactReferences.delete(id);
-    if (!this.preferences.tombstones.includes(id))
-      this.preferences.tombstones.push(id);
-    for (const enabled of Object.values(this.preferences.sessions))
-      delete enabled[id];
-    await this.store.savePreferences(this.preferences);
+    await this.updatePreferences((draft) => {
+      if (!draft.tombstones.includes(id))
+        draft.tombstones.push(id);
+      for (const enabled of Object.values(draft.sessions))
+        delete enabled[id];
+    });
     this.publish();
   }
   async restart(id: string): Promise<void> {
@@ -659,13 +708,14 @@ export class PluginRegistry implements PluginRegistryAPI {
     enabled: boolean,
   ): Promise<void> {
     this.require(id);
-    let choices = ownRecordValue(this.preferences.sessions, sessionId);
-    if (!choices) {
-      choices = {};
-      setRecordValue(this.preferences.sessions, sessionId, choices);
-    }
-    setRecordValue(choices, id, enabled);
-    await this.store.savePreferences(this.preferences);
+    await this.updatePreferences((draft) => {
+      let choices = ownRecordValue(draft.sessions, sessionId);
+      if (!choices) {
+        choices = {};
+        setRecordValue(draft.sessions, sessionId, choices);
+      }
+      setRecordValue(choices, id, enabled);
+    });
     if (sessionId === this.sessionId) {
       if (enabled) await this.start(id);
       else this.stop(id);
@@ -716,22 +766,24 @@ export class PluginRegistry implements PluginRegistryAPI {
     for (const id of this.live.keys()) this.stop(id);
     this.sessionId = sessionId;
     if (sessionId && !ownRecordValue(this.preferences.sessions, sessionId)) {
-      setRecordValue(
-        this.preferences.sessions,
-        sessionId,
-        Object.fromEntries(
-          [...this.plugins.values()].map((p) => [
-            p.manifest.id,
-            p.enabledByDefault,
-          ]),
-        ),
-      );
-      await this.store.savePreferences(this.preferences);
+      await this.updatePreferences((draft) => {
+        setRecordValue(
+          draft.sessions,
+          sessionId,
+          Object.fromEntries(
+            [...this.plugins.values()].map((p) => [
+              p.manifest.id,
+              p.enabledByDefault,
+            ]),
+          ),
+        );
+      });
     }
     if (transition !== this.sessionTransition || this.disposed) return;
     this.sessions = structuredClone(snapshots?.sessions ?? this.sessions);
     this.projects = structuredClone(snapshots?.projects ?? this.projects);
     this.slots.clear();
+    this.variants.clear();
     this.settled.clear();
     this.settledBytes = 0;
     this.historyGeneration++;
@@ -752,6 +804,20 @@ export class PluginRegistry implements PluginRegistryAPI {
   }): void {
     this.environment = { ...this.environment, ...environment };
     this.observe("environment-changed", environment as Json);
+  }
+  getHttpRequestTimeout(id: string): number {
+    this.require(id);
+    return ownRecordValue(this.preferences.request_timeout_ms ?? {}, id) ?? HTTP_REQUEST_TIMEOUT.defaultMs;
+  }
+  async setHttpRequestTimeout(id: string, timeoutMs: number): Promise<void> {
+    this.assertActive();
+    this.require(id);
+    validateHttpRequestTimeout(timeoutMs);
+    await this.updatePreferences((draft) => {
+      draft.request_timeout_ms ??= {};
+      setRecordValue(draft.request_timeout_ms, id, timeoutMs);
+    });
+    this.publish();
   }
   private require(id: string): InstalledPlugin {
     const p = this.plugins.get(id);
@@ -782,7 +848,7 @@ export class PluginRegistry implements PluginRegistryAPI {
       eventTimes: [],
       queue: Promise.resolve(),
       queued: 0,
-      controllers: new Set(),
+      controllers: new Map(),
       resources,
       network: new PluginNetwork(
         p.manifest,
@@ -928,7 +994,7 @@ export class PluginRegistry implements PluginRegistryAPI {
             new Error("Plugin authority retired; outcome may be unknown"),
           );
         }
-      for (const controller of instance.controllers) controller.abort();
+      for (const controller of instance.controllers.keys()) controller.abort();
       for (const [key, p] of this.pending)
         if (p.worker === instance.worker) {
           clearTimeout(p.timer);
@@ -936,6 +1002,8 @@ export class PluginRegistry implements PluginRegistryAPI {
           p.reject(new StalePluginCall("plugin instance ended"));
         }
     }
+    for (const [key, variant] of this.variants)
+      if (variant.pluginId === id) this.variants.delete(key);
     for (const [key, slot] of this.slots)
       if (slot.pluginId === id) this.slots.delete(key);
     const plugin = this.plugins.get(id);
@@ -1002,6 +1070,7 @@ export class PluginRegistry implements PluginRegistryAPI {
       throw new StalePluginCall("stale plugin call result discarded");
     if (response.type !== "result")
       throw new Error("unexpected plugin call response");
+    this.resultContexts.set(response.result, context);
     return response.result;
   }
   private enqueue<T>(
@@ -1053,23 +1122,72 @@ export class PluginRegistry implements PluginRegistryAPI {
     context?: PluginContext,
   ): void {
     if (this.live.get(id) !== instance) return;
+    const invoked = this.resultContexts.get(r);
+    context ??= invoked;
+    // Preserve explicit surface/tool authority while sharing the actual invocation's
+    // HTTP snapshot with queued imports and the guest's returned JSON effects.
+    if (context && invoked)
+      context = { ...context, host_http_timeout_ms: invoked.host_http_timeout_ms };
     const vars = r.vars_patch
       ? { ...instance.vars, ...r.vars_patch }
       : instance.vars;
     assertJson(vars);
     const trees = new Map(instance.trees);
-    if (r.view_output && target) trees.set(target, r.view_output);
+    const retiredSurfaces = new Set<string>();
+    let slots = this.slots;
+    if (r.remove_block_slots !== undefined) {
+      authorizeKind(this.require(id).imports, "block-slots");
+      if (
+        !Array.isArray(r.remove_block_slots) ||
+        r.remove_block_slots.length > 128
+      )
+        throw new Error("block slot removal quota exceeded");
+      slots = new Map(slots);
+      const seen = new Set<string>();
+      for (const removal of r.remove_block_slots) {
+        const pair = JSON.stringify([removal.block_id, removal.slot_id]);
+        if (seen.has(pair))
+          throw new Error("duplicate block slot removal identity");
+        seen.add(pair);
+        const key = JSON.stringify([id, removal.block_id, removal.slot_id]);
+        const existing = slots.get(key);
+        if (
+          !existing ||
+          existing.pluginId !== id ||
+          existing.block_id !== removal.block_id ||
+          existing.slot_id !== removal.slot_id
+        )
+          throw new Error(
+            "block slot removal does not address an existing owned slot",
+          );
+        slots.delete(key);
+        for (const [surfaceId, mount] of instance.surfaces) {
+          if (
+            mount.descriptor.target === "block-slot" &&
+            mount.descriptor.block_id === removal.block_id &&
+            mount.descriptor.slot_id === removal.slot_id
+          ) {
+            retiredSurfaces.add(surfaceId);
+            trees.delete(surfaceId);
+          }
+        }
+      }
+    }
+    if (r.view_output && target) {
+      if (retiredSurfaces.has(target))
+        throw new Error("retired block slot cannot publish a replacement view");
+      trees.set(target, r.view_output);
+    }
     for (const output of trees.values()) {
       if (output.tree) validateProjection(output.tree, vars);
       if (output.mode === "webview-html")
         resolveViewState(output.viewState, vars);
     }
-    let slots = this.slots;
     if (r.block_slots) {
       authorizeKind(this.require(id).imports, "block-slots");
       if (r.block_slots.length > 64)
         throw new Error("plugin exceeds 64 settled slots per call");
-      slots = new Map(this.slots);
+      slots = new Map(slots);
       for (const slot of r.block_slots) {
         if (!this.settled.has(slot.block_id))
           throw new Error(
@@ -1088,6 +1206,38 @@ export class PluginRegistry implements PluginRegistryAPI {
     for (const slot of slots.values())
       if (slot.pluginId === id && slot.tree)
         validateProjection(slot.tree, vars);
+    const variants = new Map(this.variants);
+    const variantRetirements: { block_id: string; variant_id: string }[] = [];
+    if (r.block_variants !== undefined || r.remove_block_variants !== undefined) {
+      authorizeKind(this.require(id).imports, "block-slots");
+      if ((r.block_variants?.length ?? 0) > 128 || (r.remove_block_variants?.length ?? 0) > 128)
+        throw new Error("block variant per-call quota exceeds 128");
+      const removals = new Set<string>();
+      for (const removal of r.remove_block_variants ?? []) {
+        const key = JSON.stringify([id, removal.block_id, removal.variant_id]);
+        if (removals.has(key)) throw new Error("duplicate block variant removal");
+        removals.add(key);
+        if (!variants.has(key)) throw new Error("block variant removal does not address an existing owned variant");
+        variants.delete(key);
+        variantRetirements.push(removal);
+      }
+      const additions = new Set<string>();
+      for (const variant of r.block_variants ?? []) {
+        validateBlockTextVariant(variant);
+        const key = JSON.stringify([id, variant.block_id, variant.variant_id]);
+        if (additions.has(key) || removals.has(key)) throw new Error("duplicate or conflicting block variant identity");
+        additions.add(key);
+        const source = this.settled.get(variant.block_id)?.payload;
+        if (!source || typeof source !== "object" || Array.isArray(source) || source.kind !== "text" ||
+            source.role !== "assistant" || source.text_truncated === true ||
+            typeof source.text !== "string" || !source.text ||
+            variant.source_digest !== source.source_digest || variant.history_revision !== source.history_revision)
+          throw new Error("block variant does not match a current untruncated settled assistant text source");
+        variants.set(key, { ...variant, pluginId: id });
+      }
+      if (variants.size > 512 || this.settledBytes + this.variantBytes(variants) > LIMITS.retainedBytes)
+        throw new Error("block variant retained count or byte quota exceeded");
+    }
     for (const effect of r.effects ?? [])
       authorizeKind(this.require(id).imports, effect.kind);
     // A rejected projection/patch must not publish a terminal tool success or
@@ -1121,9 +1271,24 @@ export class PluginRegistry implements PluginRegistryAPI {
           );
       }
     }
+    // All sibling slots, projections, effects and terminal receipts validated.
+    // Retire old mounts before publishing new variables so index reuse cannot
+    // route another block's projection into an evicted iframe.
+    for (const surfaceId of retiredSurfaces)
+      instance.surfaces.delete(surfaceId);
+    for (const [controller, surfaceId] of instance.controllers) {
+      if (surfaceId !== undefined && retiredSurfaces.has(surfaceId)) {
+        controller.abort(new Error("block slot retired"));
+        instance.controllers.delete(controller);
+      }
+    }
+    instance.network.retireStale();
     instance.vars = vars;
     instance.trees = trees;
     this.slots = slots;
+    this.variants = variants;
+    for (const removal of variantRetirements)
+      this.retireVariantSurfaces(removal.block_id, id, removal.variant_id);
     for (const effect of r.effects ?? [])
       void this.effect(
         id,
@@ -1207,6 +1372,13 @@ export class PluginRegistry implements PluginRegistryAPI {
       throw new StalePluginCall(
         "block surface is not settled in the current history",
       );
+    if (
+      visible &&
+      surface.target === "block-slot" &&
+      !this.slots.has(JSON.stringify([id, surface.block_id, surface.slot_id])) &&
+      !this.variants.has(JSON.stringify([id, surface.block_id, surface.slot_id]))
+    )
+      throw new StalePluginCall("block slot is absent or retired");
     if (previous?.visible === visible) return;
     if (!previous && instance.surfaces.size >= 512)
       throw new Error("plugin exceeds 512 surface identities per instance");
@@ -1323,9 +1495,16 @@ export class PluginRegistry implements PluginRegistryAPI {
       revision = mount?.revision;
     if (!mount?.visible)
       throw new StalePluginCall("action surface is not mounted/visible");
+    const sameDescriptor = (actual: PluginSurfaceDescriptor | undefined) =>
+      actual?.surface_id === surface.surface_id && actual.target === surface.target &&
+      actual.block_id === surface.block_id && actual.slot_id === surface.slot_id &&
+      actual.placement === surface.placement;
+    if (!sameDescriptor(mount.descriptor))
+      throw new StalePluginCall("action descriptor differs from its mounted surface");
     await this.enqueue(id, async (instance) => {
       if (
         instance !== original ||
+        !sameDescriptor(instance.surfaces.get(surface.surface_id)?.descriptor) ||
         instance.surfaces.get(surface.surface_id)?.revision !== revision ||
         !instance.surfaces.get(surface.surface_id)?.visible
       )
@@ -1493,7 +1672,16 @@ export class PluginRegistry implements PluginRegistryAPI {
       throw new Error("settled block requires block_id");
     const bytes = new TextEncoder().encode(JSON.stringify(payload)).length,
       previous = this.settled.get(payload.block_id);
-    if (previous) this.settledBytes -= previous.bytes;
+    if (previous) {
+      this.settledBytes -= previous.bytes;
+      if (JSON.stringify(previous.payload) !== JSON.stringify(payload)) {
+        for (const [key, variant] of this.variants)
+          if (variant.block_id === payload.block_id) {
+            this.variants.delete(key);
+            this.retireVariantSurfaces(variant.block_id, variant.pluginId, variant.variant_id);
+          }
+      }
+    }
     this.settled.delete(payload.block_id);
     this.settled.set(payload.block_id, {
       payload: structuredClone(payload),
@@ -1502,13 +1690,16 @@ export class PluginRegistry implements PluginRegistryAPI {
     this.settledBytes += bytes;
     while (
       this.settled.size > 512 ||
-      this.settledBytes > LIMITS.retainedBytes - 16384
+      this.settledBytes + this.variantBytes() > LIMITS.retainedBytes - 16384
     ) {
       const first = this.settled.entries().next().value;
       if (!first) break;
       const [id, entry] = first;
       this.settled.delete(id);
       this.settledBytes -= entry.bytes;
+      for (const [key, variant] of this.variants)
+        if (variant.block_id === id) this.variants.delete(key);
+      this.retireVariantSurfaces(id);
       for (const [key, slot] of this.slots)
         if (slot.block_id === id) this.slots.delete(key);
       for (const instance of this.live.values()) {
@@ -1527,10 +1718,10 @@ export class PluginRegistry implements PluginRegistryAPI {
       if (phase === "history-reset") {
         this.historyGeneration++;
         for (const instance of this.live.values()) {
-          for (const controller of instance.controllers)
+          for (const controller of instance.controllers.keys())
             controller.abort(new Error("history replaced"));
           instance.network.close();
-          instance.resources.close();
+          instance.resources.retireRequests();
           for (const [key, cleanup] of this.cleanupTools)
             if (cleanup.instance === instance) {
               this.cleanupTools.delete(key);
@@ -1552,6 +1743,7 @@ export class PluginRegistry implements PluginRegistryAPI {
           }
         }
         this.slots.clear();
+    this.variants.clear();
         this.settled.clear();
         this.settledBytes = 0;
         this.publish();
@@ -1968,7 +2160,7 @@ export class PluginRegistry implements PluginRegistryAPI {
     if (instance.controllers.size >= LIMITS.pending)
       throw new Error("plugin exceeds 128 pending asynchronous requests");
     const controller = new AbortController();
-    instance.controllers.add(controller);
+    instance.controllers.set(controller, context.surface?.surface_id);
     const toolSignal = context.tool_invocation
       ? context.tool_cleanup
         ? this.cleanupTools.get(context.tool_invocation.invocation_id)
@@ -2001,28 +2193,30 @@ export class PluginRegistry implements PluginRegistryAPI {
       completed = true;
       this.completion(id, instance, requestId, ok, value, error, context);
     };
+    // The invocation's trusted host context is the shared guest/host snapshot.
+    // Changing a preference never shortens an already admitted request.
+    const requestTimeout = effect.kind === "http"
+      ? validateHttpRequestTimeout(context.host_http_timeout_ms ?? HTTP_REQUEST_TIMEOUT.defaultMs)
+      : 10_000;
+    const timeout = Math.max(1, Math.min(
+      requestTimeout,
+      context.tool_cleanup ? 1000
+        : context.tool_invocation && context.tool_invocation.deadline_ms > 0
+          ? context.tool_invocation.deadline_ms - Date.now()
+          : requestTimeout,
+    ));
     const timer = setTimeout(
       () => {
         // Scope cancellation is silent. A deadline in the current scope must
         // settle the guest even if the underlying host operation ignores abort.
         if (controller.signal.aborted) return;
         deadlineExceeded = true;
-        const error = "plugin host effect exceeded 10000ms deadline";
+        const error = `plugin host effect exceeded ${timeout}ms deadline`;
         controller.abort(new Error(error));
         finish(false, undefined, error);
         instance.controllers.delete(controller);
       },
-      Math.max(
-        1,
-        Math.min(
-          10000,
-          (context.tool_cleanup
-            ? Date.now() + 1000
-            : context.tool_invocation && context.tool_invocation.deadline_ms > 0
-              ? context.tool_invocation.deadline_ms
-              : Date.now() + 10000) - Date.now(),
-        ),
-      ),
+      timeout,
     );
     try {
       let value: Json;

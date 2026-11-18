@@ -76,7 +76,12 @@ export function PluginWebview({
       return {
         nonce,
         html: enabled
-          ? webviewDocument(view.content ?? "", nonce, readWebviewTheme(), fitContent)
+          ? webviewDocument(
+              view.content ?? "",
+              nonce,
+              readWebviewTheme(),
+              fitContent,
+            )
           : "",
         error: null,
       };
@@ -103,6 +108,9 @@ export function PluginWebview({
     let windowStart = performance.now();
     let messages = 0;
     let actions = 0;
+    let clipboardRequests = 0;
+    let lastClipboardId = 0;
+    let clipboardPending = false;
     const themeObserver = new MutationObserver(() => pushTheme());
     const active = () => !retired && current.current === identity;
     const retire = () => {
@@ -110,6 +118,11 @@ export function PluginWebview({
       themeObserver.disconnect();
       if (timer !== undefined) clearTimeout(timer);
       if (port) {
+        try {
+          port.postMessage({ type: "host-retired" });
+        } catch {
+          /* Channel already lost. */
+        }
         port.onmessage = null;
         port.onmessageerror = null;
         port.close();
@@ -168,6 +181,7 @@ export function PluginWebview({
           windowStart = now;
           messages = 0;
           actions = 0;
+          clipboardRequests = 0;
         }
         if (++messages > WEBVIEW_LIMITS.messagesPerSecond) {
           reject("message-rate");
@@ -209,6 +223,98 @@ export function PluginWebview({
         }
         if (exactKeys(data, ["type"]) && data.type === "retire") {
           reject("navigation");
+          return;
+        }
+        if (
+          data &&
+          typeof data === "object" &&
+          (data as Record<string, unknown>).type === "clipboard-write"
+        ) {
+          // Request fields convey no identity or gesture authority. Only this exact
+          // mounted channel and native browser activation can authorize the write.
+          if (
+            !exactKeys(data, ["type", "id", "text"]) ||
+            typeof data.id !== "number" ||
+            !Number.isSafeInteger(data.id) ||
+            data.id <= lastClipboardId ||
+            typeof data.text !== "string" ||
+            new TextEncoder().encode(data.text).byteLength >
+              WEBVIEW_LIMITS.clipboardTextBytes
+          ) {
+            reject("action-shape");
+            return;
+          }
+          lastClipboardId = data.id;
+          const reply = (error = "") => {
+            if (!active() || !port) return;
+            try {
+              port.postMessage({
+                type: "clipboard-result",
+                id: data.id,
+                ok: !error,
+                error,
+              });
+            } catch {
+              reject("channel-error");
+            }
+          };
+          if (++clipboardRequests > WEBVIEW_LIMITS.clipboardPerSecond) {
+            reply("Clipboard request rate exceeded");
+            return;
+          }
+          if (clipboardPending) {
+            reply("Clipboard request is already pending");
+            return;
+          }
+          const style = getComputedStyle(element);
+          if (
+            !element.isConnected ||
+            globalThis.document.visibilityState !== "visible" ||
+            !globalThis.document.hasFocus() ||
+            globalThis.document.activeElement !== element ||
+            !element.checkVisibility({
+              checkOpacity: true,
+              checkVisibilityCSS: true,
+            }) ||
+            style.pointerEvents === "none"
+          ) {
+            reply("Clipboard mount is not visible and focused");
+            return;
+          }
+          if (!navigator.userActivation?.isActive) {
+            reply("Clipboard copy requires a current user activation");
+            return;
+          }
+          if (typeof navigator.clipboard?.writeText !== "function") {
+            reply("Browser clipboard writing is unavailable");
+            return;
+          }
+          clipboardPending = true;
+          // Start native write synchronously in this message task. Never defer,
+          // replay, grant iframe permissions, or report success before it settles.
+          try {
+            navigator.clipboard.writeText(data.text).then(
+              () => {
+                clipboardPending = false;
+                reply();
+              },
+              (error: unknown) => {
+                clipboardPending = false;
+                reply(
+                  error instanceof Error
+                    ? `${error.name}: ${error.message}`
+                    : "Browser clipboard write failed",
+                );
+              },
+            );
+          } catch (error) {
+            clipboardPending = false;
+            reply(
+              error instanceof Error
+                ? `${error.name}: ${error.message}`
+                : "Browser clipboard write failed",
+            );
+          }
           return;
         }
         if (
@@ -273,7 +379,9 @@ export function PluginWebview({
           key={identity}
           ref={frame}
           className="plugin-webview"
-          style={fitContent ? { height: contentHeight, flex: "none" } : undefined}
+          style={
+            fitContent ? { height: contentHeight, flex: "none" } : undefined
+          }
           data-fit-content={fitContent || undefined}
           data-testid="plugin-webview"
           data-status={status}

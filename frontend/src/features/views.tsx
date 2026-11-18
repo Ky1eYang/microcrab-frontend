@@ -1,4 +1,16 @@
-import { useQuestionImageScope, questionImageComponents, type QuestionImageScope } from "./questions/question-images";
+import {
+  PluginBlockVariant,
+  useBlockTextVariant,
+} from "./plugin-block-variants";
+import { ActionMenu, type ActionMenuGroup } from "./action-menu";
+import { InterleavedMarkdown } from "./markdown-interleaved";
+import { InputSourceLabel } from "./InputSourceLabel";
+import { isDirectUserSource } from "../client/input-source";
+import {
+  useQuestionImageScope,
+  questionImageComponents,
+  type QuestionImageScope,
+} from "./questions/question-images";
 import { markdownExtensions } from "./markdown-extensions";
 import SvgBlock from "./visualizers/SvgBlock";
 import { citationDestinations } from "./citations/parser";
@@ -8,6 +20,7 @@ import { stopReasonText } from "../client/stop-reason";
 import { failureText } from "../client/failure";
 import { t, activeLocale, subscribeLocale } from "../i18n";
 import { childText } from "./childPresentation";
+import { SecretCard } from "./questions/SecretCard";
 import type { NativeHistoryView, PendingQuestion } from "../client/types";
 import {
   Fragment,
@@ -113,7 +126,8 @@ export function CodeBlock({
   chartInteractions?: ChartInteractions;
 }) {
   const localInteractions = useRef<ChartInteractions | null>(null);
-  if (!localInteractions.current) localInteractions.current = new ChartInteractions();
+  if (!localInteractions.current)
+    localInteractions.current = new ChartInteractions();
   const interactions = chartInteractions ?? localInteractions.current;
   const [format, setFormat] = useState("preview");
   const [copied, setCopied] = useState(false);
@@ -167,38 +181,43 @@ export function CodeBlock({
           <span className="code-block-lang">{language || "text"}</span>
         )}
         <div className="code-block-actions">
-        {!inContentDialog && (
+          {!inContentDialog && (
+            <button
+              type="button"
+              className="code-block-copy-btn"
+              title={t("content.expand")}
+              aria-label={t("content.expand")}
+              onClick={() => setInspecting(true)}
+            >
+              <Icon name="expand" size={12} />
+            </button>
+          )}
           <button
             type="button"
             className="code-block-copy-btn"
-            title={t("content.expand")}
-            aria-label={t("content.expand")}
-            onClick={() => setInspecting(true)}
+            onClick={handleCopy}
+            title={t(copied ? "common.copied" : "code.copy")}
           >
-            <Icon name="expand" size={12} />
+            <Icon name={copied ? "check" : "copy"} className="copy-icon" />
+            <span aria-live="polite">
+              {t(
+                copied
+                  ? "common.copied"
+                  : copyFailed
+                    ? "common.copyFailed"
+                    : "common.copy",
+              )}
+            </span>
           </button>
-        )}
-        <button
-          type="button"
-          className="code-block-copy-btn"
-          onClick={handleCopy}
-          title={t(copied ? "common.copied" : "code.copy")}
-        >
-          <Icon name={copied ? "check" : "copy"} className="copy-icon" />
-          <span aria-live="polite">
-            {t(
-              copied
-                ? "common.copied"
-                : copyFailed
-                  ? "common.copyFailed"
-                  : "common.copy",
-            )}
-          </span>
-        </button>
         </div>
       </div>
       {rich && format === "preview" ? (
-        <VisualPreview language={language} source={source} fallback={raw} interactions={interactions} />
+        <VisualPreview
+          language={language}
+          source={source}
+          fallback={raw}
+          interactions={interactions}
+        />
       ) : (
         raw
       )}
@@ -209,7 +228,12 @@ export function CodeBlock({
           onClose={() => setInspecting(false)}
         >
           {rich ? (
-            <CodeBlock language={language} visual rawSource={source} chartInteractions={interactions}>
+            <CodeBlock
+              language={language}
+              visual
+              rawSource={source}
+              chartInteractions={interactions}
+            >
               {source}
             </CodeBlock>
           ) : (
@@ -314,7 +338,13 @@ const markdownComponents: Components = {
     const data = props as any;
     if (typeof data["data-inline-svg"] === "string") {
       const source = data["data-inline-svg"];
-      return <SvgBlock inline source={source} fallback={<code className="inline-svg-source">{source}</code>} />;
+      return (
+        <SvgBlock
+          inline
+          source={source}
+          fallback={<code className="inline-svg-source">{source}</code>}
+        />
+      );
     }
     return typeof data["data-math-source"] === "string" ? (
       <MathNode
@@ -333,40 +363,85 @@ const markdownWithoutImages: Components = {
   img: ({ alt }) => <span>{alt}</span>,
 };
 
+// remark-rehype scopes footnote references, but its section heading has a fixed id.
+function footnoteHeadingPrefix({ prefix }: { prefix: string }) {
+  type Node = { properties?: Record<string, unknown>; children?: Node[] };
+  return (tree: Node) => {
+    const visit = (node: Node) => {
+      const props = node.properties;
+      if (props?.id === "footnote-label") props.id = `${prefix}footnote-label`;
+      const describedBy = props?.ariaDescribedBy;
+      if (Array.isArray(describedBy))
+        props!.ariaDescribedBy = describedBy.map((value) =>
+          value === "footnote-label" ? `${prefix}footnote-label` : value,
+        );
+      else if (typeof describedBy === "string")
+        props!.ariaDescribedBy = describedBy
+          .split(/\s+/)
+          .map((value) =>
+            value === "footnote-label" ? `${prefix}footnote-label` : value,
+          )
+          .join(" ");
+      node.children?.forEach(visit);
+    };
+    visit(tree);
+  };
+}
+
 export const Markdown = memo(function Markdown({
   text,
   allowImages = true,
   rich,
   citation,
   questionImages,
+  idPrefix,
 }: {
   text: string;
   allowImages?: boolean;
   rich?: RichMarkdownContext;
   citation?: CitationScope;
   questionImages?: QuestionImageScope;
+  idPrefix?: string;
 }) {
   useSyncExternalStore(subscribeLocale, activeLocale, activeLocale);
   const enabled = !!rich && !rich.streaming;
   const context = useMemo(() => ({ text, enabled }), [text, enabled]);
   const components = useMemo(
-    () => questionImages && allowImages
-      ? { ...markdownComponents, ...questionImageComponents(questionImages) }
-      : citation && allowImages
-        ? { ...markdownComponents, ...citationComponents(citation) }
-        : allowImages ? markdownComponents : markdownWithoutImages,
+    () =>
+      questionImages && allowImages
+        ? { ...markdownComponents, ...questionImageComponents(questionImages) }
+        : citation && allowImages
+          ? { ...markdownComponents, ...citationComponents(citation) }
+          : allowImages
+            ? markdownComponents
+            : markdownWithoutImages,
     [citation, questionImages, allowImages],
   );
   const plugins = useMemo(() => {
-    const result: any[] = [remarkGfm, headingAttributes, [markdownExtensions, { source: text, rich: enabled }]];
+    const result: any[] = [
+      remarkGfm,
+      headingAttributes,
+      [markdownExtensions, { source: text, rich: enabled }],
+    ];
     if (enabled) result.push(remarkMath, [mathProperties, { source: text }]);
-    if ((citation || questionImages) && allowImages) result.push(citationDestinations);
+    if ((citation || questionImages) && allowImages)
+      result.push(citationDestinations);
     return result;
   }, [enabled, text, citation, questionImages, allowImages]);
   return (
     <RichContext.Provider value={context}>
       <div className="markdown-body markdown-content">
-        <ReactMarkdown remarkPlugins={plugins} skipHtml components={components}>
+        <ReactMarkdown
+          remarkPlugins={plugins}
+          skipHtml
+          components={components}
+          {...(idPrefix === undefined
+            ? {}
+            : {
+                remarkRehypeOptions: { clobberPrefix: idPrefix },
+                rehypePlugins: [[footnoteHeadingPrefix, { prefix: idPrefix }]],
+              })}
+        >
           {text}
         </ReactMarkdown>
       </div>
@@ -614,6 +689,9 @@ const ToolContent = memo(function ToolContent({
             dialogTitle={`${name} · ${t(status === "failed" ? "tools.error" : "tools.output")}`}
             empty={noInput ? t("tools.noContent") : undefined}
           />
+          {!!block.payload.attachments?.length && (
+            <ConversationImages images={block.payload.attachments} />
+          )}
         </div>
       )}
     </div>
@@ -1013,6 +1091,11 @@ export const BlockView = memo(function BlockView({
 }) {
   const { block } = useConversationBlock(fallback);
   const citation = useCitationScope(block);
+  const { variant, mode } = useBlockTextVariant(block);
+  const replacement =
+    !readOnly && mode === "variant" && variant?.status === "completed"
+      ? variant.text
+      : undefined;
   // Opt-in acceptance instrumentation counts actual React block renders;
   // the registry remains the sole content/subscription authority.
   const counts = (
@@ -1067,18 +1150,24 @@ export const BlockView = memo(function BlockView({
       <div
         className={`block-body${lower(block.role) === "user" ? " user-bubble" : ""}`}
       >
-        {block.temporary && block.role === "user" && block.submissionStatus && (
-          <div
-            className="block-incomplete"
-            role="status"
-            data-testid="input-admission-status"
-            data-status={block.submissionStatus}
-          >
-            {t(
-              `composer.input${block.submissionStatus === "admitted" ? "Waiting" : block.submissionStatus === "unknown" ? "Unknown" : "Submitting"}`,
-            )}
-          </div>
+        {lower(block.role) === "user" && (
+          <InputSourceLabel source={block.payload.source} />
         )}
+        {block.temporary &&
+          block.role === "user" &&
+          isDirectUserSource(block.payload.source) &&
+          block.submissionStatus && (
+            <div
+              className="block-incomplete"
+              role="status"
+              data-testid="input-admission-status"
+              data-status={block.submissionStatus}
+            >
+              {t(
+                `composer.input${block.submissionStatus === "admitted" ? "Waiting" : block.submissionStatus === "unknown" ? "Unknown" : "Submitting"}`,
+              )}
+            </div>
+          )}
         {block.preview &&
           (!block.preview.canonicalMessageId ||
             (kind === "reasoning" && block.preview.truncated)) &&
@@ -1124,6 +1213,16 @@ export const BlockView = memo(function BlockView({
           <SubAgentCard block={block} readOnly={readOnly} />
         ) : ["error", "status"].includes(kind) ? (
           text
+        ) : !readOnly && mode === "both" && variant?.status === "completed" ? (
+          <InterleavedMarkdown
+            original={text}
+            variant={variant.text}
+            label={variant.label}
+            citation={citation}
+            rich={{ streaming: lower(block.stream) === "streaming" }}
+          />
+        ) : replacement !== undefined ? (
+          <Markdown text={replacement} allowImages={false} />
         ) : json ? (
           <pre tabIndex={0} role="region" aria-label="JSON">
             {pretty}
@@ -1139,18 +1238,23 @@ export const BlockView = memo(function BlockView({
         {!["reasoning", "tool", "child", "error", "status"].includes(kind) && (
           <ConversationImages images={block.payload.attachments ?? []} />
         )}
-        {lower(block.role) === "user" && lower(block.stream) === "error" && (
-          <div className="block-error-badge" role="status">
-            <Icon name="info" size={14} aria-hidden="true" />
-            <span>
-              {t("failure.sendFailed", {
-                message: block.payload.failure
-                  ? failureText(block.payload.failure)
-                  : t("failure.generic"),
-              })}
-            </span>
-          </div>
+        {!readOnly && block.role === "assistant" && kind === "text" && (
+          <PluginBlockVariant block={block} />
         )}
+        {lower(block.role) === "user" &&
+          isDirectUserSource(block.payload.source) &&
+          lower(block.stream) === "error" && (
+            <div className="block-error-badge" role="status">
+              <Icon name="info" size={14} aria-hidden="true" />
+              <span>
+                {t("failure.sendFailed", {
+                  message: block.payload.failure
+                    ? failureText(block.payload.failure)
+                    : t("failure.generic"),
+                })}
+              </span>
+            </div>
+          )}
       </div>
     </article>
   );
@@ -1231,8 +1335,12 @@ export function ActionBar({
   revertId,
   retryId,
   tokens,
+  pluginActions,
+  pluginActionScope,
 }: {
   text: string;
+  pluginActions?: readonly ActionMenuGroup[];
+  pluginActionScope?: string;
   timestamp?: number | null;
   user?: boolean;
   revertId?: string;
@@ -1305,6 +1413,9 @@ export function ActionBar({
             className={copied ? "check-icon" : "copy-icon"}
           />
         </button>
+        {!!pluginActions?.length && (
+          <ActionMenu key={pluginActionScope} items={pluginActions} />
+        )}
         {revertId && (
           <button
             className="action-icon-btn action-undo-btn"
@@ -1543,6 +1654,13 @@ export function PermissionCard({
   );
 }
 export function QuestionCard({ value }: { value: PendingQuestion }) {
+  return value.secret ? (
+    <SecretCard value={value} />
+  ) : (
+    <QuestionAnswers value={value} />
+  );
+}
+function QuestionAnswers({ value }: { value: PendingQuestion }) {
   const dispatch = useAppDispatch();
   const questionImages = useQuestionImageScope(value);
   const questions = value.questions;
@@ -1591,7 +1709,12 @@ export function QuestionCard({ value }: { value: PendingQuestion }) {
         <Fragment key={q.id}>
           {q.header && <h4>{q.header}</h4>}
           <div className="question-body">
-            <Markdown text={q.question} allowImages={!!questionImages} questionImages={questionImages} rich={{ streaming: false }} />
+            <Markdown
+              text={q.question}
+              allowImages={!!questionImages}
+              questionImages={questionImages}
+              rich={{ streaming: false }}
+            />
           </div>
           <div className="choice-list">
             {(q.options ?? []).map((o) => (

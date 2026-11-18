@@ -1049,15 +1049,9 @@
 .right-sidebar-shell {
   display: flex;
   flex-direction: column;
-  width: min(
-    var(--right-rail-width),
-    max(calc(100vw - var(--left-rail-width) - var(--main-min-width)), 0px)
-  );
+  width: min(var(--right-rail-width), var(--right-rail-max-width));
   min-width: 0;
-  max-width: max(
-    calc(100vw - var(--left-rail-width) - var(--main-min-width)),
-    0px
-  );
+  max-width: var(--right-rail-max-width);
   height: 100vh;
   min-height: 100vh;
   background: var(--bg-subtle);

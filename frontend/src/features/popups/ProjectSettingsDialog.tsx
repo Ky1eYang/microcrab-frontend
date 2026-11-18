@@ -1,3 +1,4 @@
+import { ExternalSpeakersSettings } from "./ExternalSpeakersSettings";
 import { OwnerSettings } from "./OwnerSettings";
 import { ReferencesSettings } from "./ReferencesSettings";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -6,7 +7,8 @@ import { useApp } from "../../state";
 import { Icon } from "../shared";
 import { trapFocus } from "../../client/viewport";
 import { hostLocator, hostPreferenceScope } from "../../client/host-locators";
-import { hostReason, hostStatus } from "./RemoteConnectDialog";
+import { hostReason, hostStatusLabel } from "./RemoteConnectDialog";
+import { hostReadiness } from "../../state/host-readiness";
 import { t } from "../../i18n";
 import type { AgentInfo, NativeProject } from "../../client/types";
 
@@ -62,11 +64,8 @@ function HostPane({
   const connection = state.hostConnection;
   const matched =
     connection?.projectId === projectId && connection.state !== "detached";
-  const statusKey = matched ? (connection?.state ?? "detached") : "detached";
-  const statusLabel =
-    t(`host.status.${statusKey}`) !== `host.status.${statusKey}`
-      ? t(`host.status.${statusKey}`)
-      : (hostStatus[statusKey] ?? statusKey);
+  const statusKey = hostReadiness(state, projectId).status;
+  const statusLabel = hostStatusLabel(statusKey);
   const reason =
     matched && connection?.reason
       ? (hostReason[connection.reason] ?? connection.reason)
@@ -256,6 +255,7 @@ function PermissionsPane({ projectId }: { projectId: string }) {
         </button>
       </div>
       <OwnerSettings scope={{ kind: "project", id: projectId }} />
+      <ExternalSpeakersSettings scope={{ kind: "project", id: projectId }} />
     </div>
   );
 }

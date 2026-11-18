@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
-import { useAppFields, useClientPlugins } from "../state";
+import { useAppFields, useAppStore, useClientPlugins } from "../state";
 import { t } from "../i18n";
 import { Icon } from "../shell/Icon";
 import { formatPluginImportError } from "./import-errors";
 import { PluginSurface } from "./PluginSidebar";
+import { PluginHttpSettings } from "./PluginHttpSettings";
 import type { InstalledPlugin } from "./types";
 import { requestDocumentLeave } from "../client/document-leave";
 
@@ -47,6 +48,7 @@ function PluginUpload({
 }
 
 export function PluginsPage({ embedded = false }: { embedded?: boolean }) {
+  const store = useAppStore();
   const plugins = useClientPlugins();
   const registry = plugins.registry;
   const { state, dispatch } = useAppFields([
@@ -54,7 +56,8 @@ export function PluginsPage({ embedded = false }: { embedded?: boolean }) {
     "resolvedLocale",
     "pluginWorkspace",
   ]);
-  const [busy, setBusy] = useState(false);
+  const [working, setBusy] = useState(false);
+  const busy = working || !plugins.isReadyFor(state.sessionId);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -67,10 +70,17 @@ export function PluginsPage({ embedded = false }: { embedded?: boolean }) {
     return () => {
       requestAnimationFrame(() => {
         const visible = (node: Element | null): node is HTMLElement =>
-          node instanceof HTMLElement && node.isConnected &&
-          !node.closest('[inert]') && node.getClientRects().length > 0 &&
-          getComputedStyle(node).visibility !== 'hidden';
-        const candidates = [opener.current, ...document.querySelectorAll('[data-testid="rail-plugins-btn"], [data-testid="composer"] textarea')];
+          node instanceof HTMLElement &&
+          node.isConnected &&
+          !node.closest("[inert]") &&
+          node.getClientRects().length > 0 &&
+          getComputedStyle(node).visibility !== "hidden";
+        const candidates = [
+          opener.current,
+          ...document.querySelectorAll(
+            '[data-testid="rail-plugins-btn"], [data-testid="composer"] textarea',
+          ),
+        ];
         candidates.find(visible)?.focus({ preventScroll: true });
       });
     };
@@ -128,6 +138,7 @@ export function PluginsPage({ embedded = false }: { embedded?: boolean }) {
       void perform(work);
     }, ".client-plugins-page");
   const perform = async (work: () => Promise<unknown>) => {
+    if (!plugins.isReadyFor(state.sessionId)) return;
     setBusy(true);
     setError(null);
     setNotice(null);
@@ -317,6 +328,19 @@ export function PluginsPage({ embedded = false }: { embedded?: boolean }) {
         {(error || plugins.error) && (
           <div role="alert" className="client-plugin-notice">
             <span>{error || plugins.error}</span>
+            {plugins.error &&
+              !plugins.initializing &&
+              !plugins.isReadyFor(state.sessionId) && (
+                <button
+                  type="button"
+                  className="ghost-btn"
+                  onClick={() =>
+                    plugins.retrySynchronization(store.getSnapshot())
+                  }
+                >
+                  {t("plugins.retry")}
+                </button>
+              )}
           </div>
         )}
         {notice && (
@@ -403,11 +427,17 @@ export function PluginsPage({ embedded = false }: { embedded?: boolean }) {
                         <li key={capability}>{capability}</li>
                       ))}
                     </ul>
-                  ) : t("plugins.noImports")}
+                  ) : (
+                    t("plugins.noImports")
+                  )}
                 </dd>
                 <dt>{t("plugins.providesTools")}</dt>
                 <dd data-testid="plugin-provides-tools">
-                  {t(activePlugin.providesTools ? "plugins.booleanYes" : "plugins.booleanNo")}
+                  {t(
+                    activePlugin.providesTools
+                      ? "plugins.booleanYes"
+                      : "plugins.booleanNo",
+                  )}
                 </dd>
                 {Boolean(activePlugin.manifest.network_origins?.length) && (
                   <>
@@ -597,6 +627,15 @@ export function PluginsPage({ embedded = false }: { embedded?: boolean }) {
                   </label>
                 </div>
               </div>
+            </div>
+
+            <div className="settings-card client-plugin-controls-card">
+              <PluginHttpSettings
+                key={activePlugin.manifest.id}
+                registry={registry}
+                pluginId={activePlugin.manifest.id}
+                disabled={busy}
+              />
             </div>
 
             {/* Card 3: Parameter Settings Surface (view-target: setting-page); omitted when plugin exposes no view */}

@@ -44,6 +44,7 @@ function binding(question: string, executor = true): ClientBinding {
   };
   return {
     role: executor ? "executor" : "observer",
+    can_interact: executor,
     lease_id: executor ? "question-lease" : undefined,
     catalog_digest: call.catalog_digest,
     definitions: CLIENT_TOOL_DEFINITIONS,
@@ -82,7 +83,9 @@ test("question GFM inherits rich engines while arbitrary HTML stays inert and op
   await expect(body.locator("strong")).toHaveText("Choose carefully");
   await expect(body.locator("table")).toBeVisible();
   await expect(body.locator("script, .katex")).toHaveCount(0);
-  await expect(body.getByTestId("mermaid-preview")).toBeVisible({ timeout: 30000 });
+  await expect(body.getByTestId("mermaid-preview")).toBeVisible({
+    timeout: 30000,
+  });
   await expect(body.locator(".visual-format")).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Accept **plain description**" }),
@@ -99,10 +102,14 @@ test("question GFM inherits rich engines while arbitrary HTML stays inert and op
   ).toBeUndefined();
 });
 
-test("question cancellation immediately revokes a loaded preview before settlement", async ({ page }) => {
+test("question cancellation immediately revokes a loaded preview before settlement", async ({
+  page,
+}) => {
   const backend = await setup(page, "![Cancel preview](picture.png)");
-  await page.route("**/api/v1/sessions/s1/questions/question-image/image?**", (route) =>
-    route.fulfill({ contentType: "image/png", body: png }));
+  await page.route(
+    "**/api/v1/sessions/s1/questions/question-image/image?**",
+    (route) => route.fulfill({ contentType: "image/png", body: png }),
+  );
   await page.goto("/#session/s1");
   await page.getByRole("button", { name: "加载图片：Cancel preview" }).click();
   await expect(page.locator(".question-body img")).toBeVisible();
@@ -169,18 +176,26 @@ test("external images require a click and unsafe schemes never load", async ({
   expect(reads).toBe(1);
 });
 
-test("linked image preview clicks do not follow the enclosing link", async ({ page }) => {
-  await setup(page, "[![Linked preview](./picture.png)](https://navigation.example.test/leave)");
+test("linked image preview clicks do not follow the enclosing link", async ({
+  page,
+}) => {
+  await setup(
+    page,
+    "[![Linked preview](./picture.png)](https://navigation.example.test/leave)",
+  );
   let reads = 0;
   let navigations = 0;
   await page.route("https://navigation.example.test/**", async (route) => {
     navigations++;
     await route.abort();
   });
-  await page.route("**/api/v1/sessions/s1/questions/question-image/image?**", async (route) => {
-    reads++;
-    await route.fulfill({ contentType: "image/png", body: png });
-  });
+  await page.route(
+    "**/api/v1/sessions/s1/questions/question-image/image?**",
+    async (route) => {
+      reads++;
+      await route.fulfill({ contentType: "image/png", body: png });
+    },
+  );
   await page.goto("/#session/s1");
   const initial = page.url();
   await page.getByRole("button", { name: "加载图片：Linked preview" }).click();
@@ -201,10 +216,27 @@ test("observer cannot read local images and wide question tables fit mobile card
       " | value |",
     false,
   );
+  let reads = 0;
+  await page.route(
+    "**/api/v1/sessions/s1/questions/question-image/image?**",
+    async (route) => {
+      reads++;
+      await route.abort();
+    },
+  );
   await page.goto("/#session/s1");
+  const body = page.locator(".question-body");
+  await expect(body.getByText("Local preview", { exact: true })).toBeVisible();
+  await expect(body.locator("table")).toBeVisible();
+  await expect(body.locator("img")).toHaveCount(0);
   await expect(
     page.getByRole("button", { name: "加载图片：Local preview" }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Accept **plain description**" }),
   ).toBeDisabled();
+  await body.getByText("Local preview", { exact: true }).click();
+  expect(reads).toBe(0);
   const sizes = await page.evaluate(() => ({
     width: document.documentElement.clientWidth,
     scroll: document.documentElement.scrollWidth,

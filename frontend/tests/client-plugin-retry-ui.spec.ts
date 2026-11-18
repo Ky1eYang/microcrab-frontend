@@ -1,3 +1,4 @@
+import { selectSidebarPlugin } from "./plugin-sidebar-selection";
 import { maintainedPluginBundle } from "./plugin-bundle-fixture";
 import { expect, test } from "@playwright/test";
 import { nativeBackend } from "./native-fixture";
@@ -64,15 +65,14 @@ ${await response.text()}`,
   const fixture = manager.locator(
     'article[data-plugin-id="microcrab.fixture"]',
   );
-  await fixture.getByLabel("在当前会话启用").check();
+  await fixture.getByLabel("在当前会话启用").click();
+  await expect(fixture.getByLabel("在当前会话启用")).toBeChecked();
   await expect(fixture).toHaveAttribute("data-status", "ready");
   await page.goto("/#/session/s1");
   const sidebar = page.getByTestId("client-plugin-sidebar");
   if (!(await sidebar.isVisible()))
     await page.locator(".header-right-toggle-btn").click();
-  await sidebar
-    .getByRole("tab", { name: "Component fixture", exact: true })
-    .click();
+  await selectSidebarPlugin(sidebar, "Component fixture");
   await sidebar.getByTestId("plugin-expand").click();
   const surface = page.getByTestId("expanded-plugin-page");
   await expect(

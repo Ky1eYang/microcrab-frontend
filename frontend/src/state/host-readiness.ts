@@ -1,4 +1,26 @@
 import type { AppState, NativeHostState } from "../client/types";
+import { hostLocator, hostPreferenceScope } from "../client/host-locators";
+import { hostTerminalCode, peekHostQuarantine } from "../client/host-quarantine";
+
+/** Terminal hints belong to one candidate of one owner Project, never its Host group. */
+export function projectHostTerminal(
+  state: Pick<AppState, "hostConnection" | "projects" | "apiBase" | "authSession">,
+  projectId: string | undefined,
+) {
+  if (!projectId) return;
+  const connection = state.hostConnection;
+  if (connection?.projectId === projectId) {
+    if (["connecting", "pairing"].includes(connection.state)) return;
+    const code = connection.cause?.code ?? connection.reason;
+    if (hostTerminalCode(code)) return code;
+    if (["ready", "reconciling"].includes(connection.state)) return;
+  }
+  const project = state.projects.find((item) => item.id === projectId);
+  if (!project) return;
+  const scope = hostPreferenceScope(state.apiBase, state.authSession);
+  return peekHostQuarantine(scope, projectId, hostLocator(scope, project), project.root || ".")?.code;
+}
+
 
 /** Preserve the exact public cause; transport connection alone does not imply progress. */
 export function hostStatePatch(view: NativeHostState) {
@@ -54,7 +76,7 @@ export function hostReadiness(
       !!conversationId &&
       connection?.conversationId === conversationId &&
       connection?.hostFlavor === hostFlavor;
-  const status =
+  const status = projectHostTerminal(state, projectId) ?? (
     !connection || !matched
       ? projectId && connection?.projectId && connection.state !== "detached"
         ? "project_mismatch"
@@ -69,6 +91,7 @@ export function hostReadiness(
               ? "ready"
               : connection.catalogError
                 ? "catalog_error"
-                : "loading_catalog";
+                : "loading_catalog"
+  );
   return { projectId, hostFlavor, matched, status, ready: status === "ready" };
 }

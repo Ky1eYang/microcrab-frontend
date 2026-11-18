@@ -1,5 +1,16 @@
 import { test, expect, type Page } from "@playwright/test";
 import { nativeBackend } from "./native-fixture";
+import { maintainedPluginBundle } from "./plugin-bundle-fixture";
+
+async function readyPlugins(page: Page) {
+  await maintainedPluginBundle(page);
+  await nativeBackend(page);
+  await page.goto("/#session/s1");
+  await expect(page.getByText("历史回答", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "展开 Plugins" }),
+  ).toBeVisible();
+}
 
 const WIDE = { width: 1440, height: 900 };
 const NARROW = { width: 390, height: 844 };
@@ -101,7 +112,7 @@ test.describe("narrow drawer", () => {
     await page.addInitScript(() =>
       localStorage.setItem("microcrab.ui.rightRailCollapsed", "false"),
     );
-    await ready(page);
+    await readyPlugins(page);
     await expect(
       page.getByRole("complementary", { name: "Plugins" }),
     ).toHaveCount(0);
@@ -123,8 +134,50 @@ test.describe("narrow drawer", () => {
     await expect(plugins).toHaveCount(0);
   });
 
+  test("Plugins Escape survives removed focus while respecting child handlers and external popups", async ({
+    page,
+  }) => {
+    await readyPlugins(page);
+    const toggle = page.getByRole("button", { name: "展开 Plugins" });
+    await toggle.click();
+    const plugins = page.getByRole("complementary", { name: "Plugins" });
+    await expect(plugins).toBeVisible();
+    await page.evaluate(() => {
+      const popup = document.createElement("input");
+      popup.id = "foreign-popup-focus";
+      document.body.append(popup);
+      popup.focus();
+    });
+    await page.keyboard.press("Escape");
+    await expect(plugins).toBeVisible();
+    await plugins.evaluate((node) => {
+      document.getElementById("foreign-popup-focus")?.remove();
+      const transient = document.createElement("button");
+      node.append(transient);
+      transient.focus();
+      transient.remove();
+    });
+    await expect
+      .poll(() => page.evaluate(() => document.activeElement === document.body))
+      .toBe(true);
+    await page.evaluate(() => {
+      document.body.addEventListener(
+        "keydown",
+        (event) => {
+          if (event.key === "Escape") event.preventDefault();
+        },
+        { once: true },
+      );
+    });
+    await page.keyboard.press("Escape");
+    await expect(plugins).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(plugins).toHaveCount(0);
+    await expect(toggle).toBeFocused();
+  });
+
   test("the Plugins overlay has a visible close button", async ({ page }) => {
-    await ready(page);
+    await readyPlugins(page);
     const toggle = page.getByRole("button", { name: "展开 Plugins" });
     await toggle.click();
     const plugins = page.getByRole("complementary", { name: "Plugins" });

@@ -39,6 +39,11 @@ export interface NativeSession {
   host_flavor?: ConversationHostFlavor;
   kind?: "interactive" | "delegated" | "one_shot";
   parent_session_id?: string | null;
+  agent_id?: string | null;
+  depth?: number | null;
+  interaction?: "persistent" | "return" | null;
+  current_role?: "main_agent" | "sub_agent" | "both" | null;
+  accepts_user_input?: boolean;
   id: string;
   title: string;
   project_id: string | null;
@@ -164,6 +169,11 @@ export interface HistoryPosition {
   turn: number;
   round: number;
 }
+export type NativeInputSource =
+  | "framework"
+  | { agent: { agent_id: string; exchange?: { exchange_id: string; intent: "send" | "reply" } } }
+  | { external: { identity: string } };
+
 export interface NativeMessage {
   /** Exact trusted submission admission certificate; absent in historical bytes. */
   submission_operation_id?: string;
@@ -178,7 +188,7 @@ export interface NativeMessage {
     message_id: string;
     summary_truncated?: boolean;
   };
-  source?: "framework";
+  source?: NativeInputSource;
   content_omitted?: boolean;
   client_invocation_id?: string | null;
   position?: HistoryPosition | null;
@@ -197,6 +207,12 @@ export interface NativeMessage {
   tool_name?: string;
 }
 export interface NativeChildSummary {
+  agent_id?: string | null;
+  depth?: number | null;
+  interaction?: "persistent" | "return" | null;
+  parent_session_id?: string | null;
+  current_role?: "main_agent" | "sub_agent" | "both" | null;
+  accepts_user_input?: boolean;
   id: string;
   name: string;
   status: string;
@@ -271,7 +287,7 @@ export interface PermissionRequest {
 export interface PermissionProposalResult {
   proposal_id: string;
   status:
-    "persisting" | "accepted" | "declined" | "expired" | "stale" | "failed";
+    "persisting" | "outcome_unknown" | "accepted" | "declined" | "expired" | "stale" | "failed";
   remembered: boolean;
   reason?: string;
 }
@@ -739,6 +755,7 @@ export type SessionEventFrame =
       event: "permission.settled";
       data: PermissionSettled;
     }
+  | { event: "client_tools.lease_changed"; data: { executor_connected: boolean } }
   | { event: "round_limit.requested"; data: { request: RoundLimitRequest } }
   | {
       event: "round_limit.settled";
@@ -957,6 +974,7 @@ export interface Block {
   isCompact: boolean;
   tool: any;
   payload: {
+    source?: NativeInputSource;
     failure?: NativeWireError;
     text: string;
     mime: string;
@@ -987,6 +1005,7 @@ export interface QuestionIdentity {
 }
 export interface PendingQuestion extends QuestionIdentity {
   questions: Question[];
+  secret?: import("./client-tools").SecretRequest;
   deadline: number;
   blockingMode: "blocking" | "deferred";
   paused: boolean;
@@ -1074,6 +1093,8 @@ export interface AppState {
     projectId?: string;
     conversationId?: string;
     hostFlavor?: ConversationHostFlavor;
+    serverOwned?: boolean;
+    browserParticipant?: boolean;
     endpoint?: string;
     transport?: "relay" | "grpc";
     effectiveTransport?: "relay" | "grpc" | "outbound";

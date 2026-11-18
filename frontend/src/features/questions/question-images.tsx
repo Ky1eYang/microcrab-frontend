@@ -33,6 +33,8 @@ function witness(state: AppState, question: PendingQuestion): string {
   );
   if (
     !owner ||
+    !(binding?.participation_id || binding?.lease_id) ||
+    !(binding?.can_interact === true || (binding?.can_interact === undefined && binding?.role === "executor" && !!binding?.lease_id)) ||
     !lineage ||
     state.page !== "conversation" ||
     state.sessionId !== root ||
@@ -42,6 +44,7 @@ function witness(state: AppState, question: PendingQuestion): string {
     call.parent_session_id !== root ||
     !["pending", "paused"].includes(call.status) ||
     !visibleQuestion ||
+    visibleQuestion.observer ||
     visibleQuestion.imageRevoked ||
     visibleQuestion.awaitingConfirmation
   )
@@ -61,7 +64,9 @@ function witness(state: AppState, question: PendingQuestion): string {
     call.catalog_digest,
     call.arguments,
     binding?.role,
+    binding?.can_interact,
     binding?.lease_id,
+    binding?.participation_id,
   ]);
 }
 
@@ -77,7 +82,7 @@ export function useQuestionImageScope(
     const state = store.getSnapshot();
     const api = store.api;
     const binding = state.clientTools as ClientBinding;
-    const leaseId = binding.role === "executor" ? binding.lease_id : undefined;
+    const leaseId = binding.participation_id ?? (binding.role === "executor" ? binding.lease_id : undefined);
     return {
       identity: stamp,
       leaseId,
@@ -88,7 +93,7 @@ export function useQuestionImageScope(
       current: () =>
         store.api === api && witness(store.getSnapshot(), question) === stamp,
       read: (request: QuestionImageRequest, signal: AbortSignal) =>
-        api.readQuestionImage(request, leaseId ?? "", signal),
+        api.readQuestionImage(request, leaseId, signal),
     };
   }, [store, stamp, question.id, question.sessionId, question.parentSessionId]);
 }

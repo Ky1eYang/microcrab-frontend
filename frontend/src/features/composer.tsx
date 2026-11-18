@@ -137,17 +137,21 @@ export function Composer({
             ? "chatOnly.loadingNotice"
             : "browserHost.loadingNotice",
         )
-    : host.status === "loading_catalog"
-      ? t("host.readiness.loadingNotice")
-      : host.status === "catalog_error"
-        ? t("host.readiness.catalogErrorNotice", {
-            error: state.hostConnection?.catalogError ?? "",
-          })
-        : host.status === "project_mismatch"
-          ? t("host.readiness.projectMismatchNotice")
-          : ["connecting", "pairing", "reconciling"].includes(host.status)
-            ? t("host.readiness.pendingNotice")
-            : t("host.readiness.offlineNotice");
+    : host.status === "binding_mismatch"
+      ? t("host.readiness.bindingMismatchNotice")
+      : host.status === "host_preflight_unsupported"
+        ? t("host.readiness.preflightUnsupportedNotice")
+        : host.status === "loading_catalog"
+          ? t("host.readiness.loadingNotice")
+          : host.status === "catalog_error"
+            ? t("host.readiness.catalogErrorNotice", {
+                error: state.hostConnection?.catalogError ?? "",
+              })
+            : host.status === "project_mismatch"
+              ? t("host.readiness.projectMismatchNotice")
+              : ["connecting", "pairing", "reconciling"].includes(host.status)
+                ? t("host.readiness.pendingNotice")
+                : t("host.readiness.offlineNotice");
   const has = (method: string) =>
     state.capabilities?.methods.includes(method) === true;
   // A requested stop is input-ready at once; the runtime settles behind it.

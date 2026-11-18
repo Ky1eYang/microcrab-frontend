@@ -74,7 +74,8 @@ export interface ClientToolDefinition {
     action: "allow";
   }[];
   reclaimable: boolean;
-  interaction?: { mode_pointer: string; wait_timeout_ms: number };
+  interaction?: { mode_pointer: string; wait_timeout_ms: number;
+    secret_writes?: { keys_pointer: string; max_keys: number } };
 }
 export interface QuestionOption {
   id: string;
@@ -97,6 +98,30 @@ export interface Todo {
   priority?: "low" | "medium" | "high";
 }
 const string = { type: "string", minLength: 1, maxLength: 4000 };
+export interface SecretRequest {
+  reason: string;
+  secrets: { key: string; label: string; description?: string }[];
+}
+export function parseSecretRequest(value: unknown): SecretRequest {
+  const input = object(value);
+  keys(input, ["reason", "secrets", "blocking_mode"]);
+  const reason = text(input.reason, "secret reason");
+  if (input.blocking_mode !== undefined && input.blocking_mode !== "blocking")
+    throw Error("Secret requests must be blocking");
+  if (!Array.isArray(input.secrets) || input.secrets.length < 1 || input.secrets.length > 8)
+    throw Error("Secret requests require 1..8 keys");
+  const seen = new Set<string>();
+  const secrets = input.secrets.map((item: unknown) => {
+    const row = object(item);
+    keys(row, ["key", "label", "description"]);
+    const key = text(row.key, "secret key");
+    if (!/^[A-Za-z_][A-Za-z0-9_.-]{0,127}$/.test(key) || seen.has(key)) throw Error("Invalid or duplicate secret key");
+    seen.add(key);
+    return { key, label: text(row.label, "secret label"),
+      ...(row.description === undefined ? {} : { description: text(row.description, "secret description") }) };
+  });
+  return { reason, secrets };
+}
 export const CLIENT_TOOL_DEFINITIONS: ClientToolDefinition[] = [
   {
     name: "ask_user_question",
@@ -242,6 +267,23 @@ export const CLIENT_TOOL_DEFINITIONS: ClientToolDefinition[] = [
     },
   },
   PLUGIN_META_TOOL_DEFINITION,
+  {
+    name: "request_secret",
+    description: "Request 1..8 ephemeral secret strings from the user. Use key placeholders in authorized tool arguments; never ask the user to send secrets in chat. Only keys and status are returned, never plaintext. The request is blocking and may be declined.",
+    permissions: [{ tool: { kind: "exact", value: "request_secret" }, action: "allow" }],
+    reclaimable: true,
+    interaction: { mode_pointer: "/blocking_mode", wait_timeout_ms: 300000,
+      secret_writes: { keys_pointer: "/secrets", max_keys: 8 } },
+    parameters: { type: "object", additionalProperties: false, required: ["reason", "secrets"],
+      properties: {
+        reason: string,
+        blocking_mode: { type: "string", enum: ["blocking"] },
+        secrets: { type: "array", minItems: 1, maxItems: 8, items: {
+          type: "object", additionalProperties: false, required: ["key", "label"],
+          properties: { key: { type: "string", pattern: "^[A-Za-z_][A-Za-z0-9_.-]{0,127}$" },
+            label: string, description: string } } },
+      } },
+  },
 ];
 function object(value: unknown): Record<string, any> {
   if (!value || typeof value !== "object" || Array.isArray(value))

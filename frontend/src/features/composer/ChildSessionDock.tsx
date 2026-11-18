@@ -5,7 +5,7 @@ import { ContentDialog } from "../ContentDialog";
 import { Payload } from "../Payload";
 import { childText } from "../childPresentation";
 import { Icon } from "../shared";
-import { ComposerSurface } from "./ComposerSurface";
+import { ChildTurnComposer } from "./ChildTurnComposer";
 import { StatisticsOverview } from "./StatisticsDock";
 
 /** Explicit child evidence only; the shared controls never read the parent's input or statistics. */
@@ -48,54 +48,13 @@ export function ChildSessionDock({
   );
   return (
     <div className="composer-stack" data-testid="child-session-dock">
-      <ComposerSurface>
-        <textarea
-          className="home-composer-textarea"
-          aria-label={t("composer.message")}
-          placeholder={t("child.inputHint")}
-          value=""
-          disabled
-          rows={2}
-        />
-        <div className="composer-bottom-bar home-composer-bottom-bar">
-          <span
-            className="composer-bar-left child-input-owner"
-            data-testid="child-detail-status"
-          >
-            {childText(detail?.name)} · {status}
-            {detail ? ` · ${t(`child.${detail.availability}`)}` : ""}
-          </span>
-          <div className="child-content-actions">
-            {detail?.next_cursor != null && (
-              <button
-                type="button"
-                className="ghost-btn"
-                disabled={loading}
-                onClick={onEarlier}
-              >
-                {t("child.earlier")}
-              </button>
-            )}
-            <button
-              type="button"
-              className="ghost-btn"
-              disabled={loading}
-              onClick={onRefresh}
-            >
-              {t("child.refresh")}
-            </button>
-            <button
-              type="button"
-              className="composer-send-arrow-btn"
-              disabled
-              title={t("child.inputHint")}
-              aria-label={t("child.inputHint")}
-            >
-              <Icon name="send" size={16} />
-            </button>
-          </div>
-        </div>
-      </ComposerSurface>
+      <ChildTurnComposer
+        detail={detail}
+        childId={childId}
+        loading={loading}
+        onRefresh={onRefresh}
+        onEarlier={onEarlier}
+      />
       <StatisticsOverview
         statistics={null}
         usage={usage}

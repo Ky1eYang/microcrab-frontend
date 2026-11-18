@@ -1,3 +1,5 @@
+import { ChildInputDocuments } from "../client/child-input-documents";
+import { isDirectUserSource } from "../client/input-source";
 import {
   requestDocumentLeave,
   retainDocumentDrafts,
@@ -41,6 +43,15 @@ import {
   sessionInboxMutationBusy,
 } from "./inbox-draft";
 import { hostReadiness, hostStatePatch } from "./host-readiness";
+import {
+  prepareHostCandidate,
+  preparedHostCandidate,
+  quarantinedHost,
+  quarantineHost,
+  clearHostQuarantine,
+  forgetProjectQuarantine,
+  hostTerminalCode,
+} from "../client/host-quarantine";
 import { isNativeStatistics } from "../client/statistics";
 import { t } from "../i18n";
 import type {
@@ -151,6 +162,7 @@ import { normalizeLocalePreference, syncLocaleFromPreference } from "../i18n";
 export class AppStore {
   state: AppState = initialState();
   readonly conversation = createConversationRegistry();
+  readonly childInputs = new ChildInputDocuments();
   api = new ApiClient(this.state.apiBase);
   private expandedPluginReturn: {
     sessionId: string | null;
@@ -279,6 +291,7 @@ export class AppStore {
         ? (this.clientTools.binding.lease_id ?? null)
         : null,
     async () => {},
+    () => this.clientTools.sessionId === this.state.sessionId && this.clientTools.canInteract,
   );
   private projectClientTools() {
     const binding = this.clientTools.binding;
@@ -399,11 +412,9 @@ export class AppStore {
   private childRead = 0;
   private childrenRead = 0;
   private permissionProjection() {
-    const binding = this.clientTools?.binding;
     const executor =
       this.state.connection === "ws" &&
-      binding?.role === "executor" &&
-      !!binding.lease_id &&
+      this.clientTools.canInteract &&
       this.clientTools.sessionId === this.state.sessionId;
     const requests = [...this.permissionRequests.values()].filter(
       (request) =>
@@ -425,11 +436,9 @@ export class AppStore {
       : null;
   }
   private proposalProjection() {
-    const binding = this.clientTools?.binding;
     const executor =
       this.state.connection === "ws" &&
-      binding?.role === "executor" &&
-      !!binding.lease_id &&
+      this.clientTools.canInteract &&
       this.clientTools.sessionId === this.state.sessionId;
     return [...this.permissionProposals.values()]
       .filter(
@@ -498,7 +507,7 @@ export class AppStore {
     this.permissionRequests.clear();
     this.permissionProposals.clear();
     for (const result of snapshot.proposal_results ?? []) {
-      if (result.status === "persisting")
+      if (result.status === "persisting" || result.status === "outcome_unknown")
         this.proposalSubmitting.add(result.proposal_id);
       else {
         this.proposalSettled.add(result.proposal_id);
@@ -540,14 +549,13 @@ export class AppStore {
     if (this.permissionSubmitting.has(requestId)) return;
     if (
       this.state.connection !== "ws" ||
-      binding?.role !== "executor" ||
-      !binding.lease_id ||
+      !this.clientTools.canInteract ||
       this.clientTools.sessionId !== parent
     )
       throw Error(t("error.permission.observer"));
     if (request.expires_at_ms <= Date.now())
       throw Error(t("error.permission.expired"));
-    const lease = binding.lease_id;
+    const lease = binding?.lease_id;
     const cycle = this.lifecycle;
     this.permissionSubmitting.add(requestId);
     this.projectPermissions();
@@ -559,12 +567,12 @@ export class AppStore {
         remembered: boolean;
       }>(
         "permission.reply",
-        { request_id: requestId, lease_id: lease, decision },
+        { request_id: requestId, ...(lease ? { lease_id: lease } : {}), decision },
         parent,
       );
       if (
         result.request_id !== requestId ||
-        result.decision !== decision ||
+        !["allow", "deny"].includes(result.decision) ||
         result.remembered !== false
       )
         throw new CommandError(
@@ -581,6 +589,18 @@ export class AppStore {
       }
     } catch (error) {
       outcomeUnknown = error instanceof CommandError && error.outcomeUnknown;
+      if (outcomeUnknown) {
+        const receipt = await this.api.request<{ request_id: string; decision: string; remembered: boolean }>(
+          "client_tools.decision", { kind: "permission", request_id: requestId }, parent).catch(() => null);
+        if (cycle === this.lifecycle && parent === this.state.sessionId && receipt?.request_id === requestId &&
+            ["allow", "deny"].includes(receipt.decision) && receipt.remembered === false) {
+          outcomeUnknown = false;
+          this.permissionSettled.add(requestId);
+          this.permissionRequests.delete(requestId);
+          this.projectPermissions();
+          return;
+        }
+      }
       if (cycle === this.lifecycle && parent === this.state.sessionId) {
         // No auto resend: refresh current authority after conflict/timeout/disconnect.
         this.projectPermissions();
@@ -606,8 +626,7 @@ export class AppStore {
     if (this.proposalSubmitting.has(proposalId)) return;
     if (
       this.state.connection !== "ws" ||
-      binding?.role !== "executor" ||
-      !binding.lease_id ||
+      !this.clientTools.canInteract ||
       this.clientTools.sessionId !== parent
     )
       throw Error(t("error.permission.observer"));
@@ -625,11 +644,11 @@ export class AppStore {
         import("../client/types").PermissionProposalResult
       >(
         "permission.proposal.reply",
-        { proposal_id: proposalId, lease_id: binding.lease_id, accept },
+        { proposal_id: proposalId, ...(binding?.lease_id ? { lease_id: binding.lease_id } : {}), accept },
         parent,
       );
       if (cycle === this.lifecycle && parent === this.state.sessionId) {
-        if (result.status === "persisting") unknown = true;
+        if (result.status === "persisting" || result.status === "outcome_unknown") unknown = true;
         else {
           this.proposalSettled.add(proposalId);
           this.permissionProposals.delete(proposalId);
@@ -637,12 +656,32 @@ export class AppStore {
       }
     } catch (error) {
       unknown = error instanceof CommandError && error.outcomeUnknown;
+      if (unknown) {
+        const receipt = await this.api.request<import("../client/types").PermissionProposalResult>(
+          "client_tools.decision", { kind: "permission_proposal", request_id: proposalId }, parent).catch(() => null);
+        if (cycle === this.lifecycle && parent === this.state.sessionId && receipt?.proposal_id === proposalId &&
+            ["accepted", "declined", "expired", "stale", "failed"].includes(receipt.status)) {
+          unknown = false;
+          this.proposalSettled.add(proposalId);
+          this.permissionProposals.delete(proposalId);
+          return;
+        }
+      }
       throw error;
     } finally {
       if (!unknown) this.proposalSubmitting.delete(proposalId);
       if (cycle === this.lifecycle && parent === this.state.sessionId)
         this.projectPermissions();
     }
+  }
+  submitSecret(requestId: string, values: Record<string, string>) {
+    return this.clientTools.submitSecret(requestId, values);
+  }
+  declineSecret(requestId: string) {
+    return this.clientTools.declineSecret(requestId);
+  }
+  observeSecret(requestId: string) {
+    return this.clientTools.observeSecret(requestId);
   }
   private toolDefinitions(): ClientToolDefinition[] {
     return [...CLIENT_TOOL_DEFINITIONS];
@@ -774,6 +813,18 @@ export class AppStore {
       throw error;
     }
   }
+  private rememberHostTerminal(projectId: string, code: unknown, reason?: unknown) {
+    if (!hostTerminalCode(code)) return;
+    const project = this.state.projects.find((item) => item.id === projectId);
+    const connection = this.state.hostConnection;
+    if (!project || connection?.projectId !== projectId) return;
+    const candidate = preparedHostCandidate(
+      this.hostScope(), projectId,
+      connection.endpoint || hostLocator(this.hostScope(), project),
+      project.root || ".",
+    );
+    if (candidate) quarantineHost(candidate, code, reason);
+  }
   /** Execution fences retain a live relay; only known transport loss retires its attempt. */
   private suspendHost(
     projectId?: string,
@@ -796,6 +847,8 @@ export class AppStore {
       readiness?.connected ??
       (preserveTransport && matched && connection.connected === true);
     if (matched) {
+      const terminalCause = readiness?.cause ?? cause;
+      this.rememberHostTerminal(projectId, terminalCause?.code);
       ++this.hostStateRevision;
       if (!connected) this.hostAttempt++;
     }
@@ -1292,6 +1345,16 @@ export class AppStore {
       results[0].status === "fulfilled"
         ? results[0].value
         : { items: this.state.projects };
+    // Quarantine is a browser-local hint; prepare exact candidate witnesses for
+    // project presentation without persisting locators or credentials.
+    const hostScope = this.hostScope();
+    if (hostScope)
+      await Promise.all(projects.items.map(async (project) => {
+        const endpoint = hostLocator(hostScope, project);
+        if (endpoint)
+          await prepareHostCandidate(hostScope, project.id, endpoint, project.root || ".");
+      }));
+    if (!current()) return;
     const models =
       results[1].status === "fulfilled"
         ? results[1].value
@@ -1491,6 +1554,7 @@ export class AppStore {
           undefined,
           trigger,
           restoreSession,
+          true,
         );
       } catch {
         /* Fresh pairing/address recovery is explicit; effects are never replayed. */
@@ -1599,7 +1663,9 @@ export class AppStore {
       agents: [],
     });
     try {
-      await this.api.connectBrowserConversation(id, owner, flavor);
+      const browser = flavor === "chat_only" && !draft
+        ? { serverOwned: true, participant: false }
+        : await this.api.connectBrowserConversation(id, owner, flavor);
       if (!current()) return;
       const catalog = await this.call<{ items: AgentInfo[] }>(
         "agent.catalog",
@@ -1615,6 +1681,8 @@ export class AppStore {
           state: "ready",
           connected: true,
           catalogReady: true,
+          serverOwned: browser.serverOwned === true,
+          browserParticipant: browser.participant === true,
           conversationId: id,
           hostFlavor: flavor,
         },
@@ -1711,6 +1779,7 @@ export class AppStore {
       if (!current() || this.state.hostConnection?.projectId !== projectId)
         return;
       const patch = hostStatePatch(view);
+      this.rememberHostTerminal(projectId, patch.cause?.code);
       this.update({
         hostConnection: {
           ...this.state.hostConnection,
@@ -1770,6 +1839,7 @@ export class AppStore {
     transport?: "relay" | "grpc",
     trigger: HostLifecycleTrigger = "action:connect_host",
     restoreSession = true,
+    automatic = false,
   ): Promise<any> {
     const project = this.state.projects.find((p) => p.id === projectId);
     if (!project) throw Error("请选择已授权项目");
@@ -1789,11 +1859,18 @@ export class AppStore {
       throw new CommandError("invalid_request", t("hostDlg.carrierMismatch"));
     const attempt = ++this.hostAttempt;
     const cycle = this.lifecycle;
-    const current = () =>
-      attempt === this.hostAttempt &&
-      cycle === this.lifecycle &&
-      scope === this.hostScope() &&
-      !!this.state.authSession?.authenticated;
+    const directory = project.root || ".";
+    const savedLocator = hostLocator(scope, project);
+    let verified = false;
+    const current = () => {
+      const latest = this.state.projects.find((item) => item.id === projectId);
+      return attempt === this.hostAttempt && cycle === this.lifecycle &&
+        scope === this.hostScope() && !!this.state.authSession?.authenticated &&
+        !!latest && (verified || ((latest.root || ".") === directory &&
+          hostLocator(scope, latest) === savedLocator));
+    };
+    const candidate = await prepareHostCandidate(scope, projectId, endpoint, directory);
+    if (!current()) return;
     if (
       this.state.sessionId &&
       this.state.sessions.find((s) => s.id === this.state.sessionId)
@@ -1802,6 +1879,18 @@ export class AppStore {
       const popup = this.state.popup;
       this.newChat(false);
       this.update({ popup });
+    }
+    const blocked = automatic ? quarantinedHost(candidate) : undefined;
+    if (blocked) {
+      this.update({
+        agents: [],
+        hostConnection: {
+          state: "suspended", projectId, endpoint, transport: carrier,
+          connected: false, reason: blocked.code,
+          cause: { code: blocked.code, message: t(`host.reason.${blocked.reason ?? blocked.code}`) },
+        },
+      });
+      return;
     }
     this.update({
       agents: [],
@@ -1857,6 +1946,9 @@ export class AppStore {
               patch.reason = patch.cause.code;
             }
             relayState = patch.state;
+            const terminalCode = patch.cause?.code;
+            if (hostTerminalCode(terminalCode))
+              quarantineHost(candidate, terminalCode);
             this.update({
               hostConnection: {
                 ...this.state.hostConnection,
@@ -1949,12 +2041,15 @@ export class AppStore {
               transport,
               trigger,
               restoreSession,
+              automatic,
             );
           } catch (verificationError) {
             failure = verificationError;
           }
         }
         if (current()) {
+          if (failure instanceof CommandError && hostTerminalCode(failure.code))
+            quarantineHost(candidate, failure.code, failure.details?.reason);
           // Api owns generation-scoped relay cleanup. Observation failures must
           // not disconnect a healthy server-owned gRPC route.
           if (current())
@@ -1988,8 +2083,12 @@ export class AppStore {
         throw failure;
       }
       if (!descriptor || !current()) return;
+      verified = true;
+      if (!hostTerminalCode(this.state.hostConnection?.cause?.code))
+        clearHostQuarantine(candidate);
       rememberHost(scope, descriptor.host_id, projectId, endpoint);
       const ready = relayState === "ready";
+      const draftProjectChanged = this.state.draftWorkspace.projectId !== projectId;
       this.update({
         draftWorkspace: {
           kind: "remote",
@@ -2034,6 +2133,13 @@ export class AppStore {
             : p,
         ),
       });
+      // A newly connected Project has its own inherited Agent/model scope.
+      // Resolve it before catalog readiness enables first send; explicit draft
+      // choices remain authoritative in refreshDraftDefaults.
+      if (draftProjectChanged) {
+        await this.refreshDraftDefaults();
+        if (!current()) return descriptor;
+      }
       if (ready) {
         this.update({
           hostConnection: {
@@ -2203,7 +2309,7 @@ export class AppStore {
         this.update({ childListLoading: false });
     }
   }
-  private async loadChild(child: string, append = false) {
+  private async loadChild(child: string, append = false, enter = false) {
     const parent = this.state.sessionId;
     if (!parent || !child) throw Error("缺少父会话或子代理身份");
     if (append && this.state.popup.type !== "subagentDetail") return;
@@ -2227,7 +2333,7 @@ export class AppStore {
       },
     });
     try {
-      const detail = await this.api.request<NativeChildDetail>(
+      let detail = await this.api.request<NativeChildDetail>(
         "session.child",
         {
           child_id: child,
@@ -2252,6 +2358,13 @@ export class AppStore {
         return;
       if (detail.parent_session_id !== parent || detail.id !== child)
         throw Error("子代理详情身份不匹配");
+      if (enter && detail.interaction === "persistent") {
+        if (!this.state.authSession?.authenticated || this.state.authRequired || this.state.connection !== "ws")
+          throw new CommandError("child_entry_unavailable", t("childInput.disconnected"));
+        detail = await this.api.enterChild({ parentId: parent, childId: child }, new AbortController().signal);
+        if (ticket !== this.childRead || cycle !== this.lifecycle || parent !== this.state.sessionId || this.state.popup.type !== "subagentDetail" || this.state.popup.childId !== child)
+          return;
+      }
       if (prior && append) {
         const merged = mergeHistoryPage(
           { ...prior, session: { id: child } },
@@ -2291,7 +2404,8 @@ export class AppStore {
           popup: {
             ...this.state.popup,
             loading: false,
-            error: error instanceof Error ? error.message : String(error),
+            entryUnknown: enter && error instanceof CommandError && error.outcomeUnknown,
+            error: error instanceof CommandError ? `${error.code}: ${error.message}` : error instanceof Error ? error.message : String(error),
           },
         });
     }
@@ -3631,6 +3745,9 @@ export class AppStore {
         }
         break;
       }
+      case "client_tools.lease_changed":
+        this.clientTools.leaseChanged(event.data.executor_connected);
+        break;
       case "client_tool.requested":
       case "client_tool.prepared":
       case "client_tool.paused":
@@ -4011,7 +4128,7 @@ export class AppStore {
         ...this.state.transcript,
         blocks: this.state.transcript.blocks.map((block) =>
           block.temporary &&
-          block.role === "user" &&
+          block.role === "user" && isDirectUserSource(block.payload.source) &&
           block.operationId === receipt.id
             ? { ...block, submissionStatus: "admitted" as const }
             : block,
@@ -4046,7 +4163,7 @@ export class AppStore {
             (block) =>
               !(
                 block.temporary &&
-                block.role === "user" &&
+                block.role === "user" && isDirectUserSource(block.payload.source) &&
                 block.operationId === receipt.id
               ),
           ),
@@ -5288,7 +5405,7 @@ export class AppStore {
             ...this.state.transcript,
             blocks: this.state.transcript.blocks.map((block) =>
               block.temporary &&
-              block.role === "user" &&
+              block.role === "user" && isDirectUserSource(block.payload.source) &&
               block.operationId === opId
                 ? { ...block, submissionStatus: "admitted" as const }
                 : block,
@@ -5330,7 +5447,7 @@ export class AppStore {
               ...this.state.transcript,
               blocks: this.state.transcript.blocks.map((block) =>
                 block.temporary &&
-                block.role === "user" &&
+                block.role === "user" && isDirectUserSource(block.payload.source) &&
                 block.operationId === opId
                   ? { ...block, submissionStatus: "unknown" as const }
                   : block,
@@ -5386,7 +5503,7 @@ export class AppStore {
               (block) =>
                 !(
                   block.temporary &&
-                  block.role === "user" &&
+                  block.role === "user" && isDirectUserSource(block.payload.source) &&
                   block.operationId === opId
                 ),
             ),
@@ -5626,13 +5743,26 @@ export class AppStore {
         case "RefreshPermissions":
           return await this.refreshPermissions();
         case "OpenSubAgentDetail":
-          return await this.loadChild(String(value ?? ""));
+          return await this.loadChild(String(value ?? ""), false, true);
         case "RefreshSubAgentDetail":
           return await this.loadChild(String(state.popup.childId ?? ""));
         case "LoadEarlierChildMessages":
           return await this.loadChild(String(state.popup.childId ?? ""), true);
         case "LoadMoreChildren":
           return await this.loadChildren(true);
+        case "TakeOverBrowserHost": {
+          const id = state.sessionId;
+          const owner = state.authSession?.principal?.owner;
+          if (!id || !owner || state.hostConnection?.conversationId !== id ||
+              state.hostConnection.hostFlavor !== "browser_sandbox" || !state.hostConnection.browserParticipant)
+            throw Error(t("browserHost.bindingChanged"));
+          const browser = await this.api.connectBrowserConversation(id, owner, "browser_sandbox", true);
+          if (this.state.sessionId === id) this.update({ hostConnection: { ...this.state.hostConnection!,
+            serverOwned: browser.serverOwned === true, browserParticipant: browser.participant === true } });
+          return;
+        }
+        case "TakeOverClientTools":
+          return await this.clientTools.takeover();
         case "ReplyQuestion":
         case "RejectQuestion":
           return await this.clientTools.answer(
@@ -6357,6 +6487,7 @@ export class AppStore {
                 project_id: popup.projectId,
               });
               if (!current()) return;
+              forgetProjectQuarantine(this.hostScope(), popup.projectId);
               closePopup();
               const activeDeleted =
                 (deletingSelected && this.state.sessionId === selectedId) ||
@@ -6980,9 +7111,8 @@ export class AppStore {
           const target = state.transcript.blocks.find(
             (block) =>
               block.messageId === messageId &&
-              block.role === "user" &&
-              !block.temporary &&
-              block.payload.source !== "framework",
+              block.role === "user" && isDirectUserSource(block.payload.source) &&
+              !block.temporary,
           );
           const checkpointId = (
             state.history as { checkpoint_id?: string } | null

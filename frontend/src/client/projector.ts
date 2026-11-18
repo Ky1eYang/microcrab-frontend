@@ -1,3 +1,4 @@
+import { isDirectUserSource } from "./input-source";
 import { placeOperationNotice } from "./operation-notice";
 import { operationFailureRoute } from "./operation-failure";
 import {
@@ -437,8 +438,8 @@ export function applySnapshot(
   // Only admission certificates identify a composer submission. Equal text,
   // order, image bodies and terminal queue receipts cannot certify consumption.
   const userAliases = new Map<string, string>();
-  const canonicalUsers = t.blocks.filter((b) => b.role === "user");
-  for (const user of prior.blocks.filter((b) => b.role === "user")) {
+  const canonicalUsers = t.blocks.filter((b) => b.role === "user" && isDirectUserSource(b.payload.source));
+  for (const user of prior.blocks.filter((b) => b.role === "user" && isDirectUserSource(b.payload.source))) {
     if (user.sessionId !== snapshot.session.id && user.sessionId !== "draft")
       continue;
     const exact = canonicalUsers.find((b) => b.messageId === user.messageId);
@@ -446,7 +447,7 @@ export function applySnapshot(
       user.temporary && user.operationId
         ? canonicalUsers.find(
             (b) =>
-              b.payload.source !== "framework" &&
+              isDirectUserSource(b.payload.source) &&
               b.operationId === user.operationId,
           )
         : undefined;
@@ -1170,6 +1171,7 @@ export function applySnapshot(
       if (call) {
         call.payload.text = block.payload.text;
         call.payload.structured = block.payload.structured;
+        call.payload.attachments = block.payload.attachments;
         call.clientInvocationId = block.clientInvocationId;
         call.tool = {
           ...call.tool!,
@@ -1514,7 +1516,7 @@ export function applyEvent(t: Transcript, event: NativeEvent, compose = true) {
     if (data.method === "turn.queue" && data.status === "completed") {
       t.blocks = t.blocks.map((block) =>
         block.temporary &&
-        block.role === "user" &&
+        block.role === "user" && isDirectUserSource(block.payload.source) &&
         block.sessionId === event.session_id &&
         block.operationId === data.id
           ? { ...block, submissionStatus: "admitted" as const }
@@ -1835,8 +1837,8 @@ export function computeTurns(input: Block[] | Transcript): any[] {
     if (b.role === "user" || b.kind === "compaction") {
       current = {
         id: `turn:${b.id}`,
-        userIndex: b.role === "user" ? index : null,
-        extraIndices: b.role === "user" ? [] : [index],
+        userIndex: b.role === "user" && isDirectUserSource(b.payload.source) ? index : null,
+        extraIndices: b.role === "user" && isDirectUserSource(b.payload.source) ? [] : [index],
         rounds: [],
         fold: "expanded",
       };

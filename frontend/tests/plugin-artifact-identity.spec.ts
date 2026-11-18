@@ -58,13 +58,72 @@ test("same plugin ID, release version and ABI cannot retain authority after byte
         },
         new AbortController().signal,
       );
+    const settings = {
+      surface_id: "artifact-identity-settings",
+      target: "setting-page" as const,
+    };
     const configure = async (authorization: string) => {
-      await registry.render(id, "sidebar");
-      registry.setVariable(id, "id", "retained");
-      registry.setVariable(id, "endpoint", endpoint);
-      registry.setVariable(id, "authorization", authorization);
-      registry.setVariable(id, "enabled", "true");
-      await registry.action(id, "save-config");
+      await registry.render(id, settings.target, false, settings);
+      const state = () =>
+        registry.view(id, settings.target, settings).viewState as
+          | {
+              busy?: boolean;
+              error?: string;
+              servers?: {
+                id: string;
+                endpoint: string;
+                enabled: boolean;
+                config_pin: string;
+              }[];
+            }
+          | undefined;
+      const previousPin = state()?.servers?.find(
+        (row) => row.id === "retained",
+      )?.config_pin;
+      await registry.action(
+        id,
+        "save-config",
+        {
+          id: "retained",
+          endpoint,
+          authorization,
+          enabled: true,
+          clear_authorization: false,
+        },
+        settings,
+      );
+      await new Promise<void>((resolve, reject) => {
+        let unsubscribe = () => {};
+        const timer = setTimeout(() => {
+          unsubscribe();
+          reject(
+            Error("Artifact configuration acknowledgement did not settle"),
+          );
+        }, 5000);
+        const check = () => {
+          const view = registry.view(id, settings.target, settings);
+          const current = state();
+          const row = current?.servers?.find(
+            (entry) => entry.id === "retained",
+          );
+          const error = view.status === "faulted" ? view.error : current?.error;
+          if (
+            error ||
+            (!current?.busy &&
+              row?.enabled &&
+              row.endpoint === endpoint &&
+              row.config_pin &&
+              row.config_pin !== previousPin)
+          ) {
+            clearTimeout(timer);
+            unsubscribe();
+            if (error) reject(Error(error));
+            else resolve();
+          }
+        };
+        unsubscribe = registry.subscribe(check);
+        check();
+      });
     };
     try {
       await registry.initialize();

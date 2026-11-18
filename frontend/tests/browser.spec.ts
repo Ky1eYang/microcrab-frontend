@@ -62,6 +62,8 @@ test("HTTP lifecycle and settings retain WS turns, direct Host connection and ca
         "/api/v1/projects",
         "/api/v1/models",
         "/api/v1/sessions",
+        "/api/v1/settings",
+        "/api/v1/projects/project-1/settings",
         "/api/v1/projects/project-1/agents",
         "/api/v1/projects/project-1/host/connect",
         "/api/v1/sessions/s1/runtime",
@@ -141,7 +143,15 @@ test("projectless workspace selection reports missing runtime assets without a P
     route.fulfill({ status: 404, body: "not installed" }),
   );
   await page.goto("/");
-  await expect(page.getByTitle("选择项目工作区")).toContainText("无项目");
+  await expect(page.getByTitle("选择项目工作区")).toContainText("仅聊天");
+  await expect(page.locator(".composer-model-pill")).toContainText(
+    "Configured model",
+  );
+  await expect(page.getByLabel("消息", { exact: true })).toBeEnabled();
+  await expect(page.locator(".composer-offline-banner")).toHaveCount(0);
+  await page.getByTitle("选择项目工作区").click();
+  await page.locator('[data-host-flavor="browser_sandbox"]').click();
+  await expect(page.getByTitle("选择项目工作区")).toContainText("沙盒");
   await expect(page.locator(".composer-plus-btn")).toBeVisible();
   await expect(page.locator(".composer-model-pill")).toContainText(
     "Configured model",
@@ -159,7 +169,12 @@ test("projectless workspace selection reports missing runtime assets without a P
     backend.commands.filter(
       (command) => command.method === "conversation.binding",
     ),
-  ).toHaveLength(1);
+  ).toHaveLength(2);
+  expect(
+    backend.commands
+      .filter((command) => command.method === "conversation.binding")
+      .map((command) => command.params.host_flavor),
+  ).toEqual(["chat_only", "browser_sandbox"]);
   expect(
     backend.commands.filter((command) => command.method === "session.create"),
   ).toHaveLength(0);

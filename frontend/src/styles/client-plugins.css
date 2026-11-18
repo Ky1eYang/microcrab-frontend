@@ -763,20 +763,40 @@
   padding: var(--sp-2);
   border-bottom: 1px solid var(--border);
 }
+.client-plugin-chooser {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+}
+.client-plugin-select {
+  width: 100%;
+  min-width: 0;
+  min-height: var(--sp-6);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-xs);
+}
 .client-plugin-tabs {
   display: flex;
   align-items: center;
-  flex: 1 1 auto;
   min-width: 0;
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
+  overflow: hidden;
   gap: var(--sp-1);
-  scrollbar-width: thin;
 }
-.client-plugin-tabs button {
+.client-plugin-tabs-measure {
+  position: absolute;
+  width: max-content;
+  visibility: hidden;
+  pointer-events: none;
+}
+.client-plugin-tabs :is(button, span) {
+  box-sizing: border-box;
   flex: 0 0 auto;
   min-height: var(--sp-6);
-  max-width: 200px;
   padding: var(--sp-1) var(--sp-2);
   border: 0;
   color: var(--text-2);
@@ -787,7 +807,8 @@
   text-overflow: ellipsis;
   cursor: pointer;
 }
-.client-plugin-tabs button[aria-selected="true"] {
+.client-plugin-tabs button[aria-selected="true"],
+.client-plugin-tabs-measure span[data-selected="true"] {
   color: var(--text);
   background: var(--bg-muted);
   font-weight: 600;

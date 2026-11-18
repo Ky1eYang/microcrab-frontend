@@ -35,7 +35,7 @@ test("failed graph output stays before its operation error across recomposition"
     data: {
       id: "turn",
       session_id: "s1",
-      method: "turn.start",
+      method: "turn.submit",
       status: "failed",
       result: { error: { code: "provider", message: "provider disconnected" } },
     } as any,

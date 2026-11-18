@@ -1,3 +1,4 @@
+import { isDirectUserSource } from "./input-source";
 import { messageBlocks } from "./native-message-blocks";
 import { createBlock } from "./create-block";
 import type { Block, NativeDisplayObservation, Transcript } from "./types";
@@ -1023,7 +1024,7 @@ export function composeDisplayGraph(
   const admittedSubmissions = new Set(
     coveredMessages.flatMap((message) =>
       message.role === "user" &&
-      message.source !== "framework" &&
+      isDirectUserSource(message.source) &&
       message.submission_operation_id
         ? [message.submission_operation_id]
         : [],
@@ -1034,7 +1035,7 @@ export function composeDisplayGraph(
       !block.displayGraphId &&
       !(
         block.temporary &&
-        block.role === "user" &&
+        block.role === "user" && isDirectUserSource(block.payload.source) &&
         block.sessionId === graph.sessionId &&
         admittedSubmissions.has(block.operationId ?? "")
       ) &&

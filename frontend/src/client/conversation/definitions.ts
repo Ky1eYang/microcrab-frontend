@@ -78,7 +78,6 @@ export function definitionFor(block: Block): ConversationNodeDefinition {
   )!;
 }
 export function hasVisibleContent(block: Block): boolean {
-  if (block.payload.source === "framework") return false;
   if (["tool", "child", "compaction", "inbox"].includes(block.kind))
     return true;
   return (

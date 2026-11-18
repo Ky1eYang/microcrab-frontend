@@ -151,7 +151,23 @@ test("dedicated history accepts released Final records independently of empty mo
 });
 
 test("limits keep independent capacities, allow reset by omission, and reject unsafe values", () => {
-  expect(LIMIT_FIELDS).toHaveLength(14);
+  expect(LIMIT_FIELDS).toEqual([
+    "max_rounds",
+    "max_tool_calls_per_round",
+    "max_context_bytes",
+    "max_tool_output_bytes",
+    "max_tool_image_bytes",
+    "max_output_tokens",
+    "interaction_timeout_ms",
+    "max_pending_executions",
+    "max_retained_executions",
+    "lifecycle_timeout_ms",
+    "max_processes",
+    "max_execution_buffers",
+    "max_retained_processes",
+    "output_buffer_bytes",
+    "sleep_max_ms",
+  ]);
   expect(() =>
     validateSettingsOverrides({
       limits: {

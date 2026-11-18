@@ -6,9 +6,11 @@ import {
   useSyncExternalStore,
 } from "react";
 import type { EChartsType } from "echarts/core";
-import { chartOption } from "./policy";
+import { chartOptionDiagnostic } from "./policy";
 import { ChartInteractions, chartIdentity } from "./chart-interactions";
 import { useVisualTheme } from "./theme";
+import { t } from "../../i18n";
+import { Icon } from "../shared";
 export default function EChartsBlock({
   source,
   fallback,
@@ -35,7 +37,8 @@ export default function EChartsBlock({
   } | null>(null);
   const applying = useRef(false);
   const theme = useVisualTheme();
-  const option = useMemo(() => chartOption(source), [source]);
+  const diagnostic = useMemo(() => chartOptionDiagnostic(source), [source]);
+  const option = diagnostic.option;
   const identity = useMemo(
     () => (option ? chartIdentity(option) : null),
     [option],
@@ -147,6 +150,10 @@ export default function EChartsBlock({
       applying.current = false;
     }
   }, [option, identity, ready, owner, revision]);
+  const errorMessage = !option
+    ? t(diagnostic.error || "visual.error.unsupported")
+    : t("visual.error.renderFailed");
+
   return (
     <div className="visual-chart-frame">
       <div
@@ -156,6 +163,18 @@ export default function EChartsBlock({
         data-valid={valid && !!option}
       />
       {(!valid || !option) && fallback}
+      {(!valid || !option) && (
+        <div className="visual-preview-error" data-testid="echarts-error">
+          <div className="visual-preview-error-header">
+            <Icon name="warning" size={16} />
+            <span>{t("visual.error.renderFailed")}</span>
+          </div>
+          <div className="visual-preview-error-body">{errorMessage}</div>
+          <div className="visual-preview-error-hint">
+            {t("visual.error.switchToRaw")}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

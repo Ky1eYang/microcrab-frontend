@@ -1,0 +1,27 @@
+.markdown-interleaved-divider {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 12px 0;
+}
+.block-variant-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  color: var(--text-2);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.assistant-action-bar:has([aria-haspopup="menu"][aria-expanded="true"]) {
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+}
+@media (hover: none) {
+  .assistant-action-bar:has([aria-haspopup="menu"]) {
+    opacity: 1;
+    pointer-events: auto;
+    transform: none;
+  }
+}

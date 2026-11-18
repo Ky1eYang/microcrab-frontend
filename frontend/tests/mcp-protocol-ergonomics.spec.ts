@@ -68,16 +68,69 @@ async function setup(page: Page, counts = { one: 4, two: 3 }, broken = true) {
     await registry.initialize();
     await registry.setSession(session);
     await registry.setEnabled(id, session, true);
-    await registry.render(id, "sidebar");
+    const settings = {
+      surface_id: "ergonomics-settings",
+      target: "setting-page" as const,
+    };
+    await registry.render(id, settings.target, false, settings);
     const configure = async (server: string) => {
-      registry.setVariable(id, "id", server);
-      registry.setVariable(
+      const endpoint = `https://ergonomics-${server}.example.test/mcp`;
+      const state = () =>
+        registry.view(id, settings.target, settings).viewState as
+          | {
+              busy?: boolean;
+              error?: string;
+              servers?: {
+                id: string;
+                endpoint: string;
+                enabled: boolean;
+                config_pin: string;
+              }[];
+            }
+          | undefined;
+      const previousPin = state()?.servers?.find(
+        (row) => row.id === server,
+      )?.config_pin;
+      await registry.action(
         id,
-        "endpoint",
-        `https://ergonomics-${server}.example.test/mcp`,
+        "save-config",
+        {
+          id: server,
+          endpoint,
+          enabled: true,
+          authorization: "",
+          clear_authorization: false,
+        },
+        settings,
       );
-      registry.setVariable(id, "enabled", "true");
-      await registry.action(id, "save-config");
+      await new Promise<void>((resolve, reject) => {
+        let unsubscribe = () => {};
+        const timer = setTimeout(() => {
+          unsubscribe();
+          reject(Error(`MCP configuration did not settle for ${server}`));
+        }, 5000);
+        const check = () => {
+          const view = registry.view(id, settings.target, settings);
+          const current = state();
+          const row = current?.servers?.find((entry) => entry.id === server);
+          const error = view.status === "faulted" ? view.error : current?.error;
+          if (
+            error ||
+            (!current?.busy &&
+              row?.enabled &&
+              row.endpoint === endpoint &&
+              row.config_pin &&
+              row.config_pin !== previousPin)
+          ) {
+            clearTimeout(timer);
+            unsubscribe();
+            if (error) reject(Error(error));
+            else resolve();
+          }
+        };
+        unsubscribe = registry.subscribe(check);
+        check();
+      });
     };
     for (const server of broken ? ["one", "two", "broken"] : ["one", "two"])
       await configure(server);

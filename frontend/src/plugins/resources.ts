@@ -14,6 +14,7 @@ export class PluginResources {
   private configs: ResourceConfig[] = [];
   private controllers = new Map<string, AbortController>();
   private revoked = false;
+  private requestGeneration = 0;
   private storageChanged = (event: StorageEvent) => {
     if (event.key === null || event.key === this.key) {
       this.revoked = true;
@@ -186,18 +187,30 @@ export class PluginResources {
       controller = new AbortController();
       this.controllers.set(c.id, controller);
     }
+    const generation = this.requestGeneration;
     return {
       url: c.endpoint,
       headers: c.authorization ? { Authorization: c.authorization } : {},
       signal: controller.signal,
-      isCurrent: () => this.configs.includes(c) && c.enabled,
+      isCurrent: () =>
+        !this.revoked &&
+        !controller.signal.aborted &&
+        generation === this.requestGeneration &&
+        this.configs.includes(c) &&
+        c.enabled,
     };
+  }
+  /** History changes retire work, not the owner's exact-artifact saved grants.
+   * Revocation/close remain permanent; this method never reauthorizes them. */
+  retireRequests(): void {
+    this.requestGeneration++;
+    for (const controller of this.controllers.values()) controller.abort();
+    this.controllers.clear();
   }
   close(): void {
     globalThis.removeEventListener("storage", this.storageChanged);
     this.revoked = true;
-    for (const c of this.controllers.values()) c.abort();
-    this.controllers.clear();
+    this.retireRequests();
   }
   static reset(serverOrigin: string, ownerId: string, pluginId: string): void {
     const key = `microcrab.plugin.resources.v1:${JSON.stringify([new URL(serverOrigin).origin, ownerId, pluginId])}`;

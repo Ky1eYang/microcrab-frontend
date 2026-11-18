@@ -1,8 +1,11 @@
+import { selectSidebarPlugin } from "./plugin-sidebar-selection";
 import { maintainedPluginBundle } from "./plugin-bundle-fixture";
 import { expect, test } from "@playwright/test";
 import { nativeBackend } from "./native-fixture";
 
-test.beforeEach(async ({ page }) => { await maintainedPluginBundle(page); });
+test.beforeEach(async ({ page }) => {
+  await maintainedPluginBundle(page);
+});
 import { connectHostUI } from "./host-fixture";
 
 test("declared Session plugin tab preserves the conversation node, draft and route and falls back when disabled", async ({
@@ -22,8 +25,11 @@ ${await response.text()}`,
   await page.goto("/#/session/s1/plugins");
   const manager = page.getByTestId("client-plugins-manager");
   await manager.locator('[data-plugin-nav-id="microcrab.fixture"]').click();
-  const fixture = manager.locator('article[data-plugin-id="microcrab.fixture"]');
-  await fixture.getByLabel("在当前会话启用").check();
+  const fixture = manager.locator(
+    'article[data-plugin-id="microcrab.fixture"]',
+  );
+  await fixture.getByLabel("在当前会话启用").click();
+  await expect(fixture.getByLabel("在当前会话启用")).toBeChecked();
   await expect(fixture).toHaveAttribute("data-status", "ready");
   await page.evaluate(() =>
     (window as any).surfaceStore.dispatch({ type: "ClosePluginPage" }),
@@ -50,13 +56,20 @@ ${await response.text()}`,
   await expect(composer).toHaveAttribute("data-surface-survivor", "yes");
   await expect(composer).toHaveValue("surface draft survives");
   expect(page.url()).toBe(url);
-  await page.getByTestId("session-plugin-panel").getByRole("button", { name: "Use HTML", exact: true }).click();
+  await page
+    .getByTestId("session-plugin-panel")
+    .getByRole("button", { name: "Use HTML", exact: true })
+    .click();
   const html = page
     .getByTestId("session-plugin-panel")
     .getByTestId("plugin-webview");
   await expect(html).toHaveAttribute("data-status", "ready");
-  const mountedSurface = await page.evaluate(() =>
-    (window as any).surfaceStore.plugins.registry.view("microcrab.fixture", "session-tab").vars.last_action_context.surface,
+  const mountedSurface = await page.evaluate(
+    () =>
+      (window as any).surfaceStore.plugins.registry.view(
+        "microcrab.fixture",
+        "session-tab",
+      ).vars.last_action_context.surface,
   );
   expect(mountedSurface.target).toBe("session-tab");
   expect(mountedSurface.surface_id).toBeTruthy();
@@ -315,16 +328,19 @@ ${await response.text()}`,
   await page.goto("/#/session/s1/plugins");
   const manager = page.getByTestId("client-plugins-manager");
   await manager.locator('[data-plugin-nav-id="microcrab.fixture"]').click();
-  const fixture = manager.locator('article[data-plugin-id="microcrab.fixture"]');
-  await fixture.getByLabel("在当前会话启用").check();
+  const fixture = manager.locator(
+    'article[data-plugin-id="microcrab.fixture"]',
+  );
+  await fixture.getByLabel("在当前会话启用").click();
+  await expect(fixture.getByLabel("在当前会话启用")).toBeChecked();
   await expect(fixture).toHaveAttribute("data-status", "ready");
   await page.evaluate(() =>
     (window as any).slotStore.dispatch({ type: "ClosePluginPage" }),
   );
-  await page
-    .getByTestId("client-plugin-sidebar")
-    .getByRole("tab", { name: "Component fixture", exact: true })
-    .click();
+  await selectSidebarPlugin(
+    page.getByTestId("client-plugin-sidebar"),
+    "Component fixture",
+  );
   const blockId = await page.evaluate(
     () =>
       (window as any).slotStore

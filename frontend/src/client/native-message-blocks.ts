@@ -1,3 +1,4 @@
+import { isDirectUserSource, validateNativeInputSource } from "./input-source";
 import { createBlock } from "./create-block";
 import { messageImageUrl } from "./images";
 import type { Block, NativeMessage } from "./types";
@@ -7,11 +8,12 @@ export function messageBlocks(
   message: NativeMessage,
   apiBase: string,
 ): Block[] {
+  if (message.role === "user") validateNativeInputSource(message.source);
   const blocks: Block[] = [];
   if (message.role === "tool" || message.text || message.parts?.length) {
     const b = createBlock(sessionId, message.id, "text", "text", message.role);
-    if (message.role === "user" && message.source === "framework")
-      b.payload.source = "framework";
+    if (message.role === "user" && message.source !== undefined)
+      b.payload.source = structuredClone(message.source);
     b.payload.text =
       message.text ||
       message.parts
@@ -72,7 +74,7 @@ export function messageBlocks(
   }
   for (const block of blocks) {
     block.canonicalSourceId = message.canonical_source_id;
-    if (message.role === "user" && message.source !== "framework")
+    if (message.role === "user" && isDirectUserSource(message.source))
       block.operationId = message.submission_operation_id;
     block.position = message.position ?? null;
     block.clientInvocationId = message.client_invocation_id ?? null;

@@ -1,3 +1,4 @@
+import { childInputAllowed, settledReturnChild } from "../client/child-turns";
 import { useClientPlugins } from "../state";
 import {
   hasActiveSessionSidebarPlugin,
@@ -154,11 +155,12 @@ export function Header() {
       : state.page === "plugin"
         ? (activePluginName ?? t("plugins.title"))
         : current?.title || current?.id || "New chat";
+  const hiddenChildren = new Set((state.childList?.parent_session_id === state.sessionId ? state.childList.children : []).filter(settledReturnChild).map((child) => child.id));
   const children = (
     state.childList?.parent_session_id === state.sessionId
       ? state.childList.children
       : []
-  ).map((s) => ({
+  ).filter((child) => !hiddenChildren.has(child.id)).map((s) => ({
     id: s.id,
     title: childText(s.name) || s.id,
     status: childText(s.status) || "unknown",
@@ -166,7 +168,7 @@ export function Header() {
   for (const b of state.transcript.blocks) {
     if (!isSubagent(b)) continue;
     const id = childId(b);
-    if (!id || children.some((s) => s.id === id)) continue;
+    if (!id || hiddenChildren.has(id) || children.some((s) => s.id === id)) continue;
     children.push({
       id,
       title:
@@ -335,7 +337,7 @@ export function Header() {
                 ))}
                 {inspection && (
                   <span className="child-readonly-badge">
-                    {t("header.readonly")}
+                    {inspection.detail && !inspection.loading && !inspection.error && state.connection === "ws" && state.authSession?.authenticated && childInputAllowed(inspection.detail, { parentId: inspection.parentId, childId: inspection.childId }) ? t("childInput.entered") : t("header.readonly")}
                   </span>
                 )}
               </nav>
@@ -369,6 +371,8 @@ export function Header() {
                 "suspended",
                 "catalog_error",
                 "project_mismatch",
+                "binding_mismatch",
+                "host_preflight_unsupported",
               ].includes(host.status) && (
                 <Icon
                   name="warning"

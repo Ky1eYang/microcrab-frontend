@@ -9,6 +9,8 @@ export const WEBVIEW_LIMITS = {
   nodes: 4096,
   actionsPerSecond: 30,
   messagesPerSecond: 60,
+  clipboardPerSecond: 1,
+  clipboardTextBytes: 48 * 1024,
 } as const;
 
 export type JsonRejection =
@@ -66,7 +68,31 @@ export function exactKeys(
 
 // This function is serialized as source, never interpolated with guest HTML or state.
 // The host-only port remains in this closure; plugins receive just action + projection.
-function bootstrap(nonce: string, initialTheme?: WebviewTheme, fitContent = false) {
+function bootstrap(
+  nonce: string,
+  initialTheme?: WebviewTheme,
+  fitContent = false,
+) {
+  // These constants also bound the parent-side broker. The enclosing JSON envelope
+  // has its independent 64 KiB limit (including escaping and request metadata).
+  const clipboardTextBytes = 48 * 1024;
+  let nextCopyId = 0;
+  let pendingCopy:
+    | {
+        id: number;
+        resolve: () => void;
+        reject: (error: Error) => void;
+        timer: ReturnType<typeof setTimeout>;
+      }
+    | undefined;
+  const rejectCopy = (reason: string) => {
+    const pending = pendingCopy;
+    pendingCopy = undefined;
+    if (pending) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error(reason));
+    }
+  };
   const themeKeys = Object.keys(initialTheme?.tokens ?? {});
   let theme = initialTheme?.scheme;
   const themeSubscribers = new Set<(scheme: string) => void>();
@@ -114,7 +140,10 @@ function bootstrap(nonce: string, initialTheme?: WebviewTheme, fitContent = fals
     resizeFrame = window.setTimeout(() => {
       resizeFrame = undefined;
       if (!port || !document.body) return;
-      const height = Math.max(1, Math.ceil(document.body.getBoundingClientRect().height));
+      const height = Math.max(
+        1,
+        Math.ceil(document.body.getBoundingClientRect().height),
+      );
       if (height !== lastHeight) {
         lastHeight = height;
         send.call(port, { type: "content-height", height });
@@ -125,6 +154,56 @@ function bootstrap(nonce: string, initialTheme?: WebviewTheme, fitContent = fals
   let hasCurrent = false;
   const subscribers = new Set<(state: unknown) => void>();
   const api = Object.freeze({
+    copyText(text: string): Promise<void> {
+      if (
+        typeof text !== "string" ||
+        new TextEncoder().encode(text).byteLength > clipboardTextBytes
+      )
+        return Promise.reject(
+          new Error(
+            "Clipboard text exceeds the 48 KiB limit or is not a string",
+          ),
+        );
+      if (!port)
+        return Promise.reject(
+          new Error("Clipboard Host channel is unavailable"),
+        );
+      if (!navigator.userActivation?.isActive)
+        return Promise.reject(
+          new Error("Clipboard copy requires a current user activation"),
+        );
+      if (pendingCopy)
+        return Promise.reject(
+          new Error("Clipboard request is already pending"),
+        );
+      if (!Number.isSafeInteger(nextCopyId + 1))
+        return Promise.reject(
+          new Error("Clipboard request identity exhausted"),
+        );
+      const id = ++nextCopyId;
+      const request = { type: "clipboard-write", id, text };
+      if (
+        new TextEncoder().encode(JSON.stringify(request)).byteLength >
+        64 * 1024
+      )
+        return Promise.reject(
+          new Error("Clipboard request exceeds the 64 KiB envelope limit"),
+        );
+      return new Promise<void>((resolve, reject) => {
+        // A lost channel never claims success and never retries a clipboard mutation.
+        const timer = setTimeout(
+          () =>
+            rejectCopy("Clipboard result is unavailable; copy was not retried"),
+          5000,
+        );
+        pendingCopy = { id, resolve, reject, timer };
+        try {
+          send.call(port!, request);
+        } catch {
+          rejectCopy("Clipboard Host channel failed");
+        }
+      });
+    },
     action(action: string, payload: unknown = null) {
       if (port) send.call(port, { type: "action", action, payload });
     },
@@ -166,6 +245,37 @@ function bootstrap(nonce: string, initialTheme?: WebviewTheme, fitContent = fals
       if (
         update &&
         typeof update === "object" &&
+        update.type === "host-retired"
+      ) {
+        rejectCopy("Clipboard mount retired");
+        close.call(port!);
+        port = undefined;
+        return;
+      }
+      if (
+        update &&
+        typeof update === "object" &&
+        update.type === "clipboard-result"
+      ) {
+        if (
+          Object.keys(update).length !== 4 ||
+          !pendingCopy ||
+          update.id !== pendingCopy.id ||
+          typeof update.ok !== "boolean" ||
+          typeof update.error !== "string"
+        )
+          return;
+        const pending = pendingCopy;
+        pendingCopy = undefined;
+        clearTimeout(pending.timer);
+        if (update.ok) pending.resolve();
+        else
+          pending.reject(new Error(update.error || "Clipboard write failed"));
+        return;
+      }
+      if (
+        update &&
+        typeof update === "object" &&
         Object.keys(update).length === 2 &&
         update.type === "theme"
       ) {
@@ -194,12 +304,18 @@ function bootstrap(nonce: string, initialTheme?: WebviewTheme, fitContent = fals
     send.call(port, { type: "ack", nonce });
     if (fitContent) {
       const style = document.createElement("style");
-      style.textContent = "html,body{height:auto!important;min-height:0!important;overflow-y:hidden!important}body{display:flow-root!important;margin:0!important}";
+      style.textContent =
+        "html,body{height:auto!important;min-height:0!important;overflow-y:hidden!important}body{display:flow-root!important;margin:0!important}";
       document.head.append(style);
       resizeObserver = new ResizeObserver(measure);
       resizeObserver.observe(document.body);
       contentObserver = new MutationObserver(measure);
-      contentObserver.observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true });
+      contentObserver.observe(document.body, {
+        subtree: true,
+        childList: true,
+        attributes: true,
+        characterData: true,
+      });
       listen("resize", measure);
       measure();
     }
@@ -209,6 +325,7 @@ function bootstrap(nonce: string, initialTheme?: WebviewTheme, fitContent = fals
     "pagehide",
     () => {
       unlisten("message", connect);
+      rejectCopy("Clipboard document retired");
       if (port) {
         send.call(port, { type: "retire" });
         close.call(port);

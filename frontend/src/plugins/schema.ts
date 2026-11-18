@@ -1,6 +1,7 @@
 import {
   LIMITS,
   type Json,
+  type BlockTextVariant,
   type PluginManifest,
   type PluginNode,
   type PluginResult,
@@ -455,6 +456,52 @@ export function overlayVariables(
   if (remove.size) result.remove = [...remove];
   return result;
 }
+const blockVariantKeys = new Set([
+  "block_id", "variant_id", "source_digest", "history_revision", "label",
+  "status", "text", "default_display", "reason", "error", "retry_action",
+  "force_action",
+]);
+function boundedVariantString(value: unknown, limit: number, nonempty = true): value is string {
+  return typeof value === "string" && (!nonempty || value.length > 0) &&
+    value.length <= limit && encoder.encode(value).length <= limit;
+}
+/** Validate data only; ownership and source/history certification belong to the registry. */
+export function validateBlockTextVariant(value: unknown): asserts value is BlockTextVariant {
+  if (!value || typeof value !== "object" || Array.isArray(value) ||
+      Object.getPrototypeOf(value) !== Object.prototype ||
+      Object.keys(value).some((key) => !blockVariantKeys.has(key)))
+    throw new Error("invalid block text variant record or unsupported field");
+  const v = value as Record<string, unknown>;
+  if (!boundedVariantString(v.block_id, 256) ||
+      !boundedVariantString(v.variant_id, 128) ||
+      typeof v.source_digest !== "string" || !/^[0-9a-f]{64}$/.test(v.source_digest) ||
+      !boundedVariantString(v.history_revision, 1024) ||
+      !boundedVariantString(v.label, 256) ||
+      typeof v.status !== "string" ||
+      !["pending", "completed", "skipped", "error", "cancelled"].includes(v.status) ||
+      typeof v.default_display !== "string" ||
+      !["inline", "after"].includes(v.default_display) ||
+      !boundedVariantString(v.text, 32 * 1024, false))
+    throw new Error("invalid block text variant identity, status, display or UTF-8 byte quota");
+  if (v.status === "completed" ? v.text === "" : v.text !== "")
+    throw new Error("completed block text variant requires text; other states require empty text");
+  if (v.status === "skipped") {
+    if (typeof v.reason !== "string" ||
+        !["same_language", "no_prose", "unchanged"].includes(v.reason))
+      throw new Error("skipped block text variant requires a supported reason");
+  } else if (Object.hasOwn(v, "reason")) {
+    throw new Error("block text variant reason belongs only to skipped state");
+  }
+  if (v.status === "error") {
+    if (!boundedVariantString(v.error, 4 * 1024))
+      throw new Error("error block text variant requires nonempty bounded error");
+  } else if (Object.hasOwn(v, "error")) {
+    throw new Error("block text variant error belongs only to error state");
+  }
+  for (const key of ["retry_action", "force_action"])
+    if (Object.hasOwn(v, key) && !boundedVariantString(v[key], 128))
+      throw new Error(`invalid block text variant ${key}`);
+}
 export function result(text: string): PluginResult {
   const r = boundedJson<PluginResult>(text);
   assertJson(r);
@@ -512,6 +559,64 @@ export function result(text: string): PluginResult {
   if (r.rerender !== undefined && typeof r.rerender !== "boolean")
     throw new Error("rerender must be boolean");
   if (r.turn_variables) variables(r.turn_variables);
+  if (r.block_variants !== undefined) {
+    if (!Array.isArray(r.block_variants) || r.block_variants.length > 128)
+      throw new Error("block text variant quota exceeded");
+    const seen = new Set<string>();
+    for (const variant of r.block_variants) {
+      validateBlockTextVariant(variant);
+      const key = JSON.stringify([variant.block_id, variant.variant_id]);
+      if (seen.has(key)) throw new Error("duplicate block text variant identity");
+      seen.add(key);
+    }
+  }
+  if (r.remove_block_variants !== undefined) {
+    if (!Array.isArray(r.remove_block_variants) || r.remove_block_variants.length > 128)
+      throw new Error("block text variant removal quota exceeded");
+    const seen = new Set<string>();
+    for (const variant of r.remove_block_variants) {
+      if (!variant || typeof variant !== "object" || Array.isArray(variant) ||
+          Object.getPrototypeOf(variant) !== Object.prototype ||
+          Object.keys(variant).length !== 2 ||
+          !Object.keys(variant).every((key) => ["block_id", "variant_id"].includes(key)) ||
+          !boundedVariantString(variant.block_id, 256) ||
+          !boundedVariantString(variant.variant_id, 128))
+        throw new Error("invalid block text variant removal identity");
+      const key = JSON.stringify([variant.block_id, variant.variant_id]);
+      if (seen.has(key)) throw new Error("duplicate block text variant removal identity");
+      seen.add(key);
+    }
+  }
+  if (r.remove_block_slots !== undefined) {
+    if (
+      !Array.isArray(r.remove_block_slots) ||
+      r.remove_block_slots.length > 128
+    )
+      throw new Error("block slot removal quota exceeded");
+    const seen = new Set<string>();
+    for (const slot of r.remove_block_slots) {
+      if (
+        !slot ||
+        typeof slot !== "object" ||
+        Array.isArray(slot) ||
+        Object.keys(slot).length !== 2 ||
+        !Object.keys(slot).every((key) =>
+          ["block_id", "slot_id"].includes(key),
+        ) ||
+        typeof slot.block_id !== "string" ||
+        !slot.block_id ||
+        slot.block_id.length > 256 ||
+        typeof slot.slot_id !== "string" ||
+        !slot.slot_id ||
+        slot.slot_id.length > 128
+      )
+        throw new Error("invalid block slot removal identity");
+      const key = JSON.stringify([slot.block_id, slot.slot_id]);
+      if (seen.has(key))
+        throw new Error("duplicate block slot removal identity");
+      seen.add(key);
+    }
+  }
   if (r.block_slots) {
     if (!Array.isArray(r.block_slots) || r.block_slots.length > 64)
       throw new Error("block slot quota exceeded");
@@ -794,6 +899,8 @@ export function renderOutput(value: unknown): PluginResult {
 export function validateBlockSlot(slot: import("./types").BlockSlot): void {
   if (
     !slot ||
+    typeof slot !== "object" ||
+    Array.isArray(slot) ||
     typeof slot.slot_id !== "string" ||
     !slot.slot_id ||
     slot.slot_id.length > 128 ||
@@ -802,9 +909,28 @@ export function validateBlockSlot(slot: import("./types").BlockSlot): void {
     slot.block_id.length > 256 ||
     (slot.target !== undefined && slot.target !== "block-slot") ||
     (slot.placement !== undefined &&
-      !["before", "after"].includes(slot.placement))
+      slot.placement !== "before" &&
+      slot.placement !== "after")
   )
-    throw new Error("invalid block slot identity/target/placement");
+    throw new Error("invalid block slot identity or placement");
+  if (
+    slot.mode === undefined &&
+    slot.tree === undefined &&
+    slot.content === undefined &&
+    slot.view_state === undefined
+  ) {
+    if (
+      Object.keys(slot).length !== 3 ||
+      !Object.keys(slot).every((key) =>
+        ["slot_id", "block_id", "placement"].includes(key),
+      ) ||
+      slot.placement === undefined
+    )
+      throw new Error(
+        "deferred block slot requires exact identity and placement only",
+      );
+    return;
+  }
   if (slot.mode === "webview-html") {
     if (
       typeof slot.content !== "string" ||
@@ -818,6 +944,10 @@ export function validateBlockSlot(slot: import("./types").BlockSlot): void {
   } else {
     if (slot.mode !== undefined && slot.mode !== "native-json")
       throw new Error("unsupported block slot render mode");
+    if (slot.content !== undefined || slot.view_state !== undefined)
+      throw new Error(
+        "native block slot cannot contain HTML content or view state",
+      );
     if (!slot.tree) throw new Error("native block slot requires tree");
     validateTree(slot.tree);
   }

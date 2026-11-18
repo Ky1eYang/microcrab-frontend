@@ -41,3 +41,27 @@
   border-radius: var(--r-sm);
   max-width: 100%;
 }
+.visual-preview-error {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-4);
+  background: var(--bg-subtle, rgba(0, 0, 0, 0.05));
+  border-radius: var(--r-md);
+  color: var(--text-2);
+  font-size: 0.875rem;
+}
+.visual-preview-error-header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-weight: 500;
+  color: var(--text-1);
+}
+.visual-preview-error-body {
+  color: var(--text-danger, #e06c75);
+}
+.visual-preview-error-hint {
+  color: var(--text-3);
+  font-size: 0.8125rem;
+}

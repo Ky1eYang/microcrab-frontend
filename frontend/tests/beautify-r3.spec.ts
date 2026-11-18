@@ -194,7 +194,14 @@ test("former text glyphs are aria-hidden icons and names keep their text", async
   await expect(active).toHaveAccessibleName(/Assigned\s+离线/);
   await expect(active).toHaveAttribute("title", "/assigned");
   // Single-line picker retains the path as a tooltip and uses hidden chrome icons.
-  await expect(active.locator('svg[aria-hidden="true"]')).toHaveCount(2);
+  await expect(active.locator(".ws-project-folder-icon")).toHaveAttribute(
+    "aria-hidden",
+    "true",
+  );
+  await expect(active.locator(".ws-item-check svg")).toHaveAttribute(
+    "aria-hidden",
+    "true",
+  );
   await expect(active.locator("svg.glyph-icon")).toHaveCount(1);
   await expect(active.locator(".picker-project-status svg")).toHaveCount(1);
 });
