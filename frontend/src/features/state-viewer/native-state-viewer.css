@@ -248,3 +248,17 @@
     border-inline-start: 1px solid var(--border);
   }
 }
+
+/* Touch layouts: 44px tree rows and disclosure targets. */
+@media (pointer: coarse), (max-width: 767.98px) {
+  .native-state-disclosure,
+  .native-state-spacer {
+    flex-basis: 44px;
+    min-block-size: 44px;
+  }
+
+  .native-state-key {
+    min-block-size: 44px;
+    align-items: center;
+  }
+}

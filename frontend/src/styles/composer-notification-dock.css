@@ -34,7 +34,6 @@
   min-width: 0;
   min-height: 32px;
   border: 0;
-  border-inline-start: 2px solid var(--border-strong);
   border-radius: 0;
   background: transparent;
   color: var(--text-2);
@@ -42,33 +41,7 @@
   line-height: 1.45;
 }
 
-.composer-notification-dock .composer-notification-row[data-tone="warn"] {
-  border-inline-start-color: var(--warn);
-}
-
-.composer-offline-banner.composer-host-notice {
-  flex-wrap: nowrap;
-  min-width: 0;
-}
-
-.composer-host-notice .composer-offline-left,
-.composer-notice-message {
-  display: flex;
-  align-items: center;
-  flex: 1 1 0;
-  min-width: 0;
-}
-
-.composer-notice-text {
-  display: block;
-  flex: 1 1 0;
-  min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.composer-notification-dock .composer-notification-row > .settings-actions-row {
+.composer-notification-dock .composer-notification-row .settings-actions-row {
   flex: none;
   flex-wrap: nowrap;
   gap: var(--sp-1);
@@ -85,57 +58,9 @@
   white-space: nowrap;
 }
 
-.composer-notice-reveal {
-  display: inline-grid;
-  place-items: center;
-  min-width: 24px;
-  padding-inline: 0;
-  border: 0;
-  border-radius: var(--r-sm);
-  color: inherit;
-  background: none;
-  cursor: pointer;
-}
-
-.composer-notice-reveal:hover {
-  background: var(--bg-muted);
-}
-
-.composer-notice-popover {
-  position: fixed;
-  inset: auto;
-  left: var(--notice-popover-left);
-  width: var(--notice-popover-width);
-  max-height: var(--notice-popover-space);
-  padding: var(--sp-3);
-  margin: 0;
-  box-sizing: border-box;
-  overflow: auto;
-  overscroll-behavior: contain;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--r-sm);
-  background: var(--surface);
-  color: var(--text);
-  box-shadow: var(--shadow-pop);
-}
-
-.composer-notice-popover[data-placement="above"] {
-  bottom: var(--notice-popover-edge);
-}
-
-.composer-notice-popover[data-placement="below"] {
-  top: var(--notice-popover-edge);
-}
-
-@media (pointer: coarse) {
+@media (pointer: coarse), (max-width: 767.98px) {
   .composer-notification-row button,
   .composer-host-notice button {
-    min-height: 36px;
-  }
-
-  .composer-notice-reveal {
-    min-width: 36px;
+    min-height: 44px;
   }
 }

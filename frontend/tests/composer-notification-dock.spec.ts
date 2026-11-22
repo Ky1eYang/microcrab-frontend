@@ -76,7 +76,7 @@ for (const width of [1440, 390]) {
     await nativeBackend(page);
     await page.goto("/");
     const notice = page.locator(".home-composer-box .composer-host-notice");
-    const label = notice.locator(".composer-notice-text");
+    const label = notice.locator(".notice-text");
     const action = notice.getByRole("button", { name: "连接 Host", exact: true });
     await expect(label).toHaveText(/项目宿主机执行端离线/);
     await expect(label).toHaveCSS("white-space", "nowrap");
@@ -85,14 +85,14 @@ for (const width of [1440, 390]) {
     const [textBox, buttonBox] = await Promise.all([bounds(label), bounds(action)]);
     expect(textBox.x + textBox.width).toBeLessThan(buttonBox.x);
     expect(Math.abs(textBox.y + textBox.height / 2 - (buttonBox.y + buttonBox.height / 2))).toBeLessThan(2);
-    const detail = notice.locator(".composer-notice-popover");
+    const detail = notice.locator(".notice-popover");
     await label.hover();
     await expect(detail).toBeVisible();
     await expect(detail).toHaveText(/项目宿主机执行端离线。.*仍可浏览历史记录。/);
     expect(await detail.innerText()).toBe(await label.innerText());
     await action.hover();
     await expect(detail).toBeHidden();
-    const reveal = notice.locator(".composer-notice-reveal");
+    const reveal = notice.locator(".notice-reveal");
     await reveal.focus();
     await page.keyboard.press("Enter");
     await expect(reveal).toHaveAttribute("aria-expanded", "true");
@@ -267,8 +267,8 @@ test("overflowing notice shows its full text on hover and by keyboard without mo
   await page.setViewportSize({ width: 390, height: 720 });
   await fixture(page, [round("long-text")]);
   const row = page.getByTestId("round-limit-request");
-  const text = row.locator(".composer-notice-text");
-  const popup = row.locator(".composer-notice-popover");
+  const text = row.locator(".notice-text");
+  const popup = row.locator(".notice-popover");
   const reveal = row.getByRole("button", { name: "查看完整通知" });
   const action = row.getByRole("button", { name: "继续 64 轮" });
   const stop = row.getByRole("button", { name: "停止", exact: true });
@@ -326,7 +326,7 @@ test.describe("touch notice disclosure", () => {
     await fixture(page, [round("touch")]);
     const row = page.getByTestId("round-limit-request");
     const reveal = row.getByRole("button", { name: "查看完整通知" });
-    const popup = row.locator(".composer-notice-popover");
+    const popup = row.locator(".notice-popover");
     await reveal.tap();
     await expect(popup).toBeVisible();
     await expect(popup).toContainText("已执行 64 轮");

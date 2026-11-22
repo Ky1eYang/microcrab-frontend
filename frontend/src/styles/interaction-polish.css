@@ -1132,6 +1132,138 @@ button.search-result-item:focus-visible {
   }
 }
 
+/* ── D3: remaining touch controls get a ≥44px hit area on coarse pointers
+ * and narrow screens. Icon/pill controls keep their compact visual box and
+ * grow an invisible centred hit layer; list rows and text buttons simply get
+ * a 44px row on touch layouts. Desktop (fine pointer, ≥768px) is unchanged. */
+@media (pointer: coarse), (max-width: 767.98px) {
+  .header-capsule-btn,
+  .composer-send-arrow-btn,
+  .composer-stop-square-btn,
+  .composer-insert-btn,
+  .dock-pill-btn,
+  .rail-tool-btn,
+  .project-host-warn,
+  .settings-close-btn,
+  .home-workspace-badge-btn,
+  .statistics-help {
+    position: relative;
+  }
+
+  /* Raised above later siblings so the extended layer is what a tap hits. */
+  .header-capsule-btn,
+  .composer-plus-btn,
+  .composer-send-arrow-btn,
+  .composer-stop-square-btn,
+  .composer-insert-btn,
+  .dock-pill-btn,
+  .rail-tool-btn,
+  .project-host-warn,
+  .rail-project-btn,
+  .settings-close-btn {
+    z-index: 1;
+  }
+
+  .header-capsule-btn::after,
+  .composer-send-arrow-btn::after,
+  .composer-stop-square-btn::after,
+  .composer-insert-btn::after,
+  .dock-pill-btn::after,
+  .rail-tool-btn::after,
+  .project-host-warn::after,
+  .settings-close-btn::after,
+  .home-workspace-badge-btn::after,
+  .statistics-help::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: max(100%, 46px);
+    height: max(100%, 46px);
+    transform: translate(-50%, -50%);
+  }
+
+  /* The host label ellipsizes itself; the pill must not clip its hit layer. */
+  .header-capsule-btn.header-capsule-btn {
+    overflow: visible;
+  }
+
+  /* Adjacent compact controls need ≥44px between centres for their hit
+   * layers not to overlap: widen only the gaps, not the controls. */
+  .composer-bar-left {
+    gap: 18px;
+  }
+
+  .composer-bar-right {
+    row-gap: 16px;
+  }
+
+  .composer-bar-right .composer-busy-actions {
+    gap: 8px;
+  }
+
+  .rail-project-actions {
+    gap: 22px;
+  }
+
+  .rail-project-row .project-host-warn {
+    margin-inline-end: 20px;
+  }
+
+  /* The secondary tabs sit flush under the header row; a 44px tab row keeps
+   * their hit layer clear of the header controls above. */
+  .header-subnav-row {
+    min-height: 44px;
+  }
+
+  .secondary-tab-btn::after {
+    height: 44px;
+  }
+
+  .settings-dialog .settings-nav .settings-nav-item.settings-nav-item {
+    min-height: 44px;
+  }
+
+  .subnav-item-btn,
+  .session-rail-new-btn,
+  .settings-nav-item,
+  .tool-accordion-header,
+  .tool-accordion-group-header,
+  .composer-action-row,
+  .flow-card-details > summary,
+  .ghost-btn,
+  .primary-btn,
+  .perm-mode,
+  .execution-action.ghost-btn.ghost-btn {
+    min-height: 44px;
+  }
+
+  .queue-item-action-btn,
+  .queue-item-delete-btn {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  .queue-item-body > summary.queue-item-text {
+    padding-block: 12px;
+  }
+
+  /* The toast clips overflow, so its close button grows for real. */
+  .toast-close.toast-close {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .home-dropdown-menu .picker-row.picker-row {
+    min-height: 44px;
+  }
+
+  /* Section labels must not swallow taps meant for the row above. */
+  .home-dropdown-menu .dropdown-section-title {
+    pointer-events: none;
+  }
+}
+
 /* ── v0.1.18: 16px text inputs on narrow screens (no iOS focus zoom) ── */
 @media (max-width: 767.98px) {
   textarea,

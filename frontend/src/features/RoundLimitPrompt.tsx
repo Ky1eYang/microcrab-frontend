@@ -1,4 +1,4 @@
-import { ComposerNoticeText } from "./composer/ComposerNoticeText";
+import { ExpandableNotice } from "./ExpandableNotice";
 import { useAppFields } from "../state";
 import { t } from "../i18n";
 import type { RoundLimitRequestView } from "../client/types";
@@ -55,10 +55,13 @@ export function RoundLimitPrompt() {
           .filter(Boolean)
           .join(" ");
         return (
-          <article
+          <ExpandableNotice
+            as="article"
+            role={null}
             className="composer-notification-row"
             aria-label={heading}
-            data-tone="warn"
+            tone="warn"
+            text={message}
             key={request.request_id}
             data-testid="round-limit-request"
             data-kind={request.kind}
@@ -71,39 +74,39 @@ export function RoundLimitPrompt() {
                   : "ready"
             }
             aria-busy={request.submitting || undefined}
-          >
-            <ComposerNoticeText text={message} />
-            <div className="settings-actions-row">
-              <button
-                className="primary-btn"
-                type="button"
-                disabled={request.disabled}
-                onClick={() =>
-                  dispatch({
-                    type: "ReplyRoundLimit",
-                    requestId: request.request_id,
-                    decision: "continue",
-                  })
-                }
-              >
-                {t(copy.continueLabel, { used, block, additional: block })}
-              </button>
-              <button
-                className="ghost-btn"
-                type="button"
-                disabled={request.disabled}
-                onClick={() =>
-                  dispatch({
-                    type: "ReplyRoundLimit",
-                    requestId: request.request_id,
-                    decision: "stop",
-                  })
-                }
-              >
-                {t("roundLimit.stop")}
-              </button>
-            </div>
-          </article>
+            action={
+              <div className="settings-actions-row">
+                <button
+                  className="primary-btn"
+                  type="button"
+                  disabled={request.disabled}
+                  onClick={() =>
+                    dispatch({
+                      type: "ReplyRoundLimit",
+                      requestId: request.request_id,
+                      decision: "continue",
+                    })
+                  }
+                >
+                  {t(copy.continueLabel, { used, block, additional: block })}
+                </button>
+                <button
+                  className="ghost-btn"
+                  type="button"
+                  disabled={request.disabled}
+                  onClick={() =>
+                    dispatch({
+                      type: "ReplyRoundLimit",
+                      requestId: request.request_id,
+                      decision: "stop",
+                    })
+                  }
+                >
+                  {t("roundLimit.stop")}
+                </button>
+              </div>
+            }
+          />
         );
       })}
     </>

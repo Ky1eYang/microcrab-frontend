@@ -86,6 +86,59 @@ test.describe("touch (hover: none) at 390", () => {
     expect(size.hitW).toBeGreaterThanOrEqual(44);
     expect(size.hitH).toBeGreaterThanOrEqual(44);
   });
+
+  test("3.5 D3 remaining composer, header and drawer controls hit 44px", async ({
+    page,
+  }) => {
+    const expectHit = async (control: Locator, label: string) => {
+      await expect(control, label).toBeVisible();
+      const size = await measureHitArea(control);
+      expect(size.hitW, `${label} hit width`).toBeGreaterThanOrEqual(44);
+      expect(size.hitH, `${label} hit height`).toBeGreaterThanOrEqual(44);
+      return size;
+    };
+    await scenario(page, "default");
+    for (const id of [
+      "header-open-rail",
+      "header-host-connection",
+      "tab-conversation",
+      "composer-session-permissions",
+      "composer-send",
+      "statistics-activity",
+      "statistics-usage",
+    ])
+      await expectHit(page.getByTestId(id), id);
+    // Pills, Host capsule and send keep their compact visual box.
+    expect(
+      (await measureHitArea(page.getByTestId("header-host-connection")))
+        .visualH,
+    ).toBeLessThan(44);
+    expect(
+      (await measureHitArea(page.getByTestId("statistics-usage"))).visualH,
+    ).toBeLessThan(44);
+    await expectHit(
+      page.getByRole("button", { name: "快捷操作与工具" }),
+      "composer-plus",
+    );
+
+    await page.getByTestId("header-open-rail").click();
+    for (const id of [
+      "nav-new-chat",
+      "nav-dashboard",
+      "rail-plugins-btn",
+      "nav-history",
+      "project-host-warn",
+    ])
+      await expectHit(page.getByTestId(id), id);
+    await expectHit(
+      page.getByRole("button", { name: "收起侧边栏" }),
+      "collapse-sidebar",
+    );
+
+    await scenario(page, "inbox-mixed-draft");
+    for (const id of ["composer-stop", "steer-input", "queue-input"])
+      await expectHit(page.getByTestId(id), id);
+  });
 });
 
 test.describe("narrow 390", () => {
@@ -94,22 +147,25 @@ test.describe("narrow 390", () => {
   test("3.3 host-offline notice is one line with a disclosure that expands and collapses", async ({
     page,
   }) => {
-    // v0.1.20 keeps the reviewed ComposerHostNotice (one-line ellipsis plus
-    // an explicit disclosure popover) instead of the v0.1.18 ExpandableNotice.
+    // One notice pattern everywhere (D2): ExpandableNotice = dot + one-line
+    // ellipsis + "…" disclosure popover, actions on the same row.
     await scenario(page, "default");
     const notice = page.locator(".composer-host-notice").first();
     await expect(notice).toBeVisible();
-    const text = notice.locator(".composer-notice-text");
+    await expect(notice).toHaveClass(/expandable-notice/);
+    const text = notice.locator(".notice-text");
     await expect
       .poll(() => text.evaluate((el) => el.getBoundingClientRect().height))
       .toBeLessThanOrEqual(24);
-    const reveal = notice.locator(".composer-notice-reveal");
+    const reveal = notice.locator(".notice-reveal");
     await expect(reveal).toBeVisible();
     await reveal.click();
     await expect(reveal).toHaveAttribute("aria-expanded", "true");
-    await expect(notice.locator(".composer-notice-popover")).toBeVisible();
+    await expect(notice).toHaveAttribute("data-expanded", "true");
+    await expect(notice.locator(".notice-popover")).toBeVisible();
     await reveal.click();
     await expect(reveal).toHaveAttribute("aria-expanded", "false");
+    await expect(notice).toHaveAttribute("data-expanded", "false");
   });
 
   test("3.2 actionable permission cards: Will run, Deny then Allow once, no overflow", async ({
@@ -189,9 +245,9 @@ test.describe("narrow 390", () => {
     const banner = page.locator(".settings-feedback-banner.expandable-notice");
     await expect(banner).toBeVisible();
     await expect(banner).toHaveAttribute("data-expanded", "false");
-    await expect(banner).toHaveAttribute("data-expandable", "true");
-    await banner.locator(".expandable-notice-toggle").click();
+    await banner.locator(".notice-reveal").click();
     await expect(banner).toHaveAttribute("data-expanded", "true");
+    await expect(banner.locator(".notice-popover")).toBeVisible();
     const toast = page.getByTestId("toast-body");
     await expect(toast).toHaveAttribute("data-expanded", "false");
     await expect(toast).toHaveCSS("-webkit-line-clamp", "2");
@@ -223,13 +279,14 @@ test.describe("narrow 320", () => {
     await scenario(page, "inbox-mixed-draft");
     const note = page.getByTestId("inbox-draft-note");
     await expect(note).toHaveAttribute("data-expanded", "false");
-    await expect(note).toHaveAttribute("data-expandable", "true");
-    const text = note.locator(".offline-text");
+    const text = note.locator(".notice-text");
     await expect(text).toHaveCSS("white-space", "nowrap");
     await expect(text).toHaveCSS("text-overflow", "ellipsis");
-    await note.locator(".expandable-notice-toggle").click();
+    await note.locator(".notice-reveal").click();
     await expect(note).toHaveAttribute("data-expanded", "true");
-    await expect(text).not.toHaveCSS("white-space", "nowrap");
+    // The full text opens in a popover; the row itself stays one line.
+    await expect(note.locator(".notice-popover")).toBeVisible();
+    await expect(text).toHaveCSS("white-space", "nowrap");
   });
   test("P2-4 transcript status lines are one-line expandable notices", async ({
     page,
@@ -239,16 +296,17 @@ test.describe("narrow 320", () => {
     const gap = page.getByTestId("conversation-history-gap");
     for (const notice of [coverage, gap]) {
       await expect(notice).toHaveClass(/expandable-notice/);
-      await expect(notice.locator(".offline-text")).toHaveCSS(
+      await expect(notice.locator(".notice-text")).toHaveCSS(
         "white-space",
         "nowrap",
       );
     }
-    await expect(coverage).toHaveAttribute("data-expandable", "true");
     await expect(coverage).toHaveAttribute("data-expanded", "false");
-    await coverage.locator(".expandable-notice-toggle").click();
+    await coverage.locator(".notice-reveal").click();
     await expect(coverage).toHaveAttribute("data-expanded", "true");
-    await expect(coverage).toContainText("已恢复的思考内容可能不完整");
+    await expect(coverage.locator(".notice-popover")).toContainText(
+      "已恢复的思考内容可能不完整",
+    );
     // The "load earlier" control stays a plain fold button.
     await expect(
       page.locator(".transcript-history-fold-btn.expandable-notice"),
@@ -258,6 +316,21 @@ test.describe("narrow 320", () => {
 
 test.describe("desktop 1440", () => {
   test.use({ viewport: { width: 1440, height: 900 } });
+
+  test("D3 touch hit areas do not bloat fine-pointer desktop controls", async ({
+    page,
+  }) => {
+    await scenario(page, "default");
+    for (const [id, max] of [
+      ["composer-send", 32],
+      ["header-host-connection", 28],
+      ["statistics-usage", 24],
+    ] as const) {
+      const size = await measureHitArea(page.getByTestId(id));
+      expect(size.visualH, id).toBeLessThanOrEqual(max);
+      expect(size.hitH, id).toBeLessThanOrEqual(max + 1);
+    }
+  });
 
   test("3.1 Retry is visible without hover on desktop and at least 32px", async ({
     page,

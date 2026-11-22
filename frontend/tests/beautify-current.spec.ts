@@ -135,9 +135,9 @@ for (const { colorScheme, width } of [
         "color",
         await tokenColor(page, "--text-2"),
       );
-      // Tip-strip: left warn rail, no wash background.
-      await expect(banner).toHaveCSS(
-        "border-left-color",
+      // Unified notice: warn tone on the dot, no wash background.
+      await expect(banner.locator(".expandable-notice-dot").first()).toHaveCSS(
+        "background-color",
         await tokenColor(page, "--warn"),
       );
       await banner

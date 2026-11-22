@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useAppFields, useAppSelector } from "../../state";
 import { t } from "../../i18n";
-import { ComposerNoticeText } from "./ComposerNoticeText";
+import { ExpandableNotice } from "../ExpandableNotice";
 
 export function BrowserHostTakeoverNotice() {
   const { state, dispatch } = useAppFields([
@@ -28,19 +28,21 @@ export function BrowserHostTakeoverNotice() {
   };
   if (!hostParticipant) return null;
   return (
-    <div
+    <ExpandableNotice
       className="composer-notification-row"
+      tone="info"
       data-testid="browser-host-takeover-notice"
-    >
-      <ComposerNoticeText text={t("interaction.browserHostParticipant")} />
-      <button
-        type="button"
-        className="ghost-btn"
-        disabled={takingOver || sessionStatus !== "idle"}
-        onClick={() => void takeover()}
-      >
-        {t("interaction.takeoverHost")}
-      </button>
-    </div>
+      text={t("interaction.browserHostParticipant")}
+      action={
+        <button
+          type="button"
+          className="ghost-btn"
+          disabled={takingOver || sessionStatus !== "idle"}
+          onClick={() => void takeover()}
+        >
+          {t("interaction.takeoverHost")}
+        </button>
+      }
+    />
   );
 }
