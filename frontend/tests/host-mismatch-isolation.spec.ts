@@ -36,9 +36,11 @@ async function seed(page: Page) {
 }
 async function selectProject(page: Page, projectId: string) {
   await page.getByTitle("选择项目工作区").click();
-  await page.locator('[data-host-id="h1"]').click();
+  // v0.1.18 P1 picker is a flat list (Recent + All projects), no Host cascade.
   // The attribute belongs to the button itself; do not depend on project sorting.
-  await page.locator(`[data-testid="home-project-item"][data-project-id="${projectId}"]`).first().click();
+  const item = page.locator(`[data-testid="home-project-item"][data-project-id="${projectId}"]`).first();
+  if (!(await item.isVisible())) await page.getByTestId("picker-all-projects").click();
+  await item.click();
 }
 async function explicitConnect(page: Page) {
   await page.getByTestId("header-host-connection").click();
