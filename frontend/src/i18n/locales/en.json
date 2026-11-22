@@ -1614,5 +1614,9 @@
   "home.picker.sandboxNotReady": "Not ready · Click to fetch",
   "home.picker.sandboxLoading": "Fetching runtime…",
   "home.picker.sandboxError": "Couldn’t fetch the runtime. {error}",
-  "home.picker.sandboxRetry": "Retry"
+  "home.picker.sandboxRetry": "Retry",
+  "trajectory.status.awaitingResult": "No result yet",
+  "trajectory.status.unconfirmed": "Status unconfirmed",
+  "trajectory.status.inProgress": "In progress",
+  "trajectory.notRecorded": "Not recorded"
 }

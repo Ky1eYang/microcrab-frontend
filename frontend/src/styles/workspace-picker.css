@@ -281,9 +281,14 @@
   min-width: 0;
 }
 
+/* Unavailable sandbox names stay readable (text-2 keeps 4.5:1); only the
+ * folder glyph steps down to text-3. */
 .picker-other-row[data-sandbox-state="not_ready"] .ws-item-name,
 .picker-other-row[data-sandbox-state="loading"] .ws-item-name,
-.picker-other-row[data-sandbox-state="error"] .ws-item-name,
+.picker-other-row[data-sandbox-state="error"] .ws-item-name {
+  color: var(--text-2);
+}
+
 .picker-other-row[data-sandbox-state="not_ready"] .ws-project-folder-icon,
 .picker-other-row[data-sandbox-state="loading"] .ws-project-folder-icon,
 .picker-other-row[data-sandbox-state="error"] .ws-project-folder-icon {

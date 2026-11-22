@@ -1806,6 +1806,11 @@
     min-height: 44px;
   }
 
+  /* Narrow notice copy stays at least 13px even inside 12px host rows. */
+  .expandable-notice .offline-text {
+    font-size: max(1em, var(--fs-sm));
+  }
+
   .expandable-notice[data-expanded="false"] .offline-text {
     white-space: nowrap;
     overflow: hidden;

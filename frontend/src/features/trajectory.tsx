@@ -278,16 +278,16 @@ function trajectoryGlyph(item: TrajectoryItem): ToolDisplayStatus | null {
 
 function statusLabel(status: string) {
   if (status === "cancelled") return t("stopReason.cancelled");
-  if (status === "awaiting-result") return "尚无结果";
-  if (status === "unknown") return "状态未确认";
+  if (status === "awaiting-result") return t("trajectory.status.awaitingResult");
+  if (status === "unknown") return t("trajectory.status.unconfirmed");
   if (isFailed(status)) return t("tools.status.failed");
-  if (status === "thinking") return "进行中";
+  if (status === "thinking") return t("trajectory.status.inProgress");
   if (status === "done") return t("tools.status.succeeded");
   return t(`tools.status.${toolDisplayStatus(status)}`);
 }
 
 function stamp(ms?: number | null) {
-  if (ms == null || !Number.isFinite(ms)) return "未记录";
+  if (ms == null || !Number.isFinite(ms)) return t("trajectory.notRecorded");
   return new Date(ms).toLocaleString("sv-SE").replace("T", " ");
 }
 

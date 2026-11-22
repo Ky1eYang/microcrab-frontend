@@ -1614,5 +1614,9 @@
   "home.picker.sandboxNotReady": "未就绪 · 点击获取",
   "home.picker.sandboxLoading": "正在获取运行时…",
   "home.picker.sandboxError": "无法获取运行时。{error}",
-  "home.picker.sandboxRetry": "重试"
+  "home.picker.sandboxRetry": "重试",
+  "trajectory.status.awaitingResult": "尚无结果",
+  "trajectory.status.unconfirmed": "状态未确认",
+  "trajectory.status.inProgress": "进行中",
+  "trajectory.notRecorded": "未记录"
 }
