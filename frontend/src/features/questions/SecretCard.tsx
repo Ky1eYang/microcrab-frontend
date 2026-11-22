@@ -9,6 +9,7 @@ import {
 import type { PendingQuestion } from "../../client/types";
 import { activeLocale, subscribeLocale, t } from "../../i18n";
 import { useAppSelector, useAppStore } from "../../state";
+import { ExpandableNotice } from "../ExpandableNotice";
 import { Icon } from "../shared";
 import "./secret-card.css";
 
@@ -215,6 +216,16 @@ export function SecretCard({ value }: { value: PendingQuestion }) {
       className="flow-card secret-card"
       data-testid="secret-request"
       data-invocation-id={value.id}
+      data-status={
+        value.observer
+          ? "observer"
+          : value.awaitingConfirmation
+            ? "awaiting"
+            : submitting
+              ? "submitting"
+              : "ready"
+      }
+      aria-busy={submitting || undefined}
     >
       <h3 className="secret-card-title">
         <Icon name="key" size={16} aria-hidden="true" focusable="false" />
@@ -222,59 +233,84 @@ export function SecretCard({ value }: { value: PendingQuestion }) {
       </h3>
       <p>{request.reason}</p>
       <p className="secret-card-private">{t("secret.private")}</p>
-      {value.observer && <p role="status">{t("secret.observer")}</p>}
-      {value.awaitingConfirmation && (
-        <p role="status">{t("secret.awaiting")}</p>
+      {value.observer && (
+        <ExpandableNotice
+          className="inline-notice"
+          tone="neutral"
+          marker="none"
+          role="status"
+          data-testid="secret-observer"
+          text={t("secret.observer")}
+        />
       )}
-      <form
-        autoComplete="off"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void reply(false);
-        }}
-      >
-        {request.secrets.map((field) => (
-          <SecretInput
-            key={field.key}
-            field={field}
-            inputs={inputs.current}
-            disabled={disabled}
-            scope={scope}
-            locale={locale}
-          />
-        ))}
-        {error && (
-          <p role="alert" className="inline-notice">
-            {error}
-          </p>
-        )}
-        <div className="settings-actions-row">
-          <button
-            className="ghost-btn"
-            type="button"
-            disabled={disabled}
-            onClick={() => void reply(true)}
-          >
-            {t("secret.decline")}
-          </button>
-          <button className="primary-btn" type="submit" disabled={disabled}>
-            {t("secret.submit")}
-          </button>
-          {value.awaitingConfirmation && (
-            <button
-              type="button"
-              className="ghost-btn"
-              onClick={() =>
-                void store
-                  .observeSecret(value.id)
-                  .catch(() => setError(t("secret.unconfirmed")))
-              }
-            >
-              {t("secret.observe")}
-            </button>
+      {value.awaitingConfirmation && (
+        <ExpandableNotice
+          className="inline-notice"
+          tone="neutral"
+          marker="none"
+          role="status"
+          data-testid="secret-awaiting"
+          text={t("secret.awaiting")}
+        />
+      )}
+      {/* Observers only see their status line: disabled fields and buttons
+          would read as something this view could still answer. */}
+      {!value.observer && (
+        <form
+          autoComplete="off"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void reply(false);
+          }}
+        >
+          {request.secrets.map((field) => (
+            <SecretInput
+              key={field.key}
+              field={field}
+              inputs={inputs.current}
+              disabled={disabled}
+              scope={scope}
+              locale={locale}
+            />
+          ))}
+          {error && (
+            <ExpandableNotice
+              className="inline-notice"
+              tone="danger"
+              marker="none"
+              role="alert"
+              data-testid="secret-error"
+              text={error}
+            />
           )}
-        </div>
-      </form>
+          <div className="settings-actions-row flow-card-actions">
+            <button
+              className="ghost-btn"
+              type="button"
+              disabled={disabled}
+              onClick={() => void reply(true)}
+            >
+              {t("secret.decline")}
+            </button>
+            <button className="primary-btn" type="submit" disabled={disabled}>
+              {t("secret.submit")}
+            </button>
+            {value.awaitingConfirmation && (
+              <button
+                type="button"
+                className="ghost-btn"
+                onClick={() =>
+                  void store
+                    .observeSecret(value.id)
+                    .catch(() => setError(t("secret.unconfirmed")))
+                }
+              >
+                {t("secret.observe")}
+              </button>
+            )}
+          </div>
+        </form>
+      )}
     </article>
   );
 }

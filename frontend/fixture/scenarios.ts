@@ -260,6 +260,53 @@ const openAccountMenu = async () => {
   }
   if (!accountMenuOpen()) throw new Error("fixture: account menu never opened");
 };
+/** Built-in request_secret interaction (v0.1.20 Secret variables). Values
+ * never leave the fixture; the card is staged exactly like the participant
+ * browser spec does. */
+const secretInvocation = () => ({
+  invocation_id: "secret-request",
+  parent_session_id: "s1",
+  session_id: "s1",
+  call_id: "secret-call",
+  tool: "request_secret",
+  arguments: {
+    reason:
+      "Authenticate the deployment API so the next tool call can publish the preview build.",
+    secrets: [
+      {
+        key: "DEPLOY_TOKEN",
+        label: "Deployment token",
+        description: "Personal access token with the deploy:write scope",
+      },
+      { key: "OTP", label: "One-time code" },
+    ],
+  },
+  epoch: 0,
+  turn_id: 1,
+  round_id: 1,
+  catalog_digest: "fixture-secret-catalog",
+  status: "pending",
+  interaction: true,
+  blocking_mode: "blocking",
+  prepared: true,
+  created_at_ms: 1,
+  deadline_ms: 0,
+});
+const secretStage = (page: Page, observer = false) => {
+  const record = secretInvocation();
+  return nativeBackend(page, {
+    clientTools: {
+      role: observer ? "observer" : "participant",
+      can_interact: !observer,
+      participation_id: "fixture-secret-participant",
+      catalog_digest: record.catalog_digest,
+      definitions: CLIENT_TOOL_DEFINITIONS,
+      calls: [record],
+      pending: [record],
+    } as any,
+    extraMethods: ["client_tools.secret", "client_tools.secret_operation"],
+  });
+};
 const plain = (page: Page) =>
   nativeBackend(page, {
     extraMethods: ["turn.retry", "inbox.update", "inbox.remove"],
@@ -426,6 +473,16 @@ export const SCENARIOS: Record<string, Scenario> = {
     steps: async () => {
       await waitFor('[data-testid="permission-will-run"]');
     },
+  },
+  "secret-request": {
+    title: "request_secret: private value card (participant)",
+    stage: (page) => secretStage(page),
+    steps: () => waitFor('[data-testid="secret-request"]'),
+  },
+  "secret-request-observer": {
+    title: "request_secret: observer view shows only its status line",
+    stage: (page) => secretStage(page, true),
+    steps: () => waitFor('[data-testid="secret-request"]'),
   },
   "round-limit-tools": {
     title: "Round-limit prompt: tool calls",
