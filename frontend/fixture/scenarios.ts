@@ -603,7 +603,7 @@ export const SCENARIOS: Record<string, Scenario> = {
             await openPicker();
             if (mode === "loading" || mode === "error") {
               await waitFor('[data-sandbox-state="not_ready"]');
-              await click('[data-host-flavor="browser_sandbox"]');
+              await click('[data-testid="picker-sandbox-fetch"]');
               await waitFor(`[data-sandbox-state="${mode}"]`);
             } else if (mode !== "hidden")
               await waitFor(

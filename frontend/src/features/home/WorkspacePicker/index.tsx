@@ -194,7 +194,9 @@ export function WorkspacePicker() {
   const otherRow = (flavor: "chat_only" | "browser_sandbox") => {
     const sandboxRow = flavor === "browser_sandbox";
     const status = sandboxRow ? sandbox.state : "ready";
-    const selectable = status === "ready";
+    // v0.1.20 contract: every visible row selects. A sandbox that is not
+    // ready yet is still bound, and the browser Host attach then reports the
+    // missing runtime files; the row keeps its availability hint.
     const selected = ws.kind === flavor;
     const nameId = `${titleId}-${flavor}-name`;
     const descId = `${titleId}-${flavor}-desc`;
@@ -227,15 +229,8 @@ export function WorkspacePicker() {
           data-state={status}
           aria-labelledby={nameId}
           aria-describedby={descId}
-          aria-disabled={status === "loading" || undefined}
           aria-busy={status === "loading" || undefined}
           onClick={() => {
-            if (status === "loading") return;
-            if (!selectable) {
-              // Fetch only; the picker stays open and nothing is selected.
-              fetchRuntime();
-              return;
-            }
             void dispatch({
               type: "SelectDraftWorkspace",
               value: { kind: flavor },
@@ -273,21 +268,29 @@ export function WorkspacePicker() {
               {description}
             </span>
           </span>
-          {selected && selectable && (
+          {selected && (
             <span className="ws-item-check">
               <GlyphIcon name="check" size={14} />
             </span>
           )}
         </button>
-        {sandboxRow && status === "error" && (
+        {sandboxRow && (status === "error" || status === "not_ready") && (
           <button
             type="button"
             className="ghost-btn picker-retry"
-            data-testid="picker-sandbox-retry"
+            data-testid={
+              status === "error"
+                ? "picker-sandbox-retry"
+                : "picker-sandbox-fetch"
+            }
             data-picker-row=""
             onClick={fetchRuntime}
           >
-            {t("home.picker.sandboxRetry")}
+            {t(
+              status === "error"
+                ? "home.picker.sandboxRetry"
+                : "home.picker.sandboxFetch",
+            )}
           </button>
         )}
       </div>

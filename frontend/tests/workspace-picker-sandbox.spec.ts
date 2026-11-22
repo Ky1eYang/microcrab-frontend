@@ -1,8 +1,9 @@
 import { expect, test } from "@playwright/test";
 import { actions, mount, picker } from "./workspace-picker-fixture";
 
-/* Sandbox row states: available, not ready (click fetches, never selects),
- * loading, error with retry, and hidden when the browser lacks JSPI. */
+/* Sandbox row states: every visible row selects (v0.1.20 contract: attach
+ * then reports missing runtime files); Fetch/Retry prepare without selecting;
+ * hidden when the browser lacks JSPI. */
 
 test.describe("sandbox availability", () => {
   test("available: selectable row with description", async ({ page }) => {
@@ -24,15 +25,37 @@ test.describe("sandbox availability", () => {
     ]);
   });
 
-  test("not ready: click fetches without selecting, then becomes selectable", async ({
+  test("not ready: the row still selects (v0.1.20) and keeps its hint", async ({
     page,
   }) => {
     await mount(page, { sandbox: "fetchable" });
     const row = page.locator('[data-host-flavor="browser_sandbox"]');
     await expect(row).toHaveAttribute("data-state", "not_ready");
-    await expect(row).toContainText("未就绪 · 点击获取");
+    await expect(row).toContainText("运行时未就绪");
     await row.click();
+    expect(await actions(page, "SelectDraftWorkspace")).toEqual([
+      { type: "SelectDraftWorkspace", value: { kind: "browser_sandbox" } },
+    ]);
+  });
+
+  test("not ready: Fetch prepares the runtime without selecting", async ({
+    page,
+  }) => {
+    await mount(page, { sandbox: "fetchable" });
+    const row = page.locator('[data-host-flavor="browser_sandbox"]');
+    await page.getByTestId("picker-sandbox-fetch").click();
     await expect(row).toHaveAttribute("data-state", "ready");
+    await expect(picker(page)).toBeVisible();
+    expect(await actions(page, "SelectDraftWorkspace")).toEqual([]);
+  });
+
+  test("loading: spinner and busy, the row still selects", async ({ page }) => {
+    await mount(page, { sandbox: "hold" });
+    const row = page.locator('[data-host-flavor="browser_sandbox"]');
+    await page.getByTestId("picker-sandbox-fetch").click();
+    await expect(row).toHaveAttribute("data-state", "loading");
+    await expect(row).toHaveAttribute("aria-busy", "true");
+    await expect(row).toContainText("正在获取运行时…");
     await expect(picker(page)).toBeVisible();
     expect(await actions(page, "SelectDraftWorkspace")).toEqual([]);
     await row.click();
@@ -41,25 +64,12 @@ test.describe("sandbox availability", () => {
     ]);
   });
 
-  test("loading: spinner, busy, not selectable", async ({ page }) => {
-    await mount(page, { sandbox: "hold" });
-    const row = page.locator('[data-host-flavor="browser_sandbox"]');
-    await expect(row).toHaveAttribute("data-state", "not_ready");
-    await row.click();
-    await expect(row).toHaveAttribute("data-state", "loading");
-    await expect(row).toHaveAttribute("aria-busy", "true");
-    await expect(row).toContainText("正在获取运行时…");
-    await row.dispatchEvent("click");
-    expect(await actions(page, "SelectDraftWorkspace")).toEqual([]);
-    await expect(picker(page)).toBeVisible();
-  });
-
   test("error: inline danger message and retry keep the picker open", async ({
     page,
   }) => {
     await mount(page, { sandbox: "missing" });
     const row = page.locator('[data-host-flavor="browser_sandbox"]');
-    await row.click();
+    await page.getByTestId("picker-sandbox-fetch").click();
     await expect(row).toHaveAttribute("data-state", "error");
     const desc = row.locator(".picker-row-desc");
     await expect(desc).toContainText("无法获取运行时。");
