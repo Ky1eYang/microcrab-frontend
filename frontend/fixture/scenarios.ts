@@ -29,6 +29,7 @@ import {
   waitText,
 } from "./driver";
 import { CLIENT_TOOL_DEFINITIONS } from "../src/client/client-tools";
+import { stateInspection } from "../tests/state-inspection-fixture";
 
 /* Review fixtures show realistic ages. The shared nativeSnapshot keeps its
  * ordinal stamps (1/2) because ~38 Playwright specs order sessions against
@@ -483,6 +484,37 @@ export const SCENARIOS: Record<string, Scenario> = {
     title: "request_secret: observer view shows only its status line",
     stage: (page) => secretStage(page, true),
     steps: () => waitFor('[data-testid="secret-request"]'),
+  },
+  "state-secret": {
+    title: "State tab: a Secret variable lists its key, never its value",
+    stage: async (page) => {
+      const b = await nativeBackend(page, {
+        extraMethods: ["state.inspection"],
+      });
+      await page.route("**/api/v1/sessions/s1/state/inspection", (route) =>
+        route.fulfill({
+          json: stateInspection(
+            {
+              profile: { city: "Hong Kong" },
+              DEPLOY_TOKEN: { never: "rendered" },
+              framework: 1,
+            },
+            {
+              profile: { visibility: "visible", persistence: "persisted" },
+              DEPLOY_TOKEN: { visibility: "secret", persistence: "ephemeral" },
+            },
+          ),
+        }),
+      );
+      return b;
+    },
+    steps: async () => {
+      await click('[data-testid="tab-state"]');
+      await waitFor(".native-state-secret");
+      const key = document.querySelector<HTMLElement>(".native-state-secret");
+      key?.closest("button")?.click();
+      await waitFor(".native-state-protected");
+    },
   },
   "round-limit-tools": {
     title: "Round-limit prompt: tool calls",
