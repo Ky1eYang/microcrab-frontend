@@ -83,6 +83,7 @@ export function SubAgentDetailDialog() {
       data-testid="child-content-view"
     >
       <SessionViewTabs
+        modes={["chat", "trajectory"]}
         viewMode={viewMode}
         onSelect={setViewMode}
         idPrefix="child-view"

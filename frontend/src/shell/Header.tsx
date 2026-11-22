@@ -90,6 +90,8 @@ export function Header() {
   );
   const host = hostReadiness(state);
   const hostLabel = hostStatusLabel(host.status);
+  const carrier = host.matched && state.hostConnection?.connected ? state.hostConnection.carrierMode : undefined;
+  const carrierLabel = carrier ? t(`host.carrier.${carrier}`) : undefined;
   const narrow = usePluginDrawerViewport();
   const canShowRightRail = hasActiveSessionSidebarPlugin(
     clientPlugins.registry?.getSnapshot() ?? [],
@@ -350,10 +352,9 @@ export function Header() {
               className="header-capsule-btn"
               data-testid="header-host-connection"
               data-host-state={host.status}
-              title={
-                (host.matched ? state.hostConnection?.workspace : undefined) ??
-                t("header.connectBridge")
-              }
+              data-host-carrier={carrier}
+              title={[carrierLabel, host.matched ? state.hostConnection?.workspace : undefined]
+                .filter(Boolean).join(" · ") || t("header.connectBridge")}
               onClick={() =>
                 dispatch({
                   type: "OpenRemoteConnectDialog",
@@ -381,7 +382,9 @@ export function Header() {
                   aria-hidden="true"
                 />
               )}
-              Host · {hostLabel}
+              <span className="header-host-label">
+                Host · {carrierLabel ? `${carrierLabel} · ${hostLabel}` : hostLabel}
+              </span>
             </button>
           )}
           {current &&
@@ -666,7 +669,8 @@ export function Header() {
       </div>
       {state.page === "conversation" && state.sessionId && !inspection && (
         <SessionViewTabs
-          viewMode={state.viewMode === "trajectory" ? "trajectory" : "chat"}
+          modes={["chat", "trajectory", "state", "prompt"]}
+          viewMode={state.viewMode}
           plugins={sessionTabPlugins(
             clientPlugins.registry?.getSnapshot() ?? [],
             (id) =>

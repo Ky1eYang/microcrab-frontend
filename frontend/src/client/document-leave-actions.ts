@@ -50,9 +50,36 @@ export function documentLeaveSelector(
       return action.value === state.sessionId && state.page === "conversation"
         ? undefined
         : null;
-    case "CloseSubAgentDetail":
+    case "SetProjectSettingsTab":
+      return state.popup?.type === "projectSettings" &&
+        state.popup.tab === "speakers" &&
+        action.value !== "speakers"
+        ? "[data-testid='external-speakers']"
+        : undefined;
+    case "OpenRemoteConnectDialog":
+    case "OpenSessionPermissionsDialog":
+    case "OpenProjectSettings":
+      return state.popup?.type === "projectSettings"
+        ? ".project-settings-dialog"
+        : undefined;
+    case "SetSettingsTab":
+      return state.popup?.type === "settings" &&
+        state.popup.tab === "session-config" &&
+        action.value !== "session-config"
+        ? "[data-testid='external-speakers']"
+        : undefined;
     case "DismissPopup":
-      return state.popup.type === "subagentDetail" ? "[data-testid='child-turn-composer']" : undefined;
+    case "CloseSubAgentDetail":
+      if (state.popup?.type === "projectSettings")
+        return ".project-settings-dialog";
+      if (
+        state.popup?.type === "settings" &&
+        state.popup.tab === "session-config"
+      )
+        return "[data-testid='external-speakers']";
+      return state.popup?.type === "subagentDetail"
+        ? "[data-testid='child-turn-composer']"
+        : undefined;
     case "Logout":
     case "NewChat":
     case "SelectKnownProject":

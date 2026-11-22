@@ -3,6 +3,7 @@ import type {
   NativeSnapshot,
   NativeChildDetail,
   PermissionRequest,
+  PermissionSettled,
   RoundLimitRequest,
 } from "../src/client/types";
 import type {
@@ -227,7 +228,10 @@ export async function nativeBackend(
   options: {
     /** Native suites explicitly select their fixture Project; default-browser suites opt out. */
     selectProject?: boolean;
+    serverBuild?: { version: string; sha256: string | null };
     extraMethods?: string[];
+    /** Opt in to a Sandbox observer attachment and explicit Host takeover. */
+    sandboxParticipant?: boolean;
     /** Remove advertised methods (capability-absent states). */
     withoutMethods?: string[];
     retryTurn?: (command: any) => unknown | Promise<unknown>;
@@ -281,8 +285,10 @@ export async function nativeBackend(
     reconciling?: boolean;
     catalogFailure?: boolean;
     rejectAddress?: boolean;
+    rejectHostResume?: boolean;
     children?: NativeChildDetail[];
     permissionRequests?: PermissionRequest[];
+    settledPermissions?: PermissionSettled[];
     holdPermissionReply?: boolean;
     roundLimitRequests?: RoundLimitRequest[];
     holdRoundLimitReply?: boolean;
@@ -492,6 +498,8 @@ export async function nativeBackend(
       directHosts.delete(id);
       return reply({ detached: true });
     }
+    if (options.rejectHostResume && !body?.token)
+      return reject(400, "resume_rejected", "resume rejected");
     if (body?.token === "expired")
       return reject(
         403,
@@ -626,6 +634,7 @@ export async function nativeBackend(
     if (path === "/api/v1/capabilities" && verb === "GET")
       return reply({
         protocol: 1,
+        ...(options.serverBuild && { build: options.serverBuild }),
         methods,
         features: options.images ? { image_data: true } : {},
         limits: options.images
@@ -686,6 +695,9 @@ export async function nativeBackend(
           project_id: id,
           connected: false,
           ready: false,
+          reconciling: false,
+          carrier_mode: "detached",
+          connection_generation: null,
         },
       );
     }
@@ -994,6 +1006,16 @@ export async function nativeBackend(
             ),
         );
         return;
+      }
+      if (options.sandboxParticipant && command.method === "conversation.attach") {
+        const attached = command.params.force_takeover === true;
+        return result({
+          scope: { binding_id: "11111111-1111-4111-8111-111111111111" },
+          host_flavor: "browser_sandbox",
+          attached,
+          ready: true,
+          connection_generation: attached ? "sandbox-takeover-generation" : null,
+        });
       }
       if (command.method !== "conversation.binding") {
         socket.send(
@@ -1437,9 +1459,10 @@ export async function nativeBackend(
   );
   function pending() {
     return {
-      permissions: options.permissionRequests
+      permissions: options.permissionRequests || options.settledPermissions
         ? {
             parent_session_id: "s1",
+            decisions: options.settledPermissions,
             requests: pendingPermissions.filter(
               (item) => !permissionDecisions.has(item.request_id),
             ),

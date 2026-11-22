@@ -591,25 +591,6 @@ export class ClientToolController {
     this.rebinding = refresh;
     void refresh.catch(this.report);
   }
-  async takeover() {
-    if (!this.sessionId || !this.binding || !this.canInteract)
-      throw Error("Interaction binding expired");
-    const generation = this.generation;
-    const binding = await this.api.request<ClientBinding>(
-      "client_tools.takeover",
-      {
-        client_id: this.clientId,
-        catalog_digest: this.binding.catalog_digest,
-      },
-      this.sessionId,
-    );
-    if (generation !== this.generation) return;
-    this.generation++;
-    for (const controller of this.active.values()) controller.abort();
-    this.active.clear();
-    this.binding = binding;
-    this.changed();
-  }
   private async settle(
     call: ClientInvocation,
     result?: unknown,

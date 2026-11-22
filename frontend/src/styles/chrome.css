@@ -165,7 +165,8 @@
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color var(--dur-fast) ease,
+    border-color var(--dur-fast) ease, color var(--dur-fast) ease;
 }
 
 .rail-icon-btn:hover,
@@ -207,7 +208,7 @@
   white-space: nowrap;
   font-weight: 600;
   font-size: var(--fs-lg);
-  letter-spacing: 0.02em;
+  letter-spacing: -0.015em;
   color: var(--text);
 }
 
@@ -227,7 +228,8 @@
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color var(--dur-fast) ease,
+    border-color var(--dur-fast) ease, color var(--dur-fast) ease;
 }
 
 .rail-tool-btn:hover {
@@ -242,7 +244,7 @@
 
 .session-rail-new-btn {
   width: 100%;
-  border: 1px solid var(--border);
+  border: 1px solid var(--control-border);
   border-radius: var(--r-md);
   padding: 8px 12px;
   background: var(--bg-muted);
@@ -255,18 +257,19 @@
   align-items: center;
   gap: 8px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color var(--dur-fast) ease,
+    border-color var(--dur-fast) ease, color var(--dur-fast) ease;
 }
 
 .session-rail-new-btn:hover {
   background: var(--surface);
-  border-color: color-mix(in srgb, var(--text) 20%, transparent);
+  border-color: var(--text-2);
 }
 
 .session-rail-new-btn[data-active="true"] {
   background: var(--surface);
-  border-color: color-mix(in srgb, var(--text) 25%, transparent);
-  box-shadow: none;
+  border-color: var(--control-border);
+  font-weight: 600;
 }
 
 /* Sub-navigation under New Conversation */
@@ -298,7 +301,8 @@
   font-weight: 400;
   line-height: 1.3;
   cursor: pointer;
-  transition: all 0.12s ease;
+  transition: background-color var(--dur-fast) ease,
+    border-color var(--dur-fast) ease, color var(--dur-fast) ease;
   text-align: left;
 }
 
@@ -310,6 +314,16 @@
 
 .subnav-item-btn[data-active="true"] {
   font-weight: 500;
+}
+
+/* Press feedback stays distinct from hover without moving the navigation. */
+.session-rail :is(.rail-icon-btn, .rail-tool-btn, .rail-sec-action-btn, .subnav-item-btn, .user-card-btn):active:not(:disabled) {
+  background-color: var(--border);
+  color: var(--text);
+}
+
+.session-rail :is(.rail-icon-btn, .rail-tool-btn, .rail-sec-action-btn, .subnav-item-btn, .user-card-btn, .session-rail-new-btn):focus-visible {
+  outline-offset: -2px;
 }
 
 /* Scrollable projects & conversations */
@@ -360,7 +374,8 @@
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all 0.12s ease;
+  transition: background-color var(--dur-fast) ease,
+    border-color var(--dur-fast) ease, color var(--dur-fast) ease;
 }
 
 .rail-sec-action-btn:hover {
@@ -475,6 +490,18 @@
   line-height: inherit;
 }
 
+.user-card-version {
+  margin-inline-start: auto;
+  flex: none;
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-full);
+  background: var(--bg-subtle);
+  color: var(--text-2);
+  font: var(--fs-xs) / 1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
 .user-card-menu {
   position: absolute;
   left: 0;
@@ -564,7 +591,8 @@
   border-radius: var(--r-md);
   color: var(--text-2);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color var(--dur-fast) ease,
+    border-color var(--dur-fast) ease, color var(--dur-fast) ease;
   flex-shrink: 0;
 }
 
@@ -657,13 +685,20 @@
   user-select: text;
   display: flex;
   align-items: center;
-  animation: toast-slide-in var(--dur) ease-out;
+  animation: toast-slide-in var(--dur) cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+/* On active chat screens, transient feedback must not cover the composer,
+   its working controls, or a permission decision in its place. */
+#main:has(.retained-conversation-page[data-inactive="false"] .conversation-chat-pane[data-active="true"]) > .toast-container {
+  top: max(var(--sp-3), env(safe-area-inset-top));
+  bottom: auto;
 }
 
 @keyframes toast-slide-in {
   from {
     opacity: 0;
-    transform: translateY(12px);
+    transform: translateY(var(--sp-2));
   }
   to {
     opacity: 1;
@@ -748,7 +783,6 @@
   position: fixed;
   inset: 0;
   background: var(--overlay);
-  backdrop-filter: blur(4px);
   display: grid;
   place-items: center;
   z-index: var(--z-modal);
@@ -940,7 +974,8 @@
   border: 1px solid var(--border);
   color: var(--text);
   cursor: pointer;
-  transition: all 0.12s ease;
+  transition: background-color var(--dur-fast) ease,
+    border-color var(--dur-fast) ease, color var(--dur-fast) ease;
 }
 
 .preset-chip-btn:hover {
@@ -985,7 +1020,8 @@
   color: var(--text-2);
   font-size: var(--fs-xs);
   cursor: pointer;
-  transition: all 0.12s ease;
+  transition: background-color var(--dur-fast) ease,
+    border-color var(--dur-fast) ease, color var(--dur-fast) ease;
 }
 
 .auth-tab-btn[data-active="true"] {
@@ -1032,7 +1068,8 @@
   background: transparent;
   color: var(--text-2);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color var(--dur-fast) ease,
+    border-color var(--dur-fast) ease, color var(--dur-fast) ease;
 }
 
 .header-right-toggle-btn:hover {
@@ -1119,8 +1156,13 @@
   cursor: pointer;
 }
 
-.right-sidebar-close-btn:hover {
+.right-sidebar-close-btn:hover:not(:disabled) {
   background: var(--bg-muted);
+  color: var(--text);
+}
+
+.right-sidebar-close-btn:active:not(:disabled) {
+  background: var(--border);
   color: var(--text);
 }
 

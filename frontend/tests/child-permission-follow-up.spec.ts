@@ -221,6 +221,30 @@ test("ordered permission cancellation clears the card and duplicate settlement d
   ).toHaveLength(0);
 });
 
+test("Session attaches with historical socket attribution and accepts a live null responder", async ({ page }) => {
+  const ask = request();
+  const backend = await nativeBackend(page, {
+    clientTools: binding(),
+    permissionRequests: [ask],
+    settledPermissions: [{
+      request_id: "previous-permission",
+      parent_session_id: "s1",
+      session_id: "s1",
+      responder_socket: "participant-socket",
+      decision: "allow",
+    }],
+  });
+  await ready(page);
+  await expect(page.getByTestId("permission-request")).toBeVisible();
+  backend.event("permission.settled", {
+    request_id: ask.request_id,
+    parent_session_id: "s1",
+    responder_socket: null,
+    decision: "deny",
+  });
+  await expect(page.getByTestId("permission-request")).toHaveCount(0);
+});
+
 test("attach-time pending permissions cannot resurrect an authoritatively settled request", async ({
   page,
 }) => {

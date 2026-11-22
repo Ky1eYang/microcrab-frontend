@@ -1,10 +1,31 @@
-import { readHttpResponse } from "./http-response";
+import { deliverHttpSse, readHttpResponse } from "./http-response";
 import type { PluginResources } from "./resources";
 import { LIMITS, type Json, type PluginManifest } from "./types";
 interface SocketScope {
   isCurrent: () => boolean;
-  event: (requestId: number, value: Json) => void;
+  event: (
+    requestId: number,
+    value: Json,
+    current?: () => boolean,
+  ) => void | Promise<void>;
 }
+
+const SSE_INTERVAL_MS = 500;
+function waitForSseSlot(ms: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.reject(Error("HTTP response cancelled"));
+  return new Promise((resolve, reject) => {
+    const abort = () => {
+      clearTimeout(timer);
+      reject(Error("HTTP response cancelled"));
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", abort);
+      resolve();
+    }, ms);
+    signal.addEventListener("abort", abort, { once: true });
+  });
+}
+
 export class PluginNetwork {
   private sockets = new Map<number, WebSocket>();
   private scopes = new Map<number, SocketScope>();
@@ -13,6 +34,8 @@ export class PluginNetwork {
     (reason: string, retire?: boolean) => void
   >();
   private next = 0;
+  private activeSse?: AbortController;
+  private nextSseAt = 0;
   constructor(
     private readonly manifest: PluginManifest,
     private readonly event: (requestId: number, value: Json) => void,
@@ -47,10 +70,23 @@ export class PluginNetwork {
         p.resource !== undefined ? this.resources?.network(p) : undefined;
       if (p.resource !== undefined && !resource)
         throw Error("Resource grants are unavailable");
+      const streaming = p.response_mode === "sse";
+      if (streaming && (!resource || p.response_id !== undefined))
+        throw Error(
+          "HTTP SSE mode requires a configured resource without a response identity",
+        );
       const url = resource
         ? new URL(resource.url)
         : this.url(p.url, ["http:", "https:"]);
       if (resource) signal = AbortSignal.any([signal, resource.signal]);
+      const method =
+        resource?.method ?? (typeof p.method === "string" ? p.method : "GET");
+      if (
+        resource &&
+        (method === "GET" || method === "HEAD") &&
+        p.body !== undefined
+      )
+        throw Error("HTTP GET and HEAD cannot carry a body");
       if (p.body !== undefined && typeof p.body !== "string")
         throw new Error("HTTP body must be string");
       if (
@@ -58,7 +94,7 @@ export class PluginNetwork {
         new TextEncoder().encode(p.body).length > LIMITS.networkBytes
       )
         throw new Error("HTTP request body exceeds 2 MiB");
-      const headers: Record<string, string> = {};
+      const headers = new Headers();
       if (p.headers !== undefined) {
         if (
           !p.headers ||
@@ -69,56 +105,108 @@ export class PluginNetwork {
         for (const [k, v] of Object.entries(p.headers)) {
           if (typeof v !== "string")
             throw new Error("HTTP header value must be string");
-          headers[k] = v;
+          try {
+            headers.append(k, v);
+          } catch {
+            throw Error("Invalid HTTP header name or value");
+          }
         }
       }
       if (resource) {
-        for (const key of Object.keys(headers))
-          if (
-            ["authorization", "cookie", "proxy-authorization"].includes(
-              key.toLowerCase(),
-            )
-          )
+        for (const key of ["authorization", "cookie", "proxy-authorization"])
+          if (headers.has(key))
             throw Error("Resource credentials are host-owned");
-        Object.assign(headers, resource.headers);
+        for (const [key, value] of Object.entries(resource.headers))
+          headers.set(key, value);
       }
+      if (streaming) headers.set("accept", "text/event-stream");
       if (
         p.response_id !== undefined &&
         typeof p.response_id !== "string" &&
         typeof p.response_id !== "number"
       )
         throw Error("Invalid response identity");
-      const response = await fetch(url, {
-        method: typeof p.method === "string" ? p.method : "GET",
-        headers,
-        body: typeof p.body === "string" ? p.body : undefined,
-        signal,
-        redirect: "error",
-        credentials: "omit",
-        referrerPolicy: "no-referrer",
-        cache: "no-store",
-      });
-      let body: string;
-      if (p.response_mode === "discard") {
-        await response.body?.cancel();
-        body = "";
-      } else
-        body = await readHttpResponse(
-          response,
-          p.response_id as string | number | undefined,
-          signal,
-        );
-      if (resource && !resource.isCurrent())
-        throw Error("Resource grant was revoked");
-      const responseHeaders: Record<string, string> = {};
-      response.headers.forEach((v, k) => {
-        responseHeaders[k] = v;
-      });
-      return {
-        status: response.status,
-        headers: responseHeaders,
-        body,
+      if (streaming && this.activeSse)
+        throw Error("Plugin already has an active HTTP SSE request");
+      const stream = streaming ? new AbortController() : undefined;
+      if (stream) {
+        this.activeSse = stream;
+        signal = AbortSignal.any([signal, stream.signal]);
+      }
+      const current = () =>
+        !signal.aborted &&
+        scope.isCurrent() &&
+        (!resource || resource.isCurrent());
+      const redact = (text: string) => {
+        const authorization = resource?.authorization?.trim();
+        if (!authorization) return text;
+        const token = /^(?:Bearer|Basic) +(.+)$/i.exec(authorization)?.[1];
+        const sanitized = text.replaceAll(authorization, "[redacted]");
+        return token ? sanitized.replaceAll(token, "[redacted]") : sanitized;
       };
+      try {
+        if (!current()) throw Error("HTTP request was cancelled");
+        const response = await fetch(url, {
+          method,
+          headers,
+          body: typeof p.body === "string" ? p.body : undefined,
+          signal,
+          mode: "cors",
+          redirect: "error",
+          credentials: "omit",
+          referrerPolicy: "no-referrer",
+          cache: "no-store",
+        });
+        let body = "";
+        if (streaming) {
+          this.nextSseAt = Math.max(this.nextSseAt, performance.now() + SSE_INTERVAL_MS);
+          await deliverHttpSse(response, signal, async (event) => {
+            const wait = this.nextSseAt - performance.now();
+            if (wait > 0) await waitForSseSlot(wait, signal);
+            if (!current()) throw Error("HTTP SSE origin is retired");
+            await scope.event(
+              requestId,
+              {
+                ...event,
+                event: redact(event.event),
+                data: redact(event.data),
+                ...(event.id !== undefined ? { id: redact(event.id) } : {}),
+              },
+              current,
+            );
+            this.nextSseAt = performance.now() + SSE_INTERVAL_MS;
+          });
+        } else if (p.response_mode === "discard") {
+          await response.body?.cancel();
+        } else {
+          body = await readHttpResponse(
+            response,
+            p.response_id as string | number | undefined,
+            signal,
+          );
+        }
+        if (resource && !resource.isCurrent())
+          throw Error("Resource grant was revoked");
+        const responseHeaders: Record<string, string> = {};
+        response.headers.forEach((v, k) => {
+          if (
+            !streaming ||
+            ![
+              "authorization",
+              "proxy-authorization",
+              "cookie",
+              "set-cookie",
+            ].includes(k)
+          )
+            Object.defineProperty(responseHeaders, k, {
+              value: streaming ? redact(v) : v,
+              enumerable: true,
+            });
+        });
+        return { status: response.status, headers: responseHeaders, body };
+      } finally {
+        if (stream && this.activeSse === stream) this.activeSse = undefined;
+      }
     }
     if (kind === "ws-open") {
       if (this.sockets.size >= LIMITS.sockets)
@@ -244,6 +332,8 @@ export class PluginNetwork {
       }
   }
   close(): void {
+    this.activeSse?.abort();
+    this.activeSse = undefined;
     for (const [id, socket] of this.sockets) {
       this.cleanups.get(id)?.("WebSocket plugin instance ended");
       socket.onopen = null;

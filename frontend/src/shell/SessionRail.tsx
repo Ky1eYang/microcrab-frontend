@@ -579,8 +579,15 @@ export function SessionRail() {
                                 ? t("project.menu.settingsDisabled")
                                 : undefined
                             }
-                            onClick={() => {
-                              emit("CloseProjectMenu");
+                            onClick={(event) => {
+                              // The menu item unmounts when settings opens; keep
+                              // the menu trigger as the dialog's return target.
+                              event.currentTarget
+                                .closest(".rail-project-row")
+                                ?.querySelector<HTMLButtonElement>(
+                                  ".rail-project-more-btn",
+                                )
+                                ?.focus();
                               dispatch({
                                 type: "OpenProjectSettings",
                                 value: id,

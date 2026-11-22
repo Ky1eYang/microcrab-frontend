@@ -38,7 +38,6 @@ test("selected live tool keeps its DOM, inspector tab and pixel anchor through c
     ...position,
     phase: "tool_call_delta",
     index: 0,
-    id: "handoff-tool",
     name: "read",
     arguments: '{"path":"stable-handoff.txt"}',
   });
@@ -57,6 +56,37 @@ test("selected live tool keeps its DOM, inspector tab and pixel anchor through c
   await inspector.evaluate((node) => {
     (window as any).__handoffInspector = node;
   });
+  backend.event("model_observation", {
+    operation_id: "handoff-op",
+    call_id: "model-call",
+    ...position,
+    phase: "tool_call_delta",
+    index: 0,
+    id: "handoff-tool",
+    name: "read",
+  });
+  backend.event("tool", {
+    operation_id: "handoff-op",
+    ...position,
+    call_id: "handoff-tool",
+    name: "read",
+    phase: "failed",
+    execution_id: 17,
+  });
+  await expect(chosen).toHaveAttribute("data-status", "failed");
+  await expect(chosen).toContainText("#17");
+  await expect(chosen).toContainText("失败");
+  await expect(
+    page.locator('[data-testid="trajectory-seg"][data-status="failed"]'),
+  ).toHaveCount(1);
+  await expect(
+    inspector.getByRole("tab", { name: "参数", exact: true }),
+  ).toHaveAttribute("aria-selected", "true");
+  expect(
+    await inspector.evaluate(
+      (node) => node === (window as any).__handoffInspector,
+    ),
+  ).toBe(true);
   snapshot.messages.push({
     id: "handoff-assistant",
     role: "assistant",
@@ -67,15 +97,28 @@ test("selected live tool keeps its DOM, inspector tab and pixel anchor through c
         id: "handoff-tool",
         name: "read",
         arguments: { path: "stable-handoff.txt" },
+        execution_id: 17,
       },
     ],
     position,
   });
-  snapshot.history_view!.message_count = 2;
-  snapshot.history_view!.end_cursor = 2;
+  snapshot.messages.push({
+    id: "handoff-result",
+    role: "tool",
+    text: "Tool failed",
+    parts: [],
+    tool_calls: [],
+    position,
+    call_id: "handoff-tool",
+    tool_name: "read",
+  });
+  snapshot.history_view!.message_count = 3;
+  snapshot.history_view!.end_cursor = 3;
   snapshot.session.revision++;
   backend.publish(snapshot);
   await expect(chosen).toHaveAttribute("data-selected", "true");
+  await expect(chosen).toHaveAttribute("data-status", "failed");
+  await expect(chosen).toContainText("#17");
   await expect(
     inspector.getByRole("tab", { name: "参数", exact: true }),
   ).toHaveAttribute("aria-selected", "true");
@@ -88,6 +131,16 @@ test("selected live tool keeps its DOM, inspector tab and pixel anchor through c
     ),
   ).toBe(true);
   expect(Math.abs((await chosen.boundingBox())!.y - before)).toBeLessThan(2);
+  backend.event("tool", {
+    operation_id: "handoff-op",
+    ...position,
+    call_id: "handoff-tool",
+    name: "read",
+    phase: "completed",
+    execution_id: 170,
+  });
+  await expect(chosen.locator(".trajectory-title-number")).toHaveText("#17");
+  await expect(chosen).toHaveAttribute("data-status", "failed");
   // Repeated canonical snapshots must retain the same presentation identity too.
   snapshot.session.revision++;
   backend.publish(snapshot);

@@ -138,6 +138,22 @@ ReactDOM.createRoot(document.getElementById('fixture')).render(
   await expect(page.getByTestId("header-host-connection")).toBeVisible();
 }
 
+test("an existing native Session can draft offline without submitting on reconnect", async ({ page }) => {
+  await mount(page);
+  await page.evaluate(() => window.hostReadinessFixture.setDisconnected());
+  const input = page.getByRole("textbox", { name: "消息", exact: true });
+  const send = page.getByRole("button", { name: "发送 (Enter)", exact: true });
+  await expect(input).toHaveAttribute("placeholder", /重新连接项目 Host/);
+  await input.fill("Draft written offline");
+  await expect(send).toBeDisabled();
+  await input.press("Enter");
+  await expect(input).toHaveValue("Draft written offline");
+  await page.evaluate(() => window.hostReadinessFixture.setHost("project-a", true));
+  await expect(send).toBeEnabled();
+  await expect(input).toHaveValue("Draft written offline");
+  expect(await page.evaluate(() => window.hostReadinessFixture.snapshot().calls)).toEqual([]);
+});
+
 async function expectNoAutomaticWork(
   page: Page,
   calls: HostReadinessCall[] = [],

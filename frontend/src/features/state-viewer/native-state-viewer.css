@@ -1,0 +1,231 @@
+.native-state-viewer {
+  container: native-state / inline-size;
+  min-inline-size: 0;
+  padding: var(--sp-4);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  overflow-wrap: anywhere;
+}
+
+/* The conversation viewport is bounded; keep long trees in its native panel. */
+.conversation-viewport > .native-state-viewer {
+  min-block-size: 0;
+  overflow: auto;
+}
+
+.native-state-viewer > p:not(.inline-notice) {
+  margin: 0 0 var(--sp-3);
+  color: var(--text-2);
+}
+
+.native-state-viewer > section {
+  min-inline-size: 0;
+}
+
+.native-state-capacity {
+  margin-block-end: var(--sp-4);
+}
+
+.native-state-capacity h3 {
+  margin: 0;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.native-state-capacity dl {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-4);
+  margin-block: var(--sp-2);
+}
+
+.native-state-capacity dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.native-state-capacity :is(dt, p) {
+  color: var(--text-2);
+}
+
+.native-state-capacity p {
+  margin-block: var(--sp-2);
+}
+
+.native-state-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: var(--sp-2);
+  padding-block-end: var(--sp-3);
+  margin-block-end: var(--sp-3);
+  border-block-end: 1px solid var(--border);
+}
+
+.native-state-toolbar > input {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+.native-state-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: var(--sp-4);
+}
+
+.native-state-tree {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.native-state-tree .native-state-tree {
+  margin-inline-start: var(--sp-1);
+  border-inline-start: 1px solid var(--border);
+}
+
+.native-state-row {
+  display: flex;
+  align-items: start;
+  min-width: 0;
+}
+
+.native-state-disclosure,
+.native-state-spacer {
+  display: grid;
+  place-items: center;
+  flex: 0 0 28px;
+  min-block-size: 28px;
+}
+
+.native-state-disclosure {
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-2);
+}
+
+.native-state-disclosure:hover:not(:disabled) {
+  background: var(--bg-subtle);
+  color: var(--text);
+}
+
+.native-state-disclosure[aria-expanded="true"] > svg {
+  rotate: 90deg;
+}
+
+.native-state-key {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0 var(--sp-2);
+  flex: 1;
+  min-inline-size: 0;
+  min-block-size: 28px;
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  text-align: start;
+}
+
+.native-state-key code,
+.native-state-detail :is(h3 code, pre) {
+  min-inline-size: 0;
+  font-family: var(--font-mono);
+  white-space: pre-wrap;
+  unicode-bidi: plaintext;
+}
+
+.native-state-key:hover {
+  background: var(--bg-subtle);
+}
+
+.native-state-key[aria-pressed="true"] {
+  border-color: var(--border-strong);
+  background: var(--bg-muted);
+}
+
+.native-state-key small,
+.native-state-detail :is(dt, p) {
+  color: var(--text-2);
+}
+
+.native-state-detail {
+  min-inline-size: 0;
+  padding-block-start: var(--sp-4);
+  border-block-start: 1px solid var(--border);
+}
+
+.native-state-detail :is(h3, h4, p, dl, pre) {
+  margin: 0 0 var(--sp-3);
+}
+
+.native-state-detail h3 {
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+}
+
+.native-state-detail h3 code {
+  display: block;
+  margin-block-start: var(--sp-1);
+  color: var(--text);
+  font-size: var(--fs-lg);
+  font-weight: 600;
+}
+
+.native-state-detail h4 {
+  margin-block-end: var(--sp-1);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.native-state-detail dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 9rem), 1fr));
+  gap: var(--sp-2) var(--sp-3);
+}
+
+.native-state-detail dl > div {
+  min-inline-size: 0;
+  padding-block-start: var(--sp-1);
+  border-block-start: 1px solid var(--border);
+}
+
+.native-state-detail dt {
+  font-size: var(--fs-xs);
+}
+
+.native-state-detail dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.native-state-detail pre {
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-sm);
+  background: var(--bg-subtle);
+  line-height: var(--lh-code);
+}
+
+.native-state-detail > [role="status"] {
+  margin-block-start: var(--sp-2);
+}
+
+@container native-state (min-width: 40rem) {
+  .native-state-layout {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+    gap: var(--sp-5);
+  }
+
+  .native-state-detail {
+    padding-block-start: 0;
+    padding-inline-start: var(--sp-5);
+    border-block-start: 0;
+    border-inline-start: 1px solid var(--border);
+  }
+}

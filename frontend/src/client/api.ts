@@ -99,7 +99,6 @@ const SESSION_METHODS = new Set([
   "client_tools.secret",
   "client_tools.secret_operation",
   "client_tools.decision",
-  "client_tools.takeover",
   "executions.read",
   "executions.cancel",
 ]);
@@ -191,7 +190,6 @@ const MUTATIONS = new Set([
   "client_tools.result",
   "client_tools.prepare",
   "client_tools.secret",
-  "client_tools.takeover",
   "host.relay_attach",
 ]);
 function commandTimeout(method: string): number {
@@ -254,6 +252,7 @@ export class ApiClient {
   private hostTransport: "grpc" | "relay" | "outbound" | null = null;
   private hostDescriptor: HostDescriptor | null = null;
   private hostRelayRelease: HostRelayRelease | null = null;
+  private hostGeneration: string | null = null;
   readonly tabId = crypto.randomUUID();
   currentHostProject() {
     return this.hostProject;
@@ -261,10 +260,15 @@ export class ApiClient {
   currentHostTransport() {
     return this.hostTransport;
   }
-  hasOpenRelayFor(projectId: string) {
+  ownsHostGeneration(projectId: string, generation: string | null | undefined) {
+    return !!generation && this.hostProject === projectId && this.hostGeneration === generation;
+  }
+  hasOpenRelayFor(projectId: string, generation?: string | null) {
     return (
       this.hostProject === projectId &&
       this.hostTransport === "relay" &&
+      (generation === undefined || this.ownsHostGeneration(projectId, generation)) &&
+      this.socket?.readyState === WebSocket.OPEN &&
       this.relaySocket?.readyState === WebSocket.OPEN
     );
   }
@@ -279,6 +283,7 @@ export class ApiClient {
     this.hostProject = null;
     this.hostTransport = null;
     this.hostDescriptor = null;
+    this.hostGeneration = null;
   }
   private browserEgress = new BrowserHostTransport(() => this.socket);
   private browserHosts = new BrowserConversations(this, (frame) =>
@@ -349,6 +354,7 @@ export class ApiClient {
       expectedHostId?: string;
       expectedWorkspaceId?: string;
       allowLegacyBinding?: boolean;
+      onlyIfUnattached?: boolean;
       trigger?: HostLifecycleTrigger;
     } = {},
   ): Promise<HostDescriptor> {
@@ -357,7 +363,7 @@ export class ApiClient {
       !pairingToken &&
       this.hostDescriptor
     ) {
-      onState("ready");
+      onState("ready", undefined, { connection_generation: this.hostGeneration });
       return this.hostDescriptor;
     }
     const epoch = ++this.hostEpoch;
@@ -384,6 +390,7 @@ export class ApiClient {
         this.hostProject = null;
         this.hostTransport = null;
         this.hostDescriptor = null;
+        this.hostGeneration = null;
         await this.releaseOwnedRelay(
           previousRelayProject,
           previousRelayRelease,
@@ -493,14 +500,19 @@ export class ApiClient {
             reconciliation_error: result.reconciliation_error,
           },
         );
-      this.hostProject = projectId;
+      const generation = result.connection_generation ?? result.readiness?.connection_generation ?? null;
+      const ownsRoute = !result.observed_existing || this.ownsHostGeneration(projectId, generation);
+      this.hostProject = ownsRoute ? projectId : null;
       this.hostTransport = effectiveCarrier;
       this.hostDescriptor = result.descriptor;
+      this.hostGeneration = ownsRoute ? generation : null;
       this.hostRelayRelease = acquiredRelay;
       onState(
         result.ready ? "ready" : "reconciling",
         result.reconciliation_error?.code,
         {
+          connection_generation: generation,
+          observed_existing: result.observed_existing,
           readiness: result.readiness,
           reconciliation_error: result.reconciliation_error,
         },
@@ -534,6 +546,7 @@ export class ApiClient {
     options: {
       directory?: string;
       allowLegacyBinding?: boolean;
+      onlyIfUnattached?: boolean;
       trigger?: HostLifecycleTrigger;
     },
   ): Promise<Awaited<ReturnType<ApiClient["attachGrpc"]>>> {
@@ -550,6 +563,7 @@ export class ApiClient {
           token: pairingToken?.trim() || undefined,
           directory: options.directory,
           allow_legacy_binding: options.allowLegacyBinding,
+          only_if_unattached: options.onlyIfUnattached || undefined,
         }),
         15000,
         "application/json",
@@ -625,11 +639,14 @@ export class ApiClient {
     options: {
       directory?: string;
       allowLegacyBinding?: boolean;
+      onlyIfUnattached?: boolean;
       trigger?: HostLifecycleTrigger;
     },
   ) {
     return this.http<{
       descriptor: HostDescriptor;
+      connection_generation?: string | null;
+      observed_existing?: boolean;
       transport?: "grpc" | "outbound_wss";
       relay_release?: HostRelayRelease;
       status?: string;
@@ -647,6 +664,7 @@ export class ApiClient {
         token: pairingToken?.trim() || undefined,
         directory: options.directory,
         allow_legacy_binding: options.allowLegacyBinding,
+        only_if_unattached: options.onlyIfUnattached || undefined,
       }),
       60000,
       "application/json",
@@ -664,7 +682,7 @@ export class ApiClient {
       reason?: string,
       details?: NativeHostStateDetails,
     ) => void,
-    options: { directory?: string; allowLegacyBinding?: boolean },
+    options: { directory?: string; allowLegacyBinding?: boolean; onlyIfUnattached?: boolean },
   ) {
     const bridge = new WebSocket(bridgeUrl);
     bridge.binaryType = "arraybuffer";
@@ -734,6 +752,8 @@ export class ApiClient {
     const result = await Promise.race([
       this.command<{
         descriptor: HostDescriptor;
+        connection_generation?: string | null;
+        observed_existing?: boolean;
         relay_release?: HostRelayRelease;
         status?: string;
         existing_project_id?: string;
@@ -748,6 +768,7 @@ export class ApiClient {
         token: pairingToken?.trim() || undefined,
         directory: options.directory,
         allow_legacy_binding: options.allowLegacyBinding,
+        only_if_unattached: options.onlyIfUnattached || undefined,
       }),
       closed,
     ]);
@@ -773,12 +794,14 @@ export class ApiClient {
     ++this.hostEpoch;
     const project = this.hostProject;
     const relay = this.hostRelayRelease;
+    const transport = this.hostTransport;
     this.hostProject = null;
     this.hostTransport = null;
     this.hostDescriptor = null;
+    this.hostGeneration = null;
     this.closeRelay();
     if (project && !options.backendDetached) {
-      if (options.relayOnly) {
+      if (options.relayOnly || (transport === "relay" && !revoke)) {
         await this.releaseOwnedRelay(
           project,
           relay,
@@ -1041,6 +1064,7 @@ export class ApiClient {
           },
         });
       this.socket = null;
+      if (this.hostTransport === "relay" || this.relaySocket) this.hostEpoch++;
       this.closeRelay();
       void this.browserHosts.close();
       this.rejectPending();
@@ -1161,7 +1185,7 @@ export class ApiClient {
       query = method === "project.operations" ? { limit: 100 } : {};
       if (method === "project.host_reconcile") {
         verb = "POST";
-        params = {};
+        params = { connection_generation: params.connection_generation };
       }
     } else if (method === "agent.catalog") {
       if (
@@ -1887,6 +1911,10 @@ export class ApiClient {
   }
   stop() {
     ++this.hostEpoch;
+    this.hostProject = null;
+    this.hostTransport = null;
+    this.hostDescriptor = null;
+    this.hostGeneration = null;
     this.closeRelay();
     void this.browserHosts.close();
     this.stopped = true;

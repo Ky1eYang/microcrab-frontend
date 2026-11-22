@@ -12,6 +12,7 @@ const FIELDS = [
   "tool",
   "owning_session_id",
   "controller_id",
+  "responder_socket",
   "source",
   "review_reason",
   "decision",
@@ -52,6 +53,15 @@ export function validatePermissionDecision(
         new TextEncoder().encode(value[field] as string).length > 4096)
     )
       throw Error(`permission.decision.${field}: expected bounded string`);
+  const responder = value.responder_socket;
+  if (
+    responder !== undefined &&
+    responder !== null &&
+    (typeof responder !== "string" ||
+      !responder ||
+      new TextEncoder().encode(responder).length > 4096)
+  )
+    throw Error("permission.decision.responder_socket: expected bounded socket identity");
   for (const field of ["revision", "controller_id"])
     if (
       value[field] !== undefined &&

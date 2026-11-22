@@ -222,6 +222,52 @@ test("live tool handoff retains the exact detail DOM, keyboard focus and selecti
   await expectRetained(chosen);
 });
 
+test("a provisional tool keeps its disclosure and focus when its real call id arrives", async ({
+  page,
+}) => {
+  const backend = await setup(page, canonicalTool(1));
+  const delta = {
+    operation_id: "slot-operation",
+    call_id: "slot-provider",
+    ...position(2),
+    phase: "tool_call_delta",
+    index: 0,
+    name: "interaction_tool_2",
+  };
+  backend.event("model_observation", {
+    ...delta,
+    arguments: '{"path":"provisional"}',
+  });
+  const chosen = tool(page, 2);
+  await chosen.click();
+  await expect(chosen).toHaveAttribute("aria-expanded", "true");
+  const payload = chosen
+    .locator("..")
+    .getByTestId("tool-payload-input")
+    .locator("pre");
+  await payload.focus();
+  await payload.evaluate((node) => {
+    (window as any).__provisionalData = node;
+  });
+  backend.event("model_observation", { ...delta, id: "slot-tool" });
+  backend.event("tool", {
+    ...position(2),
+    operation_id: "slot-operation",
+    call_id: "slot-tool",
+    name: "interaction_tool_2",
+    phase: "failed",
+    execution_id: 88,
+  });
+  await expect(chosen).toHaveAttribute("data-status", "failed");
+  await expect(chosen).toHaveAttribute("aria-expanded", "true");
+  await expect(payload).toBeFocused();
+  expect(
+    await payload.evaluate(
+      (node) => node === (window as any).__provisionalData,
+    ),
+  ).toBe(true);
+});
+
 test("the actively read later tool keeps its native detail subtree through group merge and split", async ({
   page,
 }) => {

@@ -1,4 +1,5 @@
 import { t } from "../i18n";
+import { frontendVersion } from "../client/build-identity";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { useApp } from "../state";
 import { Icon } from "./Icon";
@@ -61,7 +62,16 @@ export function UserCard({ compact = false }: { compact?: boolean }) {
         {compact ? (
           <span className="sr-only">{name}</span>
         ) : (
-          <span className="user-card-name">{name}</span>
+          <>
+            <span className="user-card-name">{name}</span>
+            <span
+              className="user-card-version"
+              title={t("settingsDlg.frontendVersion", { version: frontendVersion })}
+              aria-hidden="true"
+            >
+              v{frontendVersion}
+            </span>
+          </>
         )}
       </button>
       {open && (

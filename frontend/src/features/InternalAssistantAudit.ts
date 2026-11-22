@@ -65,6 +65,7 @@ export function useInternalAssistantAudit(
   const sessionKey = JSON.stringify([
     parentId,
     childId,
+    state.authSession?.principal?.owner,
     lineage ? [lineage.lineage, lineage.epoch] : state.history,
   ]);
   const refreshKey = JSON.stringify([

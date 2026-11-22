@@ -1,0 +1,197 @@
+/* User Settings only. Project and plugin settings keep their own surfaces. */
+.user-settings-dialog {
+  --settings-inset: var(--sp-5);
+}
+
+.user-settings-dialog .settings-nav-title {
+  margin: 0;
+  padding: 0 var(--sp-2) var(--sp-3);
+  border: 0;
+  font-size: var(--fs-md);
+}
+
+.user-settings-dialog .settings-nav-item {
+  min-block-size: 36px;
+  border-inline-start: 2px solid transparent;
+  font-size: var(--fs-sm);
+  line-height: 1.4;
+  text-align: start;
+  transition: none;
+}
+
+.user-settings-dialog .settings-nav-item[data-active="true"] {
+  border-inline-start-color: var(--ink);
+}
+
+.user-settings-dialog .settings-header {
+  flex-shrink: 0;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--settings-inset);
+}
+
+.user-settings-dialog .settings-tab-heading {
+  font-size: var(--fs-xl);
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.user-settings-dialog .settings-close-btn {
+  flex: none;
+  inline-size: 36px;
+  block-size: 36px;
+  transition: none;
+}
+
+.user-settings-dialog .settings-body {
+  min-block-size: 0;
+  padding: var(--settings-inset);
+}
+
+.user-settings-dialog .settings-tab-pane,
+.user-settings-dialog .settings-ergonomics {
+  gap: var(--sp-5);
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+
+.user-settings-dialog .settings-ergonomics:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+}
+
+.user-settings-dialog .settings-ergonomics > .settings-description + .settings-description {
+  margin-block-start: calc(var(--sp-2) - var(--sp-5));
+}
+
+.user-settings-dialog .settings-description {
+  max-inline-size: 68ch;
+}
+
+/* Use the dialog as the frame, with rules separating groups within its pane. */
+.user-settings-dialog :is(.settings-card, .settings-section-card, .provider-models-card) {
+  min-inline-size: 0;
+  margin-block: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  gap: var(--sp-3);
+}
+
+.user-settings-dialog :is(.settings-card, .settings-section-card, .provider-models-card):not(:first-child) {
+  padding-block-start: var(--sp-4);
+  border-block-start: 1px solid var(--border);
+}
+
+.user-settings-dialog :is(.settings-card-title, .settings-section-title, .providers-header-bar .limits-group-title) {
+  font-size: var(--fs-lg);
+  line-height: 1.35;
+}
+
+.user-settings-dialog :is(.settings-row-info, .settings-form-group, .settings-input) {
+  min-inline-size: 0;
+}
+
+.user-settings-dialog :is(.settings-row-sub, .settings-input-hint, .tip-content) {
+  line-height: 1.5;
+}
+
+.user-settings-dialog :is(.settings-actions-row, .preset-buttons, .segmented, .mc-seg-group) {
+  flex-wrap: wrap;
+  max-inline-size: 100%;
+}
+
+.user-settings-dialog :is(.segmented, .mc-seg-group) {
+  border-color: var(--control-border);
+  background: transparent;
+}
+
+.user-settings-dialog :is(.segmented-option, .mc-seg-btn, .preset-btn, .mc-state-btn) {
+  min-block-size: 28px;
+}
+
+.user-settings-dialog .segmented-option[aria-checked="true"],
+.user-settings-dialog .mc-seg-btn[aria-pressed="true"] {
+  background: var(--bg-muted);
+  color: var(--text);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+.user-settings-dialog :is(.settings-nav-item, .provider-acc-head, .segmented-option, .mc-seg-btn):focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.user-settings-dialog :is(.settings-nav-item, .settings-close-btn, .preset-btn, .segmented-option, .mc-seg-btn):active {
+  background: var(--bg-muted);
+  color: var(--ink);
+}
+
+.user-settings-dialog .settings-input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+/* Keep the Provider accordion and independently visible model list; remove
+   only the extra skin on their nested form and rows. */
+.user-settings-dialog :is(.provider-subcard, .settings-subpanel, .limits-group-card) {
+  padding-inline: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.user-settings-dialog :is(.settings-subpanel, .limits-group-card + .limits-group-card) {
+  border-block-start: 1px solid var(--border);
+}
+
+.user-settings-dialog .limit-tile {
+  min-inline-size: 0;
+  padding-inline: 0;
+  border: 0;
+  border-block-start: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+}
+
+.user-settings-dialog .limit-input-wrap {
+  border-color: var(--control-border);
+}
+
+.user-settings-dialog .model-table-list {
+  gap: 0;
+}
+
+.user-settings-dialog .model-row-card {
+  padding-inline: var(--sp-1);
+  border: 0;
+  border-block-start: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+}
+
+.user-settings-dialog .about-brand-section {
+  align-items: flex-start;
+  padding: 0;
+  text-align: start;
+}
+
+@media (max-width: 767.98px) {
+  .user-settings-dialog {
+    --settings-inset: var(--sp-4);
+  }
+
+  .user-settings-dialog .settings-nav-item {
+    border-inline-start: 0;
+    border-block-end: 2px solid transparent;
+  }
+
+  .user-settings-dialog .settings-nav-item[data-active="true"] {
+    border-block-end-color: var(--ink);
+  }
+
+  .user-settings-dialog .settings-tab-heading {
+    font-size: var(--fs-lg);
+  }
+}

@@ -28,6 +28,17 @@ test("same-epoch history travel invalidates cached and pending trajectory audit 
     status: "available",
     committed_sequence: 10,
     incomplete_tail: false,
+    timeline: [
+      {
+        request_hash: `request-${selected}`,
+        call_id: `call-${selected}`,
+        sequence: 1,
+        epoch: 7,
+        turn: 1,
+        round: 1,
+        completion: "succeeded",
+      },
+    ],
     attempts: [
       {
         request_hash: `request-${selected}`,
@@ -64,7 +75,7 @@ test("same-epoch history travel invalidates cached and pending trajectory audit 
   );
   await expect(helpers).toContainText("helper-a");
   await page
-    .locator('[data-testid="trajectory-entry"][data-kind="user"]')
+    .locator('[data-testid="trajectory-entry"][data-kind="model-request"]')
     .click();
   await page.getByRole("tab", { name: "请求增量", exact: true }).click();
   const details = page.getByTestId("request-audit-diff");

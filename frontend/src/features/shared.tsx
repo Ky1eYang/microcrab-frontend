@@ -11,6 +11,8 @@ export interface FeatureBlock {
   callId?: string;
   partId?: string;
   executionId?: number;
+  displayExecutionId?: number;
+  displayExecutionStatus?: Block["displayExecutionStatus"];
   sessionId?: string;
   role: string;
   kind: string;

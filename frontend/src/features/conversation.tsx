@@ -17,11 +17,13 @@ import {
   useConversationBlocks,
   useIsolatedConversationRegistry,
 } from "./conversation/registry-context";
-import { InteractionParticipation, RoundLimitPrompt } from "./RoundLimitPrompt";
+import { ComposerNotificationDock } from "./composer/ComposerNotificationDock";
 import { CompactionCommand } from "./CompactionCommand";
 import { SubAgentDetailDialog } from "./popups/SubAgentDetailDialog";
 import {
   Fragment,
+  Suspense,
+  lazy,
   memo,
   useEffect,
   useLayoutEffect,
@@ -228,18 +230,30 @@ function SubscribedCompaction({
   );
 }
 
+function assistantOutputOperation(block: FeatureBlock) {
+  return block.role === "assistant"
+    ? (block.preview?.operationId ?? block.operationId)
+    : undefined;
+}
+
 function ConversationActionBar({
   blocks: fallback,
   historyView,
   readOnly = false,
   user = false,
   retryOperationId,
+  lifecycle,
+  inboxActive,
+  hasLaterOutput,
 }: {
   blocks: FeatureBlock[];
   historyView?: NativeHistoryView;
   readOnly?: boolean;
   user?: boolean;
   retryOperationId?: string | null;
+  lifecycle?: Transcript["turnLifecycle"];
+  inboxActive?: boolean;
+  hasLaterOutput?: (operationId: string) => boolean;
 }) {
   const blocks = useConversationBlocks(fallback);
   const first = blocks[0];
@@ -252,18 +266,74 @@ function ConversationActionBar({
         (block) => block.kind === "reasoning" && block.payload.text.trim(),
       );
   const variantActions = useAnswerVariantActions(answer);
+  const observed = useRef<{ id?: string; pending: boolean }>({ pending: false });
+  const [settled, setSettled] = useState<{ id: string; at: number }>();
+  const output =
+    user || readOnly
+      ? undefined
+      : [...blocks].reverse().find(assistantOutputOperation);
+  const operationId = output && assistantOutputOperation(output);
+  const exactLifecycle =
+    lifecycle?.sessionId === output?.sessionId ? lifecycle : undefined;
+  const receipt = operationId
+    ? exactLifecycle?.operations[operationId]
+    : undefined;
+  const superseded = !!operationId && hasLaterOutput?.(operationId) === true;
+  // A model round can validate before tools run. Its foreground receipt owns
+  // settlement; a generic busy Session proves nothing about a historical row.
+  const pending =
+    !!operationId &&
+    !superseded &&
+    receipt !== "terminal" &&
+    (receipt === "active" ||
+      blocks.some(
+        (block) =>
+          assistantOutputOperation(block) === operationId &&
+          block.stream === "streaming" &&
+          (block.kind !== "tool" || block.tool?.status === "running"),
+      ) ||
+      (operationId.startsWith("inbox:") &&
+        inboxActive === true &&
+        observed.current.id === operationId &&
+        observed.current.pending));
+  useLayoutEffect(() => {
+    if (
+      operationId &&
+      !pending &&
+      !superseded &&
+      observed.current.pending &&
+      observed.current.id === operationId
+    )
+      setSettled({ id: operationId, at: Date.now() });
+    observed.current = { id: operationId, pending };
+  }, [operationId, pending, superseded]);
   let timestamp: number | null | undefined;
   for (const block of blocks)
     timestamp = block.endedMs ?? block.startedMs ?? timestamp;
+  const terminalAt =
+    operationId && !superseded
+      ? exactLifecycle?.terminalAt?.[operationId]
+      : undefined;
+  const observedCompletionAt =
+    operationId && !superseded
+      ? (exactLifecycle?.terminalObservedAt?.[operationId] ??
+        (operationId === settled?.id ? settled.at : undefined))
+      : undefined;
   return (
     <ActionBar
       user={user}
+      pending={pending}
+      observedCompletionAt={observedCompletionAt}
       text={user ? first.payload.text : variantActions.text}
       pluginActions={
         user || readOnly ? undefined : variantActions.pluginActions
       }
       pluginActionScope={variantActions.actionScope}
-      timestamp={user ? (first.startedMs ?? first.endedMs) : timestamp}
+      timestamp={
+        user
+          ? (first.startedMs ?? first.endedMs)
+          : (terminalAt ?? (observedCompletionAt == null ? timestamp : undefined))
+      }
       revertId={
         user &&
         isDirectUserSource(first.payload.source) &&
@@ -453,7 +523,6 @@ function conversationMetadata(state: AppState, provided: boolean) {
     compactOperation: state.compactOperation,
     retryOperationId: state.retryOperationId,
     isCreatingSession: state.isCreatingSession,
-    roundLimitRequests: state.roundLimitRequests,
     historyTruncated: state.historyTruncated,
     executionActive: state.statistics?.activity.execution?.active,
     childHistory:
@@ -580,23 +649,6 @@ function ConversationList({
   const [stick, setStick] = useState(true);
   const [active, setActive] = useState(0);
   const scroll = useRef<HTMLElement>(null);
-  const composer = useRef<HTMLDivElement>(null);
-  // Keep --composer-height on the transcript in sync with the sticky composer,
-  // so scroll-padding-bottom stops focused content from hiding behind it.
-  useLayoutEffect(() => {
-    const box = composer.current;
-    const list = scroll.current;
-    if (!box || !list) return;
-    const sync = () =>
-      list.style.setProperty(
-        "--composer-height",
-        `${Math.ceil(box.getBoundingClientRect().height)}px`,
-      );
-    sync();
-    const observer = new ResizeObserver(sync);
-    observer.observe(box);
-    return () => observer.disconnect();
-  }, []);
   const following = useRef(true);
   const pauseRevision = useRef(0);
   const jumping = useRef(false);
@@ -801,8 +853,11 @@ function ConversationList({
       }
       captureReadingAnchor(true);
     };
+    // The footer is outside the scroller. Changes to its height resize the
+    // transcript viewport, but are never a request to resume following.
     const observer = new ResizeObserver(sync);
     observer.observe(inner);
+    observer.observe(host);
     const observed = new WeakSet<Element>();
     const observeThinking = () => {
       // The capped scroll host stops resizing at 480px. Observe its actual
@@ -951,7 +1006,7 @@ function ConversationList({
       ? `${position.epoch}:${position.turn}`
       : null;
   };
-  const callKey = (block: FeatureBlock) => {
+  const nativeCallKey = (block: FeatureBlock) => {
     const position = block.position ?? block.preview;
     const call = block.callId ?? block.tool?.callId ?? block.tool?.id;
     return position &&
@@ -963,6 +1018,25 @@ function ConversationList({
       ? `${position.epoch}:${position.turn}:${position.round}:${call}`
       : `row:${block.id}`;
   };
+  // Keep the disclosure owner for a streamed slot once it gains a call id.
+  // The exact native row and scoped slot prove this upgrade; a coincidentally
+  // reused call id on a replaced branch does not.
+  const toolSlots = useRef(new Map<string, { identity: string; key: string }>());
+  if (priorPresentation.view !== viewScopeKey || authorityReset)
+    toolSlots.current.clear();
+  const keysByToolRow = new Map<string, string>();
+  const nextToolSlots = new Map<string, { identity: string; key: string }>();
+  for (const block of blocks) {
+    if (block.kind !== "tool") continue;
+    const prior = toolSlots.current.get(block.id);
+    const key = prior && !presentationIdentityChanged(prior.identity, block)
+      ? prior.key
+      : nativeCallKey(block);
+    keysByToolRow.set(block.id, key);
+    nextToolSlots.set(block.id, { identity: presentationIdentity(block), key });
+  }
+  toolSlots.current = nextToolSlots;
+  const callKey = (block: FeatureBlock) => keysByToolRow.get(block.id) ?? nativeCallKey(block);
   const canonicalTools = new Map(
     blocks
       .filter((block) => block.kind === "tool")
@@ -1252,7 +1326,7 @@ function ConversationList({
       if (!jumping.current || !current) return;
       const gap =
         current.scrollHeight - current.scrollTop - current.clientHeight;
-      // 输入栏是 sticky，平滑滚动会在真正贴底前停下，这里把剩下的距离补上。
+      // Content or footer height can change before the smooth scroll settles.
       if (gap > 1) current.scrollTop = current.scrollHeight;
       jumping.current = false;
       following.current = true;
@@ -1572,7 +1646,7 @@ function ConversationList({
               </button>
             </div>
           )}
-          {stream.map((chunk) => {
+          {stream.map((chunk, index) => {
             const flat = chunk.items.flatMap((i) => i.blocks);
             const key =
               chunkKeys.get(chunk) ??
@@ -1615,6 +1689,20 @@ function ConversationList({
                       historyView={transcript.historyView}
                       readOnly={readOnly}
                       retryOperationId={state.retryOperationId}
+                      lifecycle={transcript.turnLifecycle}
+                      inboxActive={transcript.inboxActive}
+                      hasLaterOutput={(operationId) =>
+                        stream.some(
+                          (next, nextIndex) =>
+                            nextIndex > index &&
+                            next.assistant &&
+                            next.items.some((item) =>
+                              item.blocks.some(
+                                (block) => assistantOutputOperation(block) === operationId,
+                              ),
+                            ),
+                        )
+                      }
                     />
                   </PluginAnswerVariants>
                 </div>
@@ -1680,50 +1768,36 @@ function ConversationList({
             </div>
           ) : null}
         </div>
-        <div
-          ref={composer}
-          className="conversation-input-outer-wrap"
-          onFocusCapture={() => {
-            // History controls need composer clearance; its own focused input
-            // already sits above that edge. Applying the clearance to both
-            // makes native caret scrolling nudge the history on each key.
-            scroll.current?.style.setProperty("scroll-padding-bottom", "0px");
-          }}
-          onBlurCapture={(event) => {
-            if (
-              !event.currentTarget.contains(event.relatedTarget as Node | null)
-            )
-              scroll.current?.style.removeProperty("scroll-padding-bottom");
-          }}
-        >
-          <div className="conversation-input-anchor">
-            {/* 贴在输入框与任务栏上方、内容列右侧 */}
-            <FloatingScrollButton
-              following={stick}
-              targetRef={scroll}
-              threshold={85}
-              className="floating-scroll-bottom"
-              onScrollToBottom={toBottom}
-              tooltip={t("conversation.scrollLatest")}
-            />
-            {!readOnly && !footer && <InteractionParticipation />}
-            {!readOnly && !footer && !!state.roundLimitRequests?.length && (
-              <div className="composer-stack">
-                <RoundLimitPrompt />
-              </div>
-            )}
-            {footer ??
-              (!readOnly &&
-                (transcript.pendingPermission ? (
-                  <div className="composer-stack">
-                    <PermissionCard value={transcript.pendingPermission} />
-                  </div>
-                ) : (
-                  <ComposerStack onSubmitIntent={submissionIntent} />
-                )))}
-          </div>
-        </div>
       </section>
+      <div className="conversation-input-outer-wrap">
+        <div className="conversation-input-anchor">
+          <FloatingScrollButton
+            following={stick}
+            targetRef={scroll}
+            threshold={85}
+            className="floating-scroll-bottom"
+            onScrollToBottom={toBottom}
+            tooltip={t("conversation.scrollLatest")}
+          />
+          {!readOnly && !footer && (
+            <ComposerNotificationDock
+              showHostNotice={!transcript.pendingPermission}
+            />
+          )}
+          {footer ??
+            (!readOnly &&
+              (transcript.pendingPermission ? (
+                <div className="composer-stack conversation-permission-footer">
+                  <PermissionCard value={transcript.pendingPermission} />
+                </div>
+              ) : (
+                <ComposerStack
+                  onSubmitIntent={submissionIntent}
+                  hostNoticeInDock
+                />
+              )))}
+        </div>
+      </div>
       {/* 轮次导航 */}
       <TurnNavigator
         turns={navTurns}
@@ -1737,6 +1811,14 @@ function ConversationList({
     </div>
   );
 }
+const NativeStateViewer = lazy(() =>
+  import("./state-viewer/NativeStateViewer").then(({ NativeStateViewer }) => ({
+    default: NativeStateViewer,
+  })),
+);
+
+const NativePromptViewer = lazy(() => import("./prompt-viewer/NativePromptViewer"));
+
 export const ConversationPage = memo(function ConversationPage({
   active = true,
 }: {
@@ -1782,6 +1864,7 @@ export const ConversationPage = memo(function ConversationPage({
     >
       <div
         className="conversation-chat-pane"
+        data-active={chat && !childOpen}
         style={
           chat && !childOpen
             ? {
@@ -1796,10 +1879,20 @@ export const ConversationPage = memo(function ConversationPage({
       >
         <Conversation />
       </div>
-      {!chat && !activePlugin && (
+      {!activePlugin && state.viewMode === "trajectory" && (
         <div style={{ display: childOpen ? "none" : "contents" }}>
           <TrajectoryView active={active && !childOpen} />
         </div>
+      )}
+      {!activePlugin && !childOpen && state.viewMode === "state" && (
+        <Suspense fallback={null}>
+          <NativeStateViewer sessionId={state.sessionId} active={active} />
+        </Suspense>
+      )}
+      {!activePlugin && !childOpen && state.viewMode === "prompt" && (
+        <Suspense fallback={null}>
+          <NativePromptViewer sessionId={state.sessionId} active={active} />
+        </Suspense>
       )}
       {activePlugin && !childOpen && (
         <section

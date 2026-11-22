@@ -33,6 +33,8 @@ async function outboundBackend(page: Page, pendingControls = false) {
     transport,
     connected: true,
     ready,
+    reconciling: !ready,
+    connection_generation: "1",
     readiness: {
       connection_generation: "1",
       connected: true,
@@ -78,7 +80,9 @@ async function outboundBackend(page: Page, pendingControls = false) {
     });
   });
   await page.route("**/api/v1/projects/*/host-state", (route) =>
-    route.fulfill({ json: view() }),
+    route.fulfill({ json: connected ? { ...view(), carrier_mode: transport === "grpc"
+      ? "server_direct_grpc" : "server_direct_outbound" } : { connected: false, ready: false,
+      reconciling: false, carrier_mode: "detached", connection_generation: null } }),
   );
   await page.route("**/api/v1/projects/*/host/connect", (route) => {
     phases.push("connect");

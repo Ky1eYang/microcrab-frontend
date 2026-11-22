@@ -133,6 +133,13 @@ async function heldSessionNavigation(
       },
     }),
   );
+  // Native navigation now checks the selected Session's activation even when
+  // it shares the already-connected Project with the outgoing Session.
+  await page.route(/\/api\/v1\/sessions\/s[23]\/runtime$/, (route) => {
+    if (route.request().method() !== "PUT") return route.fallback();
+    const id = new URL(route.request().url()).pathname.split("/").at(-2);
+    return route.fulfill({ json: { ...nativeSnapshot, session: { ...nativeSnapshot.session, id } } });
+  });
   await page.goto("/#session/s1");
   await expect(page.getByText("历史回答", { exact: true })).toBeVisible();
   await connectHostUI(page);

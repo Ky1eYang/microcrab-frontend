@@ -3,6 +3,7 @@ import { PredicateEditor } from "./SessionPermissionsDialog/PredicateEditor";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useApp } from "../../state";
 import { t } from "../../i18n";
+import { registerDocumentLeave } from "../../client/document-leave";
 import {
   LIMIT_FIELDS,
   PROMPT_FIELDS,
@@ -23,6 +24,14 @@ type Scope =
   | { kind: "user" }
   | { kind: "project"; id: string }
   | { kind: "session"; id: string };
+export type ProjectSettingsSection =
+  "agents" | "models" | "prompts" | "permissions";
+
+type ProjectSettingsView = {
+  section: ProjectSettingsSection | null;
+  onSectionChange: (section: ProjectSettingsSection) => void;
+};
+
 const errorText = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
 const byteHint = (bytes: number) => {
@@ -82,8 +91,34 @@ const failurePath = (failure: unknown) => {
     : path;
 };
 
+function settingsSection(path: string): ProjectSettingsSection | undefined {
+  const field = /^settings\.([\w]+)/.exec(path)?.[1];
+  if (field === "permissions" || field === "initialization")
+    return "permissions";
+  if (
+    field === "limits" ||
+    field === "review" ||
+    field === "review_model" ||
+    field === "model_selection"
+  )
+    return "models";
+  if (
+    field === "auto_compaction" ||
+    field === "auto_naming" ||
+    PROMPT_FIELDS.some((name) => name === field)
+  )
+    return "prompts";
+  if (field === "agent" || field === "mode") return "agents";
+}
+
 /** Each scope has its own CAS record. Saving defaults never applies to live Sessions. */
-export function OwnerSettings({ scope = { kind: "user" } }: { scope?: Scope }) {
+export function OwnerSettings({
+  scope = { kind: "user" },
+  projectView,
+}: {
+  scope?: Scope;
+  projectView?: ProjectSettingsView;
+}) {
   const { state, dispatch } = useApp();
   const identity = JSON.stringify([
     state.authSession?.principal?.owner,
@@ -96,8 +131,34 @@ export function OwnerSettings({ scope = { kind: "user" } }: { scope?: Scope }) {
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [discard, setDiscard] = useState(false);
+  const [pendingFailure, setPendingFailure] = useState<{
+    path: string;
+    message: string;
+  } | null>(null);
+  const [visitedPrompts, setVisitedPrompts] = useState(false);
+  const [promptDraftVersion, setPromptDraftVersion] = useState(0);
   const generation = useRef(0);
+  const busyRef = useRef(false);
+  const saving = useRef(false);
   const form = useRef<HTMLElement>(null);
+  const keepEditing = useRef<HTMLButtonElement>(null);
+  const continuation = useRef<(() => void) | undefined>(undefined);
+  const isProjectView = !!projectView;
+  const section = projectView?.section;
+  const projectViewRef = useRef(projectView);
+  projectViewRef.current = projectView;
+  const visible = (candidate: ProjectSettingsSection) =>
+    !isProjectView || section === candidate;
+  const dirty =
+    isProjectView &&
+    !!snapshot &&
+    (JSON.stringify(draft) !== JSON.stringify(snapshot.overrides) ||
+      (draft.permissions !== undefined &&
+        rules !==
+          JSON.stringify(snapshot.overrides.permissions ?? [], null, 2)));
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
   const scopeParams = scope.kind === "project" ? { project_id: scope.id } : {};
   const method = scope.kind === "user" ? "settings" : `${scope.kind}.settings`;
   const request = (operation: "get" | "set", params = {}) =>
@@ -108,12 +169,15 @@ export function OwnerSettings({ scope = { kind: "user" } }: { scope?: Scope }) {
       sessionId: scope.kind === "session" ? scope.id : undefined,
     });
   const install = (next: SettingsSnapshot) => {
+    if (isProjectView) setPromptDraftVersion((version) => version + 1);
     setSnapshot(next);
     setDraft(structuredClone(next.overrides));
     setRules(JSON.stringify(next.overrides.permissions ?? [], null, 2));
   };
   const load = async () => {
+    if (busyRef.current) return;
     const ticket = ++generation.current;
+    busyRef.current = true;
     setBusy(true);
     setError("");
     try {
@@ -122,10 +186,15 @@ export function OwnerSettings({ scope = { kind: "user" } }: { scope?: Scope }) {
     } catch (failure) {
       if (ticket === generation.current) setError(errorText(failure));
     } finally {
-      if (ticket === generation.current) setBusy(false);
+      if (ticket === generation.current) {
+        busyRef.current = false;
+        setBusy(false);
+      }
     }
   };
-  useEffect(() => {
+  useLayoutEffect(() => {
+    busyRef.current = false;
+    saving.current = false;
     setSnapshot(null);
     setDraft({});
     setStatus("");
@@ -134,6 +203,44 @@ export function OwnerSettings({ scope = { kind: "user" } }: { scope?: Scope }) {
       generation.current++;
     };
   }, [identity]);
+  useEffect(() => {
+    if (!isProjectView) return;
+    const unregister = registerDocumentLeave(
+      () => form.current,
+      (proceed) => {
+        if (saving.current || (busyRef.current && dirtyRef.current)) return false;
+        if (!dirtyRef.current) return true;
+        continuation.current = proceed;
+        setDiscard(true);
+        return false;
+      },
+    );
+    const beforeUnload = (event: BeforeUnloadEvent) => {
+      if (dirtyRef.current || saving.current) event.preventDefault();
+    };
+    window.addEventListener("beforeunload", beforeUnload);
+    return () => {
+      unregister();
+      window.removeEventListener("beforeunload", beforeUnload);
+    };
+  }, [isProjectView]);
+  useLayoutEffect(() => {
+    if (!discard) return;
+    const opener = document.activeElement;
+    keepEditing.current?.focus();
+    keepEditing.current?.scrollIntoView({ block: "nearest" });
+    return () => {
+      if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
+    };
+  }, [discard]);
+  useEffect(() => {
+    if (section === "prompts") setVisitedPrompts(true);
+  }, [section]);
+  useEffect(() => {
+    if (!pendingFailure) return;
+    focusFailure(form.current, pendingFailure.path, pendingFailure.message);
+    setPendingFailure(null);
+  }, [pendingFailure]);
   const change = (key: keyof SettingsOverrides, value: unknown) => {
     setStatus("");
     setDraft((current) => {
@@ -144,7 +251,7 @@ export function OwnerSettings({ scope = { kind: "user" } }: { scope?: Scope }) {
     });
   };
   const save = async () => {
-    if (!snapshot || busy) return;
+    if (!snapshot || busyRef.current) return;
     const ticket = generation.current;
     try {
       const next = { ...draft };
@@ -165,6 +272,8 @@ export function OwnerSettings({ scope = { kind: "user" } }: { scope?: Scope }) {
           );
       }
       validateSettingsOverrides(next);
+      saving.current = true;
+      busyRef.current = true;
       setBusy(true);
       setError("");
       const saved = await request("set", {
@@ -184,16 +293,25 @@ export function OwnerSettings({ scope = { kind: "user" } }: { scope?: Scope }) {
     } catch (failure) {
       if (ticket === generation.current) {
         setError(errorText(failure));
-        focusFailure(
-          form.current,
+        const path =
           errorText(failure) === t("settingsUX.rulesJson")
             ? "settings.permissions"
-            : failurePath(failure),
-          errorText(failure),
-        );
+            : failurePath(failure);
+        const view = projectViewRef.current;
+        if (!view) focusFailure(form.current, path, errorText(failure));
+        else if (view.section) {
+          // A save is for the whole Project draft, not just the current tab.
+          const target = settingsSection(path);
+          if (target) view.onSectionChange(target);
+          setPendingFailure({ path, message: errorText(failure) });
+        }
       }
     } finally {
-      if (ticket === generation.current) setBusy(false);
+      if (ticket === generation.current) {
+        saving.current = false;
+        busyRef.current = false;
+        setBusy(false);
+      }
     }
   };
   const models = state.availableModels.flatMap((model) =>
@@ -206,6 +324,13 @@ export function OwnerSettings({ scope = { kind: "user" } }: { scope?: Scope }) {
       },
     })),
   );
+  const agents =
+    !projectView ||
+    (scope.kind === "project" &&
+      state.hostConnection?.projectId === scope.id &&
+      state.hostConnection.state === "ready")
+      ? state.agents
+      : [];
   const modelSelect = (field: "model_selection" | "review_model") => (
     <ModelCombobox
       label={t(`ownerSettings.${field}`)}
@@ -254,12 +379,32 @@ export function OwnerSettings({ scope = { kind: "user" } }: { scope?: Scope }) {
       })}
     </span>
   );
+  const reviewControls = (
+    <label className="settings-form-group">
+      <span className="settings-form-label">{t("ownerSettings.review")}</span>
+      {booleanSelect("review")}
+      {source("review")}
+    </label>
+  );
+  const reviewModel = (
+    <label className="settings-form-group">
+      <span className="settings-form-label">
+        {t("ownerSettings.review_model")}
+      </span>
+      {modelSelect("review_model")}
+      {source("review_model")}
+    </label>
+  );
   return (
     <section
       ref={form}
       onChangeCapture={() => clearFailure(form.current)}
       className="settings-ergonomics"
       data-testid={`owner-settings-${scope.kind}`}
+      data-inactive-project-settings={
+        isProjectView && !section ? "true" : undefined
+      }
+      hidden={isProjectView && !section && !discard}
       aria-busy={busy}
     >
       <p className="settings-description">
@@ -270,6 +415,11 @@ export function OwnerSettings({ scope = { kind: "user" } }: { scope?: Scope }) {
         )}
       </p>
       <p className="settings-description">{t("ownerSettings.precedence")}</p>
+      {isProjectView && (
+        <p className="settings-description">
+          {t("project.settings.sharedSave")}
+        </p>
+      )}
       {error && (
         <p role="alert" className="inline-notice" data-tone="danger">
           {error}
@@ -282,438 +432,457 @@ export function OwnerSettings({ scope = { kind: "user" } }: { scope?: Scope }) {
       )}
       {snapshot && (
         <>
-          <section
-            className="settings-section-card settings-model-default"
-            data-testid="settings-model-default"
-          >
-            <div className="settings-section-head">
-              <h4 className="settings-section-title">
+          {visible("models") && (
+            <section
+              className="settings-section-card settings-model-default"
+              data-testid="settings-model-default"
+            >
+              <div className="settings-section-head">
+                <h4 className="settings-section-title">
+                  {t(
+                    scope.kind === "session"
+                      ? "ownerSettings.model_selection"
+                      : "settingsUX.newSessionModel",
+                  )}
+                </h4>
+                <div className="settings-section-meta">
+                  <span
+                    className="limit-source-pill"
+                    data-testid="settings-revisions"
+                  >
+                    {t("ownerSettings.revisions", {
+                      desired: snapshot.revision,
+                      applied: snapshot.applied_revision ?? snapshot.revision,
+                    })}
+                  </span>
+                </div>
+              </div>
+              <p className="settings-description">
                 {t(
                   scope.kind === "session"
-                    ? "ownerSettings.model_selection"
-                    : "settingsUX.newSessionModel",
+                    ? "ownerSettings.liveHint"
+                    : "settingsUX.newSessionHint",
                 )}
-              </h4>
-              <div className="settings-section-meta">
-                <span
-                  className="limit-source-pill"
-                  data-testid="settings-revisions"
-                >
-                  {t("ownerSettings.revisions", {
-                    desired: snapshot.revision,
-                    applied: snapshot.applied_revision ?? snapshot.revision,
-                  })}
-                </span>
-              </div>
-            </div>
-            <p className="settings-description">
-              {t(
-                scope.kind === "session"
-                  ? "ownerSettings.liveHint"
-                  : "settingsUX.newSessionHint",
+              </p>
+              {modelSelect("model_selection")}
+              {source("model_selection")}
+              <p className="inline-notice" data-testid="settings-application">
+                {t(`ownerSettings.application.${snapshot.application}`)}
+                {snapshot.reason && ` · ${snapshot.reason}`}
+              </p>
+              {snapshot.applied_revision !== snapshot.revision && (
+                <Payload
+                  value={snapshot.desired_effective}
+                  testid="settings-desired-effective"
+                />
               )}
-            </p>
-            {modelSelect("model_selection")}
-            {source("model_selection")}
-            <p className="inline-notice" data-testid="settings-application">
-              {t(`ownerSettings.application.${snapshot.application}`)}
-              {snapshot.reason && ` · ${snapshot.reason}`}
-            </p>
-            {snapshot.applied_revision !== snapshot.revision && (
-              <Payload
-                value={snapshot.desired_effective}
-                testid="settings-desired-effective"
-              />
-            )}
-          </section>
+              {projectView && (
+                <div className="settings-form-grid">
+                  {reviewControls}
+                  {reviewModel}
+                </div>
+              )}
+            </section>
+          )}
 
-          <section className="settings-section-card">
-            <div className="settings-section-head">
-              <h4 className="settings-section-title">
-                {t("ownerSettings.agentMode")}
-              </h4>
-            </div>
-            <div className="settings-form-grid">
-              <div className="settings-form-group">
-                <span className="settings-form-label">
-                  {t("ownerSettings.agent")}
-                </span>
-                <SearchableSelect<string | undefined>
-                  label={t("ownerSettings.agent")}
-                  disabled={busy}
-                  valueKey={draft.agent ?? ""}
-                  options={[
-                    {
-                      key: "",
-                      label: t("ownerSettings.inherit"),
-                      value: undefined,
-                    },
-                    ...state.agents.map((agent) => ({
-                      key: agent.name,
-                      label: agent.name,
-                      value: agent.name,
-                    })),
-                  ]}
-                  onChange={(value) => {
-                    change("agent", value);
-                    change("mode", undefined);
-                  }}
-                />
-                {source("agent")}
+          {visible("agents") && (
+            <section className="settings-section-card">
+              <div className="settings-section-head">
+                <h4 className="settings-section-title">
+                  {t("ownerSettings.agentMode")}
+                </h4>
               </div>
-              <div className="settings-form-group">
-                <span className="settings-form-label">
-                  {t("ownerSettings.mode")}
-                </span>
-                <SearchableSelect<string | undefined>
-                  label={t("ownerSettings.mode")}
-                  disabled={busy}
-                  valueKey={draft.mode ?? ""}
-                  options={[
-                    {
-                      key: "",
-                      label: t("ownerSettings.inherit"),
-                      value: undefined,
-                    },
-                    ...(state.agents
-                      .find(
-                        (agent) =>
-                          agent.name ===
-                          (draft.agent ?? snapshot.effective.agent),
-                      )
-                      ?.modes.map((mode) => ({
-                        key: mode.name,
-                        label: mode.description
-                          ? `${mode.name} · ${mode.description}`
-                          : mode.name,
-                        value: mode.name,
-                      })) ?? []),
-                  ]}
-                  onChange={(value) => change("mode", value)}
-                />
-                {source("mode")}
-              </div>
-            </div>
-            {scope.kind === "session" &&
-              state.publicState?.mode_prompt !== undefined && (
-                <div className="settings-subpanel">
-                  <div className="settings-section-title">
-                    {t("ownerSettings.modeState")}
-                  </div>
-                  <p className="settings-description">
-                    {t("ownerSettings.modeBoundary")}
-                  </p>
-                  <Payload
-                    value={{
-                      mode: state.publicState.mode,
-                      mode_prompt: state.publicState.mode_prompt,
+              <div className="settings-form-grid">
+                <div className="settings-form-group">
+                  <span className="settings-form-label">
+                    {t("ownerSettings.agent")}
+                  </span>
+                  <SearchableSelect<string | undefined>
+                    label={t("ownerSettings.agent")}
+                    disabled={busy}
+                    valueKey={draft.agent ?? ""}
+                    options={[
+                      {
+                        key: "",
+                        label: t("ownerSettings.inherit"),
+                        value: undefined,
+                      },
+                      ...agents.map((agent) => ({
+                        key: agent.name,
+                        label: agent.name,
+                        value: agent.name,
+                      })),
+                    ]}
+                    onChange={(value) => {
+                      change("agent", value);
+                      change("mode", undefined);
                     }}
-                    testid="settings-mode-state"
                   />
+                  {source("agent")}
                 </div>
-              )}
-          </section>
-
-          <PromptSettings draft={draft} snapshot={snapshot} busy={busy}
-            frozen={scope.kind === "session"} onChange={change} />
-
-          <section className="settings-section-card">
-            <div className="settings-section-head">
-              <h4 className="settings-section-title">
-                {t("ownerSettings.limits")}
-              </h4>
-            </div>
-            <div className="limits-groups-stack">
-              {(
-                [
-                  {
-                    key: "timeouts",
-                    fields: [
-                      "interaction_timeout_ms",
-                      "lifecycle_timeout_ms",
-                      "sleep_max_ms",
-                    ],
-                  },
-                  {
-                    key: "bytes",
-                    fields: [
-                      "max_context_bytes",
-                      "max_tool_output_bytes",
-                      "max_tool_image_bytes",
-                      "output_buffer_bytes",
-                      "max_output_tokens",
-                    ],
-                  },
-                  {
-                    key: "processes",
-                    fields: [
-                      "max_processes",
-                      "max_retained_processes",
-                      "max_pending_executions",
-                      "max_retained_executions",
-                      "max_execution_buffers",
-                    ],
-                  },
-                  {
-                    key: "rounds",
-                    fields: ["max_rounds", "max_tool_calls_per_round"],
-                  },
-                ] as const
-              ).map((group) => (
-                <div className="limits-group-card" key={group.key}>
-                  <h5 className="limits-group-title">
-                    {t(`ownerSettings.limitGroup.${group.key}`)}
-                  </h5>
-                  <div className="limits-grid">
-                    {group.fields.map((field) => {
-                      const unit = field.endsWith("_ms")
-                        ? "ms"
-                        : field.endsWith("_bytes")
-                          ? "bytes"
-                          : field.endsWith("_tokens")
-                            ? "tokens"
-                            : "";
-                      const effectiveVal = snapshot.effective.limits[field];
-                      const sourceKey =
-                        snapshot.sources[`limits.${field}`] ?? "admin";
-                      return (
-                        <label className="limit-tile" key={field}>
-                          <div className="limit-tile-top">
-                            <span className="limit-tile-label">
-                              {t(`ownerSettings.limit.${field}`)}
-                            </span>
-                            <span className="limit-source-pill">
-                              {draft.limits?.[field] === undefined
-                                ? t("ownerSettings.inherit")
-                                : t(`ownerSettings.source.${scope.kind}`)}
-                            </span>
-                          </div>
-                          <div className="limit-input-wrap">
-                            <input
-                              className="settings-input"
-                              disabled={busy}
-                              data-testid={`limit-${field}`}
-                              data-validation-path={`settings.limits.${field}`}
-                              type="number"
-                              min={field === "max_retained_processes" ? 0 : 1}
-                              step="1"
-                              max={snapshot.constraints.limits[field]}
-                              placeholder={String(
-                                snapshot.effective.limits[field],
-                              )}
-                              value={draft.limits?.[field] ?? ""}
-                              onChange={(e) => {
-                                const limits = { ...draft.limits };
-                                if (e.target.value === "") delete limits[field];
-                                else limits[field] = Number(e.target.value);
-                                change(
-                                  "limits",
-                                  Object.keys(limits).length
-                                    ? limits
-                                    : undefined,
-                                );
-                              }}
-                            />
-                            {unit && <span className="limit-unit">{unit}</span>}
-                          </div>
-                          <div className="limit-tile-meta">
-                            <span>
-                              {t("ownerSettings.effective", {
-                                value: field.endsWith("_bytes")
-                                  ? `${effectiveVal} · ${byteHint(effectiveVal)}`
-                                  : effectiveVal,
-                                source: t(`ownerSettings.source.${sourceKey}`),
-                              })}
-                              {field.endsWith("_bytes") &&
-                                draft.limits?.[field] !== undefined &&
-                                draft.limits[field] !== effectiveVal && (
-                                  <span className="limit-draft-hint">
-                                    {t("ownerSettings.draftValue", {
-                                      value: byteHint(draft.limits[field]),
-                                    })}
-                                  </span>
-                                )}
-                            </span>
-                            <span>
-                              {t("ownerSettings.limitMax", {
-                                maximum: snapshot.constraints.limits[field],
-                              })}
-                            </span>
-                          </div>
-                        </label>
-                      );
-                    })}
+                <div className="settings-form-group">
+                  <span className="settings-form-label">
+                    {t("ownerSettings.mode")}
+                  </span>
+                  <SearchableSelect<string | undefined>
+                    label={t("ownerSettings.mode")}
+                    disabled={busy}
+                    valueKey={draft.mode ?? ""}
+                    options={[
+                      {
+                        key: "",
+                        label: t("ownerSettings.inherit"),
+                        value: undefined,
+                      },
+                      ...(agents
+                        .find(
+                          (agent) =>
+                            agent.name ===
+                            (draft.agent ?? snapshot.effective.agent),
+                        )
+                        ?.modes.map((mode) => ({
+                          key: mode.name,
+                          label: mode.description
+                            ? `${mode.name} · ${mode.description}`
+                            : mode.name,
+                          value: mode.name,
+                        })) ?? []),
+                    ]}
+                    onChange={(value) => change("mode", value)}
+                  />
+                  {source("mode")}
+                </div>
+              </div>
+              {scope.kind === "session" &&
+                state.publicState?.mode_prompt !== undefined && (
+                  <div className="settings-subpanel">
+                    <div className="settings-section-title">
+                      {t("ownerSettings.modeState")}
+                    </div>
+                    <p className="settings-description">
+                      {t("ownerSettings.modeBoundary")}
+                    </p>
+                    <Payload
+                      value={{
+                        mode: state.publicState.mode,
+                        mode_prompt: state.publicState.mode_prompt,
+                      }}
+                      testid="settings-mode-state"
+                    />
                   </div>
-                </div>
-              ))}
-            </div>
-          </section>
+                )}
+            </section>
+          )}
 
-          <section className="settings-section-card">
-            <div className="settings-section-head">
-              <h4 className="settings-section-title">
-                {t("ownerSettings.permissions")}
-              </h4>
-            </div>
-            <div className="settings-form-grid">
-              <label className="settings-form-group">
-                <span className="settings-form-label">
-                  {t("ownerSettings.initialization")}
-                </span>
-                <select
-                  className="settings-input"
-                  disabled={busy}
-                  value={draft.initialization ?? ""}
-                  onChange={(e) =>
-                    change("initialization", e.target.value || undefined)
-                  }
-                >
-                  <option value="">{t("ownerSettings.inherit")}</option>
-                  {["allow", "ask", "deny"].map((action) => (
-                    <option key={action} value={action}>
-                      {t(`permission.action.${action}`)}
-                    </option>
-                  ))}
-                </select>
-                {source("initialization")}
-              </label>
-              <label className="settings-form-group">
-                <span className="settings-form-label">
-                  {t("ownerSettings.review")}
-                </span>
-                {booleanSelect("review")}
-                {source("review")}
-              </label>
-            </div>
-            <label className="settings-form-group">
-              <span className="settings-form-label">
-                {t("ownerSettings.review_model")}
-              </span>
-              {modelSelect("review_model")}
-              {source("review_model")}
-            </label>
-            <label className="settings-toggle-row">
-              <span>{t("ownerSettings.overridePermissions")}</span>
-              <input
-                type="checkbox"
-                disabled={busy}
-                checked={draft.permissions !== undefined}
-                onChange={(e) =>
-                  change("permissions", e.target.checked ? [] : undefined)
-                }
+          {(visible("prompts") || visitedPrompts) && (
+            <div hidden={!visible("prompts")}>
+              <PromptSettings
+                key={promptDraftVersion}
+                draft={draft}
+                snapshot={snapshot}
+                busy={busy}
+                frozen={scope.kind === "session"}
+                onChange={change}
               />
-            </label>
-            {draft.permissions !== undefined && (
-              <div className="settings-subpanel">
-                <PredicateEditor
-                  rules={draft.permissions}
-                  disabled={busy}
-                  onChange={(permissions) => {
-                    change("permissions", permissions);
-                    setRules(JSON.stringify(permissions, null, 2));
-                  }}
-                />
+            </div>
+          )}
+
+          {visible("models") && (
+            <section className="settings-section-card">
+              <div className="settings-section-head">
+                <h4 className="settings-section-title">
+                  {t("ownerSettings.limits")}
+                </h4>
+              </div>
+              <div className="limits-groups-stack">
+                {(
+                  [
+                    {
+                      key: "timeouts",
+                      fields: [
+                        "interaction_timeout_ms",
+                        "lifecycle_timeout_ms",
+                        "sleep_max_ms",
+                      ],
+                    },
+                    {
+                      key: "bytes",
+                      fields: [
+                        "max_context_bytes",
+                        "max_tool_output_bytes",
+                        "max_tool_image_bytes",
+                        "output_buffer_bytes",
+                        "max_output_tokens",
+                      ],
+                    },
+                    {
+                      key: "processes",
+                      fields: [
+                        "max_processes",
+                        "max_retained_processes",
+                        "max_pending_executions",
+                        "max_retained_executions",
+                        "max_execution_buffers",
+                      ],
+                    },
+                    {
+                      key: "rounds",
+                      fields: ["max_rounds", "max_tool_calls_per_round"],
+                    },
+                  ] as const
+                ).map((group) => (
+                  <div className="limits-group-card" key={group.key}>
+                    <h5 className="limits-group-title">
+                      {t(`ownerSettings.limitGroup.${group.key}`)}
+                    </h5>
+                    <div className="limits-grid">
+                      {group.fields.map((field) => {
+                        const unit = field.endsWith("_ms")
+                          ? "ms"
+                          : field.endsWith("_bytes")
+                            ? "bytes"
+                            : field.endsWith("_tokens")
+                              ? "tokens"
+                              : "";
+                        const effectiveVal = snapshot.effective.limits[field];
+                        const sourceKey =
+                          snapshot.sources[`limits.${field}`] ?? "admin";
+                        return (
+                          <label className="limit-tile" key={field}>
+                            <div className="limit-tile-top">
+                              <span className="limit-tile-label">
+                                {t(`ownerSettings.limit.${field}`)}
+                              </span>
+                              <span className="limit-source-pill">
+                                {draft.limits?.[field] === undefined
+                                  ? t("ownerSettings.inherit")
+                                  : t(`ownerSettings.source.${scope.kind}`)}
+                              </span>
+                            </div>
+                            <div className="limit-input-wrap">
+                              <input
+                                className="settings-input"
+                                disabled={busy}
+                                data-testid={`limit-${field}`}
+                                data-validation-path={`settings.limits.${field}`}
+                                type="number"
+                                min={field === "max_retained_processes" ? 0 : 1}
+                                step="1"
+                                max={snapshot.constraints.limits[field]}
+                                placeholder={String(
+                                  snapshot.effective.limits[field],
+                                )}
+                                value={draft.limits?.[field] ?? ""}
+                                onChange={(e) => {
+                                  const limits = { ...draft.limits };
+                                  if (e.target.value === "")
+                                    delete limits[field];
+                                  else limits[field] = Number(e.target.value);
+                                  change(
+                                    "limits",
+                                    Object.keys(limits).length
+                                      ? limits
+                                      : undefined,
+                                  );
+                                }}
+                              />
+                              {unit && (
+                                <span className="limit-unit">{unit}</span>
+                              )}
+                            </div>
+                            <div className="limit-tile-meta">
+                              <span>
+                                {t("ownerSettings.effective", {
+                                  value: field.endsWith("_bytes")
+                                    ? `${effectiveVal} · ${byteHint(effectiveVal)}`
+                                    : effectiveVal,
+                                  source: t(
+                                    `ownerSettings.source.${sourceKey}`,
+                                  ),
+                                })}
+                                {field.endsWith("_bytes") &&
+                                  draft.limits?.[field] !== undefined &&
+                                  draft.limits[field] !== effectiveVal && (
+                                    <span className="limit-draft-hint">
+                                      {t("ownerSettings.draftValue", {
+                                        value: byteHint(draft.limits[field]),
+                                      })}
+                                    </span>
+                                  )}
+                              </span>
+                              <span>
+                                {t("ownerSettings.limitMax", {
+                                  maximum: snapshot.constraints.limits[field],
+                                })}
+                              </span>
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {visible("permissions") && (
+            <section className="settings-section-card">
+              <div className="settings-section-head">
+                <h4 className="settings-section-title">
+                  {t("ownerSettings.permissions")}
+                </h4>
+              </div>
+              <div className="settings-form-grid">
                 <label className="settings-form-group">
                   <span className="settings-form-label">
-                    {t("ownerSettings.permissionRules")}
+                    {t("ownerSettings.initialization")}
                   </span>
-                  <textarea
-                    className="settings-input monospace-text"
-                    rows={8}
+                  <select
+                    className="settings-input"
                     disabled={busy}
-                    value={rules}
-                    onChange={(e) => setRules(e.target.value)}
-                    data-testid="settings-permission-rules"
-                    data-validation-path="settings.permissions"
-                  />
-                </label>
-              </div>
-            )}
-          </section>
-
-          <section className="settings-section-card">
-            <div className="settings-section-head">
-              <h4 className="settings-section-title">
-                {t("ownerSettings.behavior")}
-              </h4>
-            </div>
-            <label className="settings-form-group">
-              <span className="settings-form-label">
-                {t("ownerSettings.auto_naming")}
-              </span>
-              {booleanSelect("auto_naming")}
-              {source("auto_naming")}
-            </label>
-            <label className="settings-toggle-row">
-              <span>{t("ownerSettings.overrideCompaction")}</span>
-              <input
-                type="checkbox"
-                disabled={busy}
-                checked={draft.auto_compaction !== undefined}
-                onChange={(e) =>
-                  change(
-                    "auto_compaction",
-                    e.target.checked
-                      ? (snapshot.effective.auto_compaction ?? {
-                          enabled: true,
-                          turn_threshold: 0.8,
-                          round_threshold: 0.95,
-                          headroom_tokens: 0,
-                        })
-                      : undefined,
-                  )
-                }
-              />
-            </label>
-            {draft.auto_compaction && (
-              <div className="settings-subpanel">
-                <label className="settings-toggle-row">
-                  <span>{t("ownerSettings.enabled")}</span>
-                  <input
-                    type="checkbox"
-                    disabled={busy}
-                    checked={draft.auto_compaction.enabled}
+                    value={draft.initialization ?? ""}
                     onChange={(e) =>
-                      change("auto_compaction", {
-                        ...draft.auto_compaction,
-                        enabled: e.target.checked,
-                      })
+                      change("initialization", e.target.value || undefined)
                     }
-                  />
+                  >
+                    <option value="">{t("ownerSettings.inherit")}</option>
+                    {["allow", "ask", "deny"].map((action) => (
+                      <option key={action} value={action}>
+                        {t(`permission.action.${action}`)}
+                      </option>
+                    ))}
+                  </select>
+                  {source("initialization")}
                 </label>
-                <div className="settings-form-grid-3">
-                  {(
-                    [
-                      "turn_threshold",
-                      "round_threshold",
-                      "headroom_tokens",
-                    ] as const
-                  ).map((field) => (
-                    <label className="settings-form-group" key={field}>
-                      <span className="settings-form-label">
-                        {t(`ownerSettings.${field}`)}
-                      </span>
-                      <input
-                        className="settings-input"
-                        type="number"
-                        disabled={busy}
-                        step={field === "headroom_tokens" ? 1 : 0.01}
-                        data-validation-path={`settings.auto_compaction.${field}`}
-                        value={draft.auto_compaction![field]}
-                        onChange={(e) =>
-                          change("auto_compaction", {
-                            ...draft.auto_compaction,
-                            [field]: Number(e.target.value),
-                          })
-                        }
-                      />
-                    </label>
-                  ))}
-                </div>
+                {!projectView && reviewControls}
               </div>
-            )}
-            {source("auto_compaction")}
-          </section>
+              {!projectView && reviewModel}
+              <label className="settings-toggle-row">
+                <span>{t("ownerSettings.overridePermissions")}</span>
+                <input
+                  type="checkbox"
+                  disabled={busy}
+                  checked={draft.permissions !== undefined}
+                  onChange={(e) =>
+                    change("permissions", e.target.checked ? [] : undefined)
+                  }
+                />
+              </label>
+              {draft.permissions !== undefined && (
+                <div className="settings-subpanel">
+                  <PredicateEditor
+                    rules={draft.permissions}
+                    disabled={busy}
+                    onChange={(permissions) => {
+                      change("permissions", permissions);
+                      setRules(JSON.stringify(permissions, null, 2));
+                    }}
+                  />
+                  <label className="settings-form-group">
+                    <span className="settings-form-label">
+                      {t("ownerSettings.permissionRules")}
+                    </span>
+                    <textarea
+                      className="settings-input monospace-text"
+                      rows={8}
+                      disabled={busy}
+                      value={rules}
+                      onChange={(e) => setRules(e.target.value)}
+                      data-testid="settings-permission-rules"
+                      data-validation-path="settings.permissions"
+                    />
+                  </label>
+                </div>
+              )}
+            </section>
+          )}
+
+          {visible("prompts") && (
+            <section className="settings-section-card">
+              <div className="settings-section-head">
+                <h4 className="settings-section-title">
+                  {t("ownerSettings.behavior")}
+                </h4>
+              </div>
+              <label className="settings-form-group">
+                <span className="settings-form-label">
+                  {t("ownerSettings.auto_naming")}
+                </span>
+                {booleanSelect("auto_naming")}
+                {source("auto_naming")}
+              </label>
+              <label className="settings-toggle-row">
+                <span>{t("ownerSettings.overrideCompaction")}</span>
+                <input
+                  type="checkbox"
+                  disabled={busy}
+                  checked={draft.auto_compaction !== undefined}
+                  onChange={(e) =>
+                    change(
+                      "auto_compaction",
+                      e.target.checked
+                        ? (snapshot.effective.auto_compaction ?? {
+                            enabled: true,
+                            turn_threshold: 0.8,
+                            round_threshold: 0.95,
+                            headroom_tokens: 0,
+                          })
+                        : undefined,
+                    )
+                  }
+                />
+              </label>
+              {draft.auto_compaction && (
+                <div className="settings-subpanel">
+                  <label className="settings-toggle-row">
+                    <span>{t("ownerSettings.enabled")}</span>
+                    <input
+                      type="checkbox"
+                      disabled={busy}
+                      checked={draft.auto_compaction.enabled}
+                      onChange={(e) =>
+                        change("auto_compaction", {
+                          ...draft.auto_compaction,
+                          enabled: e.target.checked,
+                        })
+                      }
+                    />
+                  </label>
+                  <div className="settings-form-grid-3">
+                    {(
+                      [
+                        "turn_threshold",
+                        "round_threshold",
+                        "headroom_tokens",
+                      ] as const
+                    ).map((field) => (
+                      <label className="settings-form-group" key={field}>
+                        <span className="settings-form-label">
+                          {t(`ownerSettings.${field}`)}
+                        </span>
+                        <input
+                          className="settings-input"
+                          type="number"
+                          disabled={busy}
+                          step={field === "headroom_tokens" ? 1 : 0.01}
+                          data-validation-path={`settings.auto_compaction.${field}`}
+                          value={draft.auto_compaction![field]}
+                          onChange={(e) =>
+                            change("auto_compaction", {
+                              ...draft.auto_compaction,
+                              [field]: Number(e.target.value),
+                            })
+                          }
+                        />
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {source("auto_compaction")}
+            </section>
+          )}
         </>
       )}
       <div className="settings-actions-row settings-sticky-actions">
@@ -740,6 +909,7 @@ export function OwnerSettings({ scope = { kind: "user" } }: { scope?: Scope }) {
           className="ghost-btn"
           disabled={!snapshot || busy}
           onClick={() => {
+            if (isProjectView) setPromptDraftVersion((version) => version + 1);
             setDraft({});
             setRules("[]");
             setStatus("");
@@ -748,6 +918,39 @@ export function OwnerSettings({ scope = { kind: "user" } }: { scope?: Scope }) {
           {t("ownerSettings.reset")}
         </button>
       </div>
+      {discard && (
+        <div role="alertdialog" aria-label={t("project.settings.draftTitle")}>
+          <p>{t("project.settings.draftHint")}</p>
+          <div className="settings-actions-row">
+            <button
+              type="button"
+              ref={keepEditing}
+              className="ghost-btn"
+              onClick={() => {
+                continuation.current = undefined;
+                setDiscard(false);
+              }}
+            >
+              {t("project.settings.keepEditing")}
+            </button>
+            <button
+              type="button"
+              className="ghost-btn"
+              onClick={() => {
+                if (busyRef.current || !snapshot) return;
+                const proceed = continuation.current;
+                continuation.current = undefined;
+                dirtyRef.current = false;
+                install(snapshot);
+                setDiscard(false);
+                proceed?.();
+              }}
+            >
+              {t("project.settings.discardLeave")}
+            </button>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
@@ -856,6 +1059,9 @@ export function ProvidersSettings() {
       if (!active.creating && (!active.id || reloadSelected)) {
         const provider =
           next.items.find((item: PublicProvider) => item.id === active.id) ??
+          next.items.find(
+            (item: PublicProvider) => item.scope === "user" && !item.read_only,
+          ) ??
           next.items[0];
         if (provider) edit(provider, false);
         else if (reloadSelected) edit(null, false);
@@ -885,8 +1091,17 @@ export function ProvidersSettings() {
     const ticket = generation.current;
     const intent = editIntent.current;
     try {
-      if (!id.trim())
-        throw Error(`provider.id: ${t("ownerSettings.providerIdRequired")}`);
+      let providerId = selected?.id;
+      if (!providerId && creatingNew && method === "provider.set") {
+        const typedId = id.trim();
+        const localId = typedId.startsWith("user:") ? typedId.slice(5) : typedId;
+        if (!localId)
+          throw Error(`provider.id: ${t("ownerSettings.providerIdRequired")}`);
+        if (!/^[a-zA-Z0-9_-]{1,128}$/.test(localId))
+          throw Error(`provider.id: ${t("ownerSettings.providerIdInvalid")}`);
+        providerId = `user:${localId}`;
+      }
+      if (!providerId) return;
       if (method === "provider.set") {
         try {
           new URL(draft.endpoint);
@@ -912,7 +1127,7 @@ export function ProvidersSettings() {
       setBusy(true);
       setError("");
       const params = {
-        provider_id: id,
+        provider_id: providerId,
         expected_revision: selected?.revision ?? 0,
         ...(method === "provider.set"
           ? {
@@ -1050,7 +1265,15 @@ export function ProvidersSettings() {
             onChange={(e) => setId(e.target.value)}
             data-testid="provider-id"
             data-validation-path="provider.id"
+            aria-describedby={
+              creatingNew ? `${controlId}-private-id` : undefined
+            }
           />
+          {creatingNew && (
+            <span id={`${controlId}-private-id`} className="settings-row-sub">
+              {t("ownerSettings.privateIdHint")}
+            </span>
+          )}
         </label>
         {(["name", "endpoint"] as const).map((field) => (
           <label className="settings-form-group" key={field}>

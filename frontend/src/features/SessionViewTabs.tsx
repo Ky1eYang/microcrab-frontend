@@ -1,5 +1,8 @@
+import type { SessionViewMode } from "../client/types";
 import { t } from "../i18n";
-export function SessionViewTabs({
+
+export function SessionViewTabs<Mode extends SessionViewMode>({
+  modes,
   viewMode,
   onSelect,
   idPrefix = "view",
@@ -8,8 +11,9 @@ export function SessionViewTabs({
   selectedPlugin = null,
   onSelectPlugin,
 }: {
-  viewMode: "chat" | "trajectory";
-  onSelect: (mode: "chat" | "trajectory") => void;
+  modes: readonly Mode[];
+  viewMode: Mode;
+  onSelect: (mode: Mode) => void;
   idPrefix?: string;
   panelId?: string;
   plugins?: readonly { id: string; name: string }[];
@@ -19,12 +23,7 @@ export function SessionViewTabs({
   return (
     <div className="header-subnav-row">
       <div className="header-subnav-tabs" role="tablist" aria-label={t("view.tabs")}>
-        {(
-          [
-            ["chat", t("view.tab.chat")],
-            ["trajectory", t("view.tab.trajectory")],
-          ] as const
-        ).map(([mode, label]) => (
+        {modes.map((mode) => (
           <button
             key={mode}
             id={`${idPrefix}-tab-${mode}`}
@@ -34,7 +33,7 @@ export function SessionViewTabs({
             aria-controls={panelId}
             onClick={() => onSelect(mode)}
           >
-            <span>{label}</span>
+            <span>{t(`view.tab.${mode}`)}</span>
           </button>
         ))}
         {plugins.map((plugin) => (

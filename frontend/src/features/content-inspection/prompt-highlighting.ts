@@ -14,7 +14,15 @@ export const HELPER_BINDINGS: Record<
   compact_template: ["user_input"],
   auto_compact_template: [],
   rename_template: ["user_input"],
-  action_review_template: ["tool", "tool_name", "tool_args", "user_input"],
+  action_review_template: [
+    "tool",
+    "tool_name",
+    "tool_args",
+    "user_input",
+    "operation_kind",
+    "mode",
+    "mode_prompt",
+  ],
 };
 
 /** Presentation hints only. Core remains the authoritative Tera2/helper validator. */

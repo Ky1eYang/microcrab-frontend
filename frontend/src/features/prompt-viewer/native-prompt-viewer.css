@@ -1,0 +1,210 @@
+.native-prompt-viewer {
+  min-inline-size: 0;
+  padding: var(--sp-4);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  overflow-wrap: anywhere;
+}
+
+/* The panel scrolls inside the shell; the bounded source scrollports are retained. */
+.conversation-viewport > .native-prompt-viewer {
+  min-block-size: 0;
+  overflow: auto;
+}
+
+.native-prompt-viewer :is(h3, h4, p, ol, pre) {
+  margin: 0;
+}
+
+.native-prompt-viewer > p:not(.native-prompt-declarations-note) {
+  margin-block-end: var(--sp-3);
+}
+
+.native-prompt-viewer h3 {
+  margin-block-end: var(--sp-1);
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  text-wrap: balance;
+}
+
+.native-prompt-system {
+  margin-block-end: var(--sp-4);
+  padding-block-end: var(--sp-4);
+  border-block-end: 1px solid var(--border);
+}
+
+.native-prompt-system > p,
+.native-prompt-viewer > p {
+  color: var(--text-2);
+}
+
+.native-prompt-viewer > .native-prompt-declarations-note {
+  margin-block-end: var(--sp-3);
+  max-inline-size: 68ch;
+}
+
+.native-prompt-source {
+  max-block-size: 24rem;
+  overflow: auto;
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-subtle);
+  font-family: var(--font-mono);
+  line-height: var(--lh-code);
+  white-space: pre-wrap;
+}
+
+.native-prompt-source code,
+.native-prompt-tool code,
+.native-prompt-definition > p {
+  min-inline-size: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  unicode-bidi: plaintext;
+}
+
+.native-prompt-source code,
+.native-prompt-tool code {
+  font-family: var(--font-mono);
+}
+
+.native-prompt-tools {
+  padding-inline-start: var(--sp-5);
+}
+
+.native-prompt-tools > li {
+  min-inline-size: 0;
+  border-block-end: 1px solid var(--border);
+}
+
+.native-prompt-tools > li::marker,
+.native-prompt-pages > [role="status"] {
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.native-prompt-tool {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  inline-size: 100%;
+  min-block-size: 36px;
+  padding: var(--sp-1) var(--sp-2);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  font-weight: 500;
+  text-align: start;
+}
+
+.native-prompt-tool::before {
+  flex: none;
+  inline-size: 1ch;
+  content: "+" / "";
+  color: var(--text-2);
+  text-align: center;
+}
+
+.native-prompt-tool[aria-expanded="true"]::before {
+  content: "−" / "";
+}
+
+.native-prompt-tool:hover {
+  background: var(--bg-subtle);
+}
+
+.native-prompt-tool[aria-expanded="true"] {
+  background: var(--bg-muted);
+}
+
+.native-prompt-definition {
+  margin: var(--sp-2) var(--sp-2) var(--sp-4);
+  padding-inline-start: var(--sp-3);
+  border-inline-start: 1px solid var(--border-strong);
+}
+
+.native-prompt-definition > p {
+  margin-block-end: var(--sp-2);
+}
+
+.native-prompt-definition h5 {
+  margin: var(--sp-3) 0 var(--sp-1);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+
+.native-prompt-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 23rem), 1fr));
+  gap: 0 var(--sp-4);
+  margin: 0;
+}
+
+.native-prompt-fields > div {
+  min-inline-size: 0;
+  padding-block: var(--sp-2);
+  border-block-start: 1px solid var(--border);
+}
+
+.native-prompt-fields dt {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-1) var(--sp-2);
+  font-weight: 600;
+}
+
+.native-prompt-fields dd {
+  margin: var(--sp-1) 0 0;
+  color: var(--text-2);
+  white-space: pre-wrap;
+}
+
+.native-prompt-field-type,
+.native-prompt-required {
+  padding-inline: var(--sp-1);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+}
+
+.native-prompt-field-type,
+.native-prompt-definition > .native-prompt-schema-note {
+  color: var(--text-2);
+}
+
+.native-prompt-json-toggle {
+  min-block-size: 32px;
+}
+
+.native-prompt-raw-choice {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-block: var(--sp-2);
+}
+
+.native-prompt-viewer .native-prompt-schema-source {
+  margin-block-start: var(--sp-2);
+}
+
+.native-prompt-json-string {
+  color: var(--syntax-string);
+}
+
+.native-prompt-json-number,
+.native-prompt-json-literal {
+  color: var(--syntax-literal);
+}
+
+.native-prompt-pages {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-block-start: var(--sp-3);
+}

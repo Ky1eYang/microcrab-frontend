@@ -15,7 +15,7 @@ const message = (id: string, text: string): NativeMessage => ({
 const host = (page: Page) => page.locator("#conversation-transcript");
 const gap = (node: Locator) =>
   node.evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop);
-async function setup(
+async function historyFixture(
   page: Page,
   options: Parameters<typeof nativeBackend>[1] = {},
 ) {
@@ -25,6 +25,13 @@ async function setup(
     { ...message("follow-user", "Earlier question"), role: "user" },
     message("follow-answer", prose("Earlier answer")),
   ];
+  return backend;
+}
+async function setup(
+  page: Page,
+  options: Parameters<typeof nativeBackend>[1] = {},
+) {
+  const backend = await historyFixture(page, options);
   await page.goto("/#session/s1");
   await expect(
     page.getByText("Earlier answer 44", { exact: true }),
@@ -133,18 +140,37 @@ test("rejected input does not rearm paused reading", async ({ page }) => {
   await expect(host(page)).toHaveAttribute("data-following", "false");
 });
 async function thinking(page: Page) {
-  const backend = await setup(page);
-  const running = structuredClone(backend.snapshot());
+  const backend = await historyFixture(page);
+  const running = backend.snapshot();
   running.session.status = "running";
   running.inbox = { items: [], active: true, paused: false };
-  backend.publish(running);
   const scope = {
     operation_id: "follow-thinking-op",
     call_id: "follow-thinking-call",
     epoch: 0,
-    turn: 1,
+    turn: 2,
     round: 1,
   };
+  // A fresh provider request follows its own admitted user row, not the
+  // completed assistant of the previous turn. Model the Server's positions.
+  running.messages = [
+    ...running.messages.map((item) => ({
+      ...item,
+      position: { epoch: 0, turn: 1, round: 1 },
+    })),
+    {
+      ...message("follow-thinking-user", "Continue with a new thought"),
+      role: "user",
+      position: { epoch: scope.epoch, turn: scope.turn, round: scope.round },
+      submission_operation_id: scope.operation_id,
+    },
+  ];
+  // Attach as an observer of an already admitted turn. Pairing a Host here
+  // triggers an unrelated runtime-open/reattach that the idle fixture simulates.
+  await page.goto("/#session/s1");
+  await expect(
+    page.getByText("Continue with a new thought", { exact: true }),
+  ).toBeAttached();
   backend.event("model_observation", { ...scope, phase: "started" });
   backend.event("model_observation", {
     ...scope,
@@ -152,6 +178,7 @@ async function thinking(page: Page) {
     text: prose("Thinking", 50),
   });
   const thought = page.getByTestId("think-block");
+  await expect(thought).toHaveAttribute("data-streaming", "true");
   await expect(thought).toHaveAttribute("data-expanded", "true");
   const inner = thought.locator(".think-content");
   await expect

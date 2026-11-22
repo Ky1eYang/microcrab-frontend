@@ -1,4 +1,5 @@
 import { isDirectUserSource } from "./input-source";
+import { executionToolOutcome, settledToolStatus } from "./tool-outcome";
 import { placeOperationNotice } from "./operation-notice";
 import { operationFailureRoute } from "./operation-failure";
 import {
@@ -29,8 +30,16 @@ import { observeTurnLifecycle } from "./turn-lifecycle";
 import { t as translate } from "../i18n";
 import { failureBlockText, wireFailure } from "./failure";
 import { messageBlocks } from "./native-message-blocks";
+import {
+  callOccurrenceKey,
+  displayExecutionId,
+  mergeDisplayExecution,
+  preferDisplayExecution,
+  resultOccurrenceKey,
+} from "./tool-execution-display";
 import type {
   Block,
+  DisplayExecutionCertificate,
   Transcript,
   NativeSnapshot,
   NativeSession,
@@ -285,8 +294,19 @@ function projectDelegateChildren(
     return;
   childProjection.set(t.blocks, { sessionId, rows });
   t.executionRows = rows;
+  const byId = new Map(
+    rows.filter((row) => row.session_id === sessionId).map((row) => [row.execution_id, row]),
+  );
   for (const block of t.blocks) {
     if (block.sessionId !== sessionId || !block.tool) continue;
+    const execution = block.executionId == null ? undefined : byId.get(block.executionId);
+    const outcome = execution && execution.call_id === block.callId
+      ? executionToolOutcome(execution.status)
+      : undefined;
+    if (outcome) {
+      block.payload.observedToolOutcome = outcome;
+      block.tool.status = outcome;
+    }
     if (block.tool.childBinding === "execution") {
       block.kind = "tool";
       delete block.tool.childSessionId;
@@ -299,6 +319,8 @@ function projectDelegateChildren(
         row.session_id === sessionId &&
         row.call_id === block.callId &&
         row.delegate_child &&
+        (block.displayExecutionId == null ||
+          block.displayExecutionId === row.execution_id) &&
         row.execution_id === receipt?.execution_id &&
         receipt?.session_id === sessionId,
     );
@@ -415,6 +437,29 @@ export function applySnapshot(
   t.blocks = snapshot.messages.flatMap((message) =>
     messageBlocks(snapshot.session.id, message, apiBase),
   );
+  // A metadata refresh may rebuild canonical rows after a live handoff. Keep
+  // only the producer previously bound to this exact canonical row and position.
+  const canonicalOutputKey = (block: Block) =>
+    JSON.stringify([block.messageId, block.partId, block.kind, block.position]);
+  const priorCanonicalOutputs = new Map(
+    prior.blocks
+      .filter(
+        (block) =>
+          block.sessionId === snapshot.session.id &&
+          block.role === "assistant" &&
+          !block.preview &&
+          !block.temporary &&
+          block.operationId &&
+          block.position,
+      )
+      .map((block) => [canonicalOutputKey(block), block]),
+  );
+  for (const block of t.blocks) {
+    if (block.role !== "assistant" || !block.position) continue;
+    const previous = priorCanonicalOutputs.get(canonicalOutputKey(block));
+    if (!previous) continue;
+    block.operationId = previous.operationId;
+  }
 
   // Only explicit durable metadata identifies a compact baseline; user text is never a marker.
   const markers = new Map(
@@ -881,8 +926,17 @@ export function applySnapshot(
         canonicalMessageId: target,
       };
     }
-    if (canonical && block.kind !== "reasoning")
+    if (canonical && block.kind !== "reasoning") {
       blockAliases.set(block.id, canonical.id);
+      // Preserve the producer only when its canonical round/identity agrees;
+      // legacy ordinal matching alone cannot certify an active answer.
+      if (
+        origin.operationId &&
+        target &&
+        (origin.canonicalMessageId === target || positioned.includes(target))
+      )
+        canonical.operationId = origin.operationId;
+    }
     if (
       block.kind !== "reasoning" &&
       (block.kind === "tool"
@@ -1161,34 +1215,68 @@ export function applySnapshot(
   // Instead of replacing the call card with result card at the end, merge the result into
   // the call card IN-PLACE so the block order (Text 1 -> Tool -> Text 2) is strictly preserved!
   const pendingCalls = new Map<string, Block>();
+  const exactCalls = new Map<string, Block>();
   const toRemove = new Set<string>();
   for (const block of t.blocks) {
     if (!block.callId) continue;
     if (block.role === "assistant" && block.kind === "tool") {
       pendingCalls.set(block.callId, block);
+      const exact = callOccurrenceKey(block);
+      if (exact) exactCalls.set(exact, block);
     } else if (block.role === "tool") {
-      const call = pendingCalls.get(block.callId);
+      const exact = resultOccurrenceKey(block);
+      const call = exact
+        ? exactCalls.get(exact)
+        : block.displayExecutionId == null
+          ? pendingCalls.get(block.callId)
+          : undefined;
       if (call) {
+        if (exact)
+          mergeDisplayExecution(call, block.displayExecutionId, block.displayExecutionStatus);
+        const occurrence = callOccurrenceKey(call);
+        if (occurrence) exactCalls.delete(occurrence);
         call.payload.text = block.payload.text;
         call.payload.structured = block.payload.structured;
         call.payload.attachments = block.payload.attachments;
         call.clientInvocationId = block.clientInvocationId;
         call.tool = {
           ...call.tool!,
-          status: "completed",
+          status: settledToolStatus(call),
         };
         toRemove.add(block.id);
-        pendingCalls.delete(block.callId);
+        if (pendingCalls.get(block.callId) === call)
+          pendingCalls.delete(block.callId);
       }
     }
   }
   t.blocks = t.blocks.filter((block) => !toRemove.has(block.id));
+  const canonicalPriorTools = new Map(
+    prior.blocks.flatMap((block) => {
+      const key = callOccurrenceKey(block);
+      return block.sessionId === snapshot.session.id &&
+        key &&
+        block.displayExecutionId != null
+        ? [[key, { id: block.displayExecutionId, status: block.displayExecutionStatus }] as const]
+        : [];
+    }),
+  );
+  const displayExecutionCertificates = new Map<string, DisplayExecutionCertificate>();
+  for (const block of t.blocks) {
+    const key = callOccurrenceKey(block);
+    if (!key) continue;
+    const previous = canonicalPriorTools.get(key);
+    if (previous) preferDisplayExecution(block, previous);
+    if (block.displayExecutionId !== undefined)
+      displayExecutionCertificates.set(key, { id: block.displayExecutionId, status: block.displayExecutionStatus });
+  }
+  t.displayExecutionCertificates = displayExecutionCertificates;
   const executions = new Map(
     prior.blocks
       .filter(
         (block) =>
           block.sessionId === snapshot.session.id &&
-          block.executionId != null &&
+          block.role === "assistant" &&
+          (block.executionId != null || block.payload.observedToolOutcome) &&
           invocationKey(block),
       )
       .map((block) => [invocationKey(block), block]),
@@ -1199,6 +1287,10 @@ export function applySnapshot(
     if (
       !priorBlock ||
       block.kind !== "tool" ||
+      block.role !== "assistant" ||
+      (block.displayExecutionId != null &&
+        priorBlock.executionId != null &&
+        block.displayExecutionId !== priorBlock.executionId) ||
       (block.executionId != null &&
         block.executionId !== priorBlock.executionId)
     )
@@ -1232,6 +1324,10 @@ export function applySnapshot(
     block.canonicalContent = priorBlock.canonicalContent;
     block.startedMs = priorBlock.startedMs;
     block.endedMs = priorBlock.endedMs;
+    if (priorBlock.payload.observedToolOutcome && block.tool) {
+      block.payload.observedToolOutcome = priorBlock.payload.observedToolOutcome;
+      block.tool.status = priorBlock.payload.observedToolOutcome;
+    }
   }
 
   projectDelegateChildren(
@@ -1733,6 +1829,8 @@ export function applyEvent(t: Transcript, event: NativeEvent, compose = true) {
           [origin.epoch, origin.turn, origin.round].every(
             Number.isSafeInteger,
           )) &&
+        block.sessionId === event.session_id &&
+        block.role === "assistant" &&
         block.kind === "tool" &&
         block.callId === data.call_id &&
         position?.epoch === origin.epoch &&
@@ -1755,11 +1853,19 @@ export function applyEvent(t: Transcript, event: NativeEvent, compose = true) {
       b.temporary = true;
       t.blocks.push(b);
     }
+    const incomingExecutionId = displayExecutionId(data.execution_id);
+    if (
+      incomingExecutionId !== undefined &&
+      ((b.displayExecutionId != null &&
+        b.displayExecutionId !== incomingExecutionId) ||
+        (b.executionId != null && b.executionId !== incomingExecutionId))
+    )
+      return;
     const terminal = ["completed", "success", "failed", "result"].includes(
       data.phase,
     );
-    if (Number.isSafeInteger(data.execution_id) && data.execution_id > 0) {
-      b.executionId = data.execution_id;
+    if (incomingExecutionId !== undefined) {
+      b.executionId = incomingExecutionId;
       b.execution = {
         ...b.execution,
         ...data,
@@ -1789,6 +1895,14 @@ export function applyEvent(t: Transcript, event: NativeEvent, compose = true) {
             : data.phase
           : "running",
     };
+    const outcome =
+      data.phase === "failed" ||
+      ["cancelled", "interrupted"].includes(b.tool.status)
+        ? b.tool.status
+        : executionToolOutcome(b.execution?.status);
+    if (outcome) b.payload.observedToolOutcome = outcome;
+    if (b.payload.observedToolOutcome)
+      b.tool.status = b.payload.observedToolOutcome;
     b.payload.text =
       typeof data.result === "string"
         ? data.result

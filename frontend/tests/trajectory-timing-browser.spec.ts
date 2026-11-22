@@ -66,6 +66,57 @@ const tool = (id: string, start: number, end: number, head = "branch") => ({
   history_head: head,
 });
 
+test("historical failure is red and explicit on a narrow trajectory; sibling branch failures do not transfer", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 760 });
+  const backend = await nativeBackend(page);
+  backend.snapshot().messages = messages;
+  await page.route("**/api/v1/sessions/s1/audit/requests", (route) =>
+    route.fulfill({
+      json: {
+        status: "available",
+        attempts: [],
+        timeline: [model(1, 1000, 2000), model(2, 2600, 3000)],
+        stages: [
+          { ...tool("one", 2000, 2400), completion: "failed" },
+          tool("two", 2100, 2600),
+          { ...tool("two", 2100, 2600, "sibling"), completion: "failed" },
+        ],
+      },
+    }),
+  );
+  await page.goto("/#session/s1");
+  await page.getByRole("tab", { name: "轨迹", exact: true }).click();
+  const failed = page.locator(
+    '[data-testid="trajectory-entry"][data-kind="tool"][data-status="failed"]',
+  );
+  await expect(failed).toHaveCount(1);
+  await expect(failed).toContainText("pwsh");
+  await expect(failed).toContainText("失败");
+  await expect(failed.locator(".trajectory-title-number")).toHaveCount(0);
+  await expect(failed.locator(".trajectory-entry-time")).toHaveCSS(
+    "color",
+    /rgb\((248, 113, 113|220, 38, 38)\)/,
+  );
+  const segment = page.locator(
+    '[data-testid="trajectory-seg"][data-lane="tool"][data-status="failed"]',
+  );
+  await expect(segment).toHaveAccessibleName(/失败/);
+  await segment.focus();
+  await page.keyboard.press("Enter");
+  const inspector = page.getByTestId("trajectory-inspector");
+  await expect(inspector.locator('dd[data-status="failed"]')).toHaveText(
+    "失败",
+  );
+  await expect(inspector.getByRole("tab", { name: "请求增量" })).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(
+    390,
+  );
+  await page.keyboard.press("Escape");
+  await expect(inspector).toHaveCount(0);
+});
+
 for (const inputRound of [0, 1]) {
   test(`model and parallel tool ranges preserve input order (input round ${inputRound})`, async ({
     page,

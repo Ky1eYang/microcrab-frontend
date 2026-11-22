@@ -1331,6 +1331,8 @@ export function answerTokenUsage(
 export function ActionBar({
   text,
   timestamp,
+  pending = false,
+  observedCompletionAt,
   user = false,
   revertId,
   retryId,
@@ -1342,6 +1344,8 @@ export function ActionBar({
   pluginActions?: readonly ActionMenuGroup[];
   pluginActionScope?: string;
   timestamp?: number | null;
+  pending?: boolean;
+  observedCompletionAt?: number;
   user?: boolean;
   revertId?: string;
   retryId?: string;
@@ -1364,12 +1368,12 @@ export function ActionBar({
   );
   const state = useMemo(() => JSON.parse(selected), [selected]);
   const [copied, setCopied] = useState(false);
-  // Canonical messages do not all carry wall-clock timing. Keep a local display
-  // fallback stable for this mounted bar; never feed it into execution timing.
-  const [observedAt] = useState(Date.now);
+  // Preserve existing mount-time display for untimed history; a witnessed live
+  // completion instead supplies its browser observation time, never runtime data.
+  const [mountedAt] = useState(Date.now);
   const hasSourceTime =
     timestamp != null && Number.isFinite(timestamp) && timestamp > 0;
-  const displayTime = hasSourceTime ? timestamp : observedAt;
+  const displayTime = hasSourceTime ? timestamp : (observedCompletionAt ?? mountedAt);
   const displayDate = new Date(displayTime);
   const padTime = (value: number) => String(value).padStart(2, "0");
   const utcOffset = -displayDate.getTimezoneOffset();
@@ -1479,17 +1483,29 @@ export function ActionBar({
             {tokens.output === null ? "-" : formatNumber(tokens.output)} tokens
           </span>
         )}
-        <time
-          className="message-time-label"
-          dateTime={displayDate.toISOString()}
-          title={detailedTime}
-          data-time-source={hasSourceTime ? "source" : "browser"}
-        >
-          {displayDate.toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
-          })}
-        </time>
+        {pending && !user ? (
+          <progress
+            className="message-action-progress"
+            aria-label={t("message.answerInProgress")}
+            title={t("message.answerInProgress")}
+          />
+        ) : (
+          <time
+            className="message-time-label"
+            dateTime={displayDate.toISOString()}
+            title={
+              !hasSourceTime && observedCompletionAt != null
+                ? t("message.answerCompletionObserved", { time: detailedTime })
+                : detailedTime
+            }
+            data-time-source={hasSourceTime ? "source" : "browser"}
+          >
+            {displayDate.toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+            })}
+          </time>
+        )}
       </div>
     </div>
   );

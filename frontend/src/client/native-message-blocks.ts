@@ -1,6 +1,13 @@
 import { isDirectUserSource, validateNativeInputSource } from "./input-source";
 import { createBlock } from "./create-block";
 import { messageImageUrl } from "./images";
+import {
+  displayExecutionId,
+  displayExecutionStatus,
+  mergeDisplayExecution,
+  toolResultExecutionId,
+  toolResultOccurrence,
+} from "./tool-execution-display";
 import type { Block, NativeMessage } from "./types";
 
 export function messageBlocks(
@@ -44,6 +51,13 @@ export function messageBlocks(
     if (message.role === "tool") {
       b.kind = "tool";
       b.callId = message.call_id;
+      mergeDisplayExecution(
+        b,
+        toolResultExecutionId(message, sessionId),
+        displayExecutionStatus(message.execution_status),
+      );
+      if (b.displayExecutionId !== undefined)
+        b.resultExecutionCall = toolResultOccurrence(message);
       b.tool = {
         name: message.tool_name ?? "tool",
         builtin: message.tool_builtin === "delegate" ? "delegate" : undefined,
@@ -59,9 +73,16 @@ export function messageBlocks(
     }
     blocks.push(b);
   }
-  for (const call of message.tool_calls ?? []) {
+  for (const [index, call] of (message.tool_calls ?? []).entries()) {
     const b = createBlock(sessionId, message.id, call.id, "tool", "assistant");
     b.callId = call.id;
+    b.toolCallIndex = index;
+    if (message.role === "assistant")
+      mergeDisplayExecution(
+        b,
+        displayExecutionId(call.execution_id),
+        displayExecutionStatus(call.execution_status),
+      );
     b.tool = {
       name: call.name,
       builtin: call.builtin === "delegate" ? "delegate" : undefined,

@@ -2,6 +2,10 @@ import { userTaskInputAllowed } from "../client/session-kind";
 import { Icon as PermissionIcon } from "../shell/Icon";
 import { QueueDock } from "./composer/QueueDock";
 import { ComposerSurface } from "./composer/ComposerSurface";
+import {
+  ComposerHostNotice,
+  composerHostMessage,
+} from "./composer/ComposerHostNotice";
 import { StatisticsDock } from "./composer/StatisticsDock";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ComposerImages } from "./composer/Images";
@@ -33,7 +37,8 @@ const SLASH_QUERY = /^\/([^\s]*)$/;
 
 export function Composer({
   onSubmitIntent,
-}: { onSubmitIntent?: () => () => void } = {}) {
+  hostNoticeInDock = false,
+}: { onSubmitIntent?: () => () => void; hostNoticeInDock?: boolean } = {}) {
   const dispatch = useAppDispatch();
   const { state } = useAppSelector(
     (state) => ({
@@ -119,39 +124,11 @@ export function Composer({
   const host = hostReadiness(state);
   const isHostReady = host.ready;
   const isProjectOffline = !isHostReady;
-  const browserHost = !host.projectId;
-  const browserError =
-    browserHost && host.matched && !!state.hostConnection?.catalogError;
-  const hostNotice = browserHost
-    ? browserError
-      ? t(
-          host.hostFlavor === "chat_only"
-            ? "chatOnly.unavailableNotice"
-            : "browserHost.unavailableNotice",
-          {
-            error: state.hostConnection?.catalogError ?? "",
-          },
-        )
-      : t(
-          host.hostFlavor === "chat_only"
-            ? "chatOnly.loadingNotice"
-            : "browserHost.loadingNotice",
-        )
-    : host.status === "binding_mismatch"
-      ? t("host.readiness.bindingMismatchNotice")
-      : host.status === "host_preflight_unsupported"
-        ? t("host.readiness.preflightUnsupportedNotice")
-        : host.status === "loading_catalog"
-          ? t("host.readiness.loadingNotice")
-          : host.status === "catalog_error"
-            ? t("host.readiness.catalogErrorNotice", {
-                error: state.hostConnection?.catalogError ?? "",
-              })
-            : host.status === "project_mismatch"
-              ? t("host.readiness.projectMismatchNotice")
-              : ["connecting", "pairing", "reconciling"].includes(host.status)
-                ? t("host.readiness.pendingNotice")
-                : t("host.readiness.offlineNotice");
+  const offlineDraft =
+    !!state.sessionId &&
+    !!host.projectId &&
+    ["detached", "suspended", "project_mismatch"].includes(host.status);
+  const offlineDraftHint = offlineDraft ? t("composer.hostDraft") : undefined;
   const has = (method: string) =>
     state.capabilities?.methods.includes(method) === true;
   // A requested stop is input-ready at once; the runtime settles behind it.
@@ -196,7 +173,7 @@ export function Composer({
     });
   };
   const slashMatch = SLASH_QUERY.exec(draft);
-  const slashVisible = !!slashMatch && dismissedSlash !== draft;
+  const slashVisible = !offlineDraft && !!slashMatch && dismissedSlash !== draft;
   useEffect(() => {
     if (slashVisible && menu === "plus") setMenu(null);
   }, [slashVisible, menu]);
@@ -248,7 +225,7 @@ export function Composer({
       dispatch({
         type: "ShowToast",
         kind: "error",
-        text: hostNotice,
+        text: composerHostMessage(host, state.hostConnection?.catalogError),
       });
       return;
     }
@@ -557,54 +534,9 @@ export function Composer({
           )}
         </>
       }
-      clip={isProjectOffline}
+      clip={isProjectOffline && !hostNoticeInDock}
     >
-      {isProjectOffline && (
-        <div
-          className="composer-offline-banner"
-          role="alert"
-          data-host-state={host.status}
-        >
-          <div className="composer-offline-left">
-            <Icon
-              name="warning"
-              size={16}
-              className="offline-icon"
-              aria-hidden="true"
-            />
-            <span className="offline-text">{hostNotice}</span>
-          </div>
-          {(!browserHost || browserError) && (
-            <button
-              type="button"
-              className="composer-offline-reconnect-btn"
-              disabled={host.status === "loading_catalog"}
-              onClick={() =>
-                dispatch({
-                  type: browserHost
-                    ? "ReconnectBrowserHost"
-                    : host.status === "catalog_error"
-                      ? "RetryHostCatalog"
-                      : "OpenRemoteConnectDialog",
-                  projectId: host.projectId,
-                })
-              }
-            >
-              {browserHost
-                ? t(
-                    host.hostFlavor === "chat_only"
-                      ? "chatOnly.retry"
-                      : "browserHost.retry",
-                  )
-                : host.status === "catalog_error"
-                  ? t("host.readiness.retryCatalog")
-                  : host.status === "loading_catalog"
-                    ? t("host.readiness.loadingAction")
-                    : t("host.readiness.connect")}
-            </button>
-          )}
-        </div>
-      )}
+      {!hostNoticeInDock && <ComposerHostNotice />}
       {!child &&
         state.sessionId &&
         (state.agentInitRetryRequired ||
@@ -683,19 +615,19 @@ export function Composer({
         placeholder={
           child
             ? tr("composer.childReadOnly")
-            : busy
-              ? t("composer.inbox.busyPlaceholder")
-              : tr("composer.placeholder")
+            : offlineDraftHint ??
+              (busy ? t("composer.inbox.busyPlaceholder") : tr("composer.placeholder"))
         }
         value={draft}
         disabled={
-          child || !ready || isProjectOffline || state.isCreatingSession
+          child || !ready || (isProjectOffline && !offlineDraft) || state.isCreatingSession
         }
         rows={2}
         aria-controls={slashVisible ? "composer-slash-palette" : undefined}
         aria-expanded={slashVisible || undefined}
         aria-activedescendant={slashVisible ? activeSlashId : undefined}
         onPaste={(event) => {
+          if (offlineDraft) return; // Keep native text paste, but do not admit attachments.
           const files = Array.from(event.clipboardData.items)
             .filter(
               (item) => item.kind === "file" && item.type.startsWith("image/"),
@@ -1022,7 +954,8 @@ export function Composer({
           ) : (
             <button
               className="composer-send-arrow-btn"
-              title={t("composer.send")}
+              title={offlineDraftHint ?? t("composer.send")}
+              aria-label={t("composer.send")}
               type="button"
               disabled={
                 child ||
@@ -1192,12 +1125,16 @@ export function ComposerDock() {
 }
 export function ComposerStack({
   onSubmitIntent,
-}: { onSubmitIntent?: () => () => void } = {}) {
+  hostNoticeInDock,
+}: { onSubmitIntent?: () => () => void; hostNoticeInDock?: boolean } = {}) {
   return (
     <div className="composer-stack">
       <QueueDock />
       <TodoPanel />
-      <Composer onSubmitIntent={onSubmitIntent} />
+      <Composer
+        onSubmitIntent={onSubmitIntent}
+        hostNoticeInDock={hostNoticeInDock}
+      />
       <ComposerDock />
     </div>
   );

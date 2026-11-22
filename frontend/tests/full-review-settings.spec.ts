@@ -164,7 +164,7 @@ for (const width of [1440, 390]) {
     await page.getByTestId("project-menu-settings").click();
     await page.setViewportSize({ width, height: 900 });
     const dialog = page.getByTestId("project-settings");
-    await dialog.getByTestId("project-settings-tab-permissions").click();
+    await dialog.getByTestId("project-settings-tab-agents").click();
     const owner = dialog.getByTestId("owner-settings-project");
     const combo = owner.getByRole("combobox", { name: "Agent", exact: true });
     const mode = owner.getByRole("combobox", { name: "模式", exact: true });

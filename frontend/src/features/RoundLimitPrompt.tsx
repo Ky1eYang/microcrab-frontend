@@ -1,6 +1,5 @@
-import { useState } from "react";
-import type { ClientBinding } from "../client/client-tool-controller";
-import { useApp } from "../state";
+import { ComposerNoticeText } from "./composer/ComposerNoticeText";
+import { useAppFields } from "../state";
 import { t } from "../i18n";
 import type { RoundLimitRequestView } from "../client/types";
 
@@ -32,36 +31,11 @@ function labels(request: RoundLimitRequestView) {
   }
 }
 
-export function InteractionParticipation() {
-  const { state, dispatch } = useApp();
-  const [takingOver, setTakingOver] = useState(false);
-  const binding = state.clientTools as ClientBinding | null;
-  const participant = state.connection === "ws" && binding?.role === "participant" && binding.can_interact === true;
-  const hostParticipant = state.hostConnection?.browserParticipant &&
-    state.hostConnection.conversationId === state.sessionId && state.hostConnection.hostFlavor === "browser_sandbox";
-  const takeover = async (type: string) => {
-    if (takingOver) return;
-    setTakingOver(true);
-    try { await dispatch({ type }); } finally { setTakingOver(false); }
-  };
-  if (!participant && !hostParticipant) return null;
-  return (
-    <div className="composer-stack inline-notice" data-testid="interaction-participant">
-      <p>{t("interaction.participant")}</p>
-      <div className="settings-actions-row">
-        {participant && <button type="button" className="ghost-btn"
-          disabled={takingOver || state.transcript.sessionStatus !== "idle"}
-          onClick={() => void takeover("TakeOverClientTools")}>{t("interaction.takeoverExecutor")}</button>}
-        {hostParticipant && <button type="button" className="ghost-btn"
-          disabled={takingOver || state.transcript.sessionStatus !== "idle"}
-          onClick={() => void takeover("TakeOverBrowserHost")}>{t("interaction.takeoverHost")}</button>}
-      </div>
-    </div>
-  );
-}
-
 export function RoundLimitPrompt() {
-  const { state, dispatch } = useApp();
+  const { state, dispatch } = useAppFields([
+    "roundLimitRequests",
+    "resolvedLocale",
+  ]);
   return (
     <>
       {state.roundLimitRequests?.map((request) => {
@@ -69,9 +43,22 @@ export function RoundLimitPrompt() {
         const bytes = request.kind === "context_bytes";
         const used = bytes ? mib(request.used) : request.used;
         const block = bytes ? mib(request.block) : request.block;
+        const heading = t(copy.heading);
+        const message = [
+          `${heading} · ${t(copy.description, { used, block, additional: block })}`,
+          request.session_id !== request.parent_session_id
+            ? t("roundLimit.child", { id: request.session_id })
+            : "",
+          request.observer ? t("roundLimit.observer") : "",
+          request.submitting ? t("roundLimit.submitting") : "",
+        ]
+          .filter(Boolean)
+          .join(" ");
         return (
           <article
-            className="flow-card"
+            className="composer-notification-row"
+            aria-label={heading}
+            data-tone="warn"
             key={request.request_id}
             data-testid="round-limit-request"
             data-kind={request.kind}
@@ -85,24 +72,8 @@ export function RoundLimitPrompt() {
             }
             aria-busy={request.submitting || undefined}
           >
-            <h3>{t(copy.heading)}</h3>
-            <p>{t(copy.description, { used, block, additional: block })}</p>
-            {request.session_id !== request.parent_session_id && (
-              <p className="flow-card-meta">
-                {t("roundLimit.child", { id: request.session_id })}
-              </p>
-            )}
-            {request.observer && (
-              <p className="inline-notice" role="status">
-                {t("roundLimit.observer")}
-              </p>
-            )}
-            {request.submitting && (
-              <p className="inline-notice" role="status">
-                {t("roundLimit.submitting")}
-              </p>
-            )}
-            <div className="settings-actions-row flow-card-actions">
+            <ComposerNoticeText text={message} />
+            <div className="settings-actions-row">
               <button
                 className="primary-btn"
                 type="button"

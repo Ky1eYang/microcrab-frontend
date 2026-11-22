@@ -68,6 +68,17 @@ test("child chat and trajectory share production session views under parent read
     return route.fulfill({
       json: {
         status: "available",
+        timeline: [
+          {
+            epoch: 5,
+            turn: 1,
+            round: 2,
+            sequence: 1,
+            call_id: "child-provider",
+            request_hash: "child-request",
+            completion: "succeeded",
+          },
+        ],
         attempts: selector.internal_assistants
           ? []
           : [
@@ -126,6 +137,12 @@ test("child chat and trajectory share production session views under parent read
   await child
     .locator('[data-testid="trajectory-entry"][data-kind="tool"]')
     .click();
+  await expect(
+    child.getByRole("tab", { name: "请求增量", exact: true }),
+  ).toHaveCount(0);
+  await child
+    .locator('[data-testid="trajectory-entry"][data-kind="model-request"]')
+    .click();
   await child.getByRole("tab", { name: "请求增量", exact: true }).click();
   await expect(child.getByTestId("historical-request-diff")).toContainText(
     "CHILD_SCOPED_DELTA",
@@ -133,8 +150,7 @@ test("child chat and trajectory share production session views under parent read
   expect(selectors.at(-1)).toMatchObject({
     child_session_id: "child-shared",
     epoch: 5,
-    turn: 1,
-    tool_call_id: "child-tool",
+    call_id: "child-provider",
   });
   await child.getByRole("tab", { name: "对话", exact: true }).click();
   await expect(child.getByTestId("tool-payload-output")).toContainText(

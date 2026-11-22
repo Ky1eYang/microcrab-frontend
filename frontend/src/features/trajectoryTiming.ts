@@ -44,6 +44,30 @@ export function selectedModelRequests(timeline: AuditTimeline[]) {
   return selected;
 }
 
+function selectedToolStage(
+  stages: AuditStage[] | undefined,
+  model: AuditTimeline | undefined,
+  start?: number | null,
+) {
+  const exact = stages?.filter(
+    (stage) =>
+      (!model?.history_head ||
+        !stage.history_head ||
+        model.history_head === stage.history_head) &&
+      (start == null ||
+        stage.started_at_ms == null ||
+        start === stage.started_at_ms),
+  );
+  if (exact?.length === 1) return exact[0];
+  // In the absence of exact branch/clock evidence, do not choose whichever
+  // invocation happened to be last in a bounded audit response.
+  const timed =
+    start == null
+      ? []
+      : exact?.filter((stage) => stage.started_at_ms === start);
+  return timed?.length === 1 ? timed[0] : undefined;
+}
+
 /** Apply only observed ranges. Provider boundaries never stand in for tool time. */
 export function timedTrajectoryBlocks(
   blocks: FeatureBlock[],
@@ -52,7 +76,7 @@ export function timedTrajectoryBlocks(
 ): FeatureBlock[] {
   const models = selectedModelRequests(timeline);
   const inputs = new Map<string, AuditStage>();
-  const tools = new Map<string, AuditStage>();
+  const tools = new Map<string, AuditStage[]>();
   for (const stage of stages) {
     if (stage.turn == null || stage.subagent != null) continue;
     const model =
@@ -67,15 +91,47 @@ export function timedTrajectoryBlocks(
       continue;
     if (stage.kind === "input")
       inputs.set(`${stage.epoch}:${stage.turn}`, stage);
-    else if (stage.tool_call_id != null && stage.round != null)
-      tools.set(
-        `${positionKey(stage.epoch, stage.turn, stage.round)}:${stage.tool_call_id}`,
-        stage,
-      );
+    else if (stage.tool_call_id != null && stage.round != null) {
+      const key = `${positionKey(stage.epoch, stage.turn, stage.round)}:${stage.tool_call_id}`;
+      const matches = tools.get(key);
+      if (matches) matches.push(stage);
+      else tools.set(key, [stage]);
+    }
   }
   const seenModels = new Set<string>();
   const seenInputs = new Set<string>();
   const result: FeatureBlock[] = [];
+  const requestIdentity = (model: AuditTimeline) =>
+    JSON.stringify([
+      model.epoch,
+      model.turn,
+      model.round,
+      model.call_id,
+      model.history_head,
+      model.request_hash,
+    ]);
+  const inputRow = (
+    original: FeatureBlock,
+    model: AuditTimeline,
+  ): FeatureBlock => ({
+    id: `model-audit:${requestIdentity(model)}`,
+    messageId: model.request_hash,
+    sessionId: original.sessionId,
+    role: "assistant",
+    kind: "model-request",
+    stream: "complete",
+    position: { epoch: model.epoch, turn: model.turn!, round: model.round! },
+    startedMs: model.started_at_ms,
+    payload: {
+      text: "",
+      auditStatus: model.completion,
+      stopReason: modelStopReason(original, model),
+      auditTimingKey: `model-input:${requestIdentity(model)}`,
+      auditSequence: model.sequence,
+      auditScope: original.payload.auditScope,
+      auditSelector: { epoch: model.epoch, call_id: model.call_id },
+    },
+  });
   for (const [index, original] of blocks.entries()) {
     const position = original.position ?? original.preview;
     if (
@@ -88,22 +144,17 @@ export function timedTrajectoryBlocks(
     }
     const key = positionKey(position.epoch, position.turn, position.round);
     const model = models.get(key);
-    const modelIdentity =
-      model &&
-      JSON.stringify([
-        model.epoch,
-        model.turn,
-        model.round,
-        model.call_id,
-        model.history_head,
-        model.request_hash,
-      ]);
+    const modelIdentity = model && requestIdentity(model);
     const callId = original.tool?.callId ?? original.payload.tool_call_id;
     const stage =
       original.role === "user"
         ? inputs.get(`${position.epoch}:${position.turn}`)
         : original.tool && callId
-          ? tools.get(`${key}:${callId}`)
+          ? selectedToolStage(
+              tools.get(`${key}:${callId}`),
+              model,
+              original.startedMs,
+            )
           : undefined;
     const next = blocks[index + 1];
     const nextPosition = next?.position ?? next?.preview;
@@ -120,29 +171,7 @@ export function timedTrajectoryBlocks(
     ) {
       // User inputs precede their consuming request. A request-start clock is
       // evidence for model input, never an earlier position for the user itself.
-      const input: FeatureBlock = {
-        id: `model-audit:${modelIdentity}`,
-        messageId: model.request_hash,
-        sessionId: original.sessionId,
-        role: "assistant",
-        kind: "model-request",
-        stream: "complete",
-        position: {
-          epoch: model.epoch,
-          turn: model.turn!,
-          round: model.round!,
-        },
-        startedMs: model.started_at_ms,
-        payload: {
-          text: "",
-          auditStatus: model.completion,
-          stopReason: modelStopReason(original, model),
-          auditTimingKey: `model-input:${modelIdentity}`,
-          auditSequence: model.sequence,
-          auditScope: original.payload.auditScope,
-          auditSelector: { epoch: model.epoch, call_id: model.call_id },
-        },
-      };
+      const input = inputRow(original, model);
       if (original.role === "user") deferredInput = input;
       else result.push(input);
       seenInputs.add(key);
@@ -206,6 +235,11 @@ export function timedTrajectoryBlocks(
             endedMs: range?.ended_at_ms ?? original.endedMs,
             payload: {
               ...original.payload,
+              ...(original.tool &&
+              stage?.kind === "tool" &&
+              stage.completion !== "pending"
+                ? { auditToolOutcome: stage.completion }
+                : {}),
               ...(requestSelector
                 ? original.tool
                   ? { auditSchemaSelector: requestSelector }
@@ -230,7 +264,37 @@ export function timedTrajectoryBlocks(
     );
     if (deferredInput) result.push(deferredInput);
   }
-  return result;
+  // The provider can already have received a continuation while its first
+  // visible output block has not arrived. Anchor that witnessed request within
+  // its known turn, not to the preceding tool's detail and not to another turn.
+  const pendingRows = new Map<number, FeatureBlock[]>();
+  for (const [key, model] of [...models].sort(
+    ([, a], [, b]) => a.sequence - b.sequence,
+  )) {
+    if (seenInputs.has(key) || !model.call_id) continue;
+    let anchor = -1;
+    for (let index = 0; index < result.length; index++) {
+      const row = result[index];
+      const position = row.position ?? row.preview;
+      if (
+        position?.epoch === model.epoch &&
+        position.turn === model.turn &&
+        position.round != null &&
+        position.round < model.round!
+      )
+        anchor = index;
+    }
+    if (anchor < 0) continue;
+    const rows = pendingRows.get(anchor) ?? [];
+    rows.push(inputRow(result[anchor], model));
+    pendingRows.set(anchor, rows);
+  }
+  return pendingRows.size
+    ? result.flatMap((block, index) => [
+        block,
+        ...(pendingRows.get(index) ?? []),
+      ])
+    : result;
 }
 
 /** Union actual intervals so parallel work and call/result rows count once. */

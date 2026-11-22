@@ -33,7 +33,7 @@ for (const colorScheme of ["light", "dark"] as const) {
             `project-settings-host-${colorScheme}-${width}.png`,
           ),
         });
-        for (const tab of ["references", "permissions", "agents"] as const) {
+        for (const tab of ["agents", "models", "prompts", "speakers", "permissions", "references"] as const) {
           await page.getByTestId(`project-settings-tab-${tab}`).click();
           await expect(page.getByTestId("project-settings-pane")).toBeVisible();
           expect(await page.getByTestId("project-settings-pane").evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
@@ -214,6 +214,9 @@ test.describe("permission policy editor", () => {
     await page.getByTestId("project-settings-tab-permissions").click();
     const project = page.getByTestId("project-settings");
     await expect(project.locator("textarea")).toHaveCount(0);
+    await expect(project.getByTestId("external-speakers")).toHaveCount(0);
+    await expect(project.getByTestId("settings-model-default")).toHaveCount(0);
+    await page.getByTestId("project-settings-tab-models").click();
     const defaults = project.getByTestId("owner-settings-project");
     await expect(defaults.getByTestId("settings-save")).toBeEnabled();
     await expect(defaults.getByTestId("settings-revisions")).toContainText(
@@ -226,6 +229,7 @@ test.describe("permission policy editor", () => {
     await expect(defaults.getByLabel("操作审查", { exact: true })).toHaveValue(
       "",
     );
+    await page.getByTestId("project-settings-tab-permissions").click();
     await project
       .getByRole("button", { name: "打开当前会话权限", exact: true })
       .click();

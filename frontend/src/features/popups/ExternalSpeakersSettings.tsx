@@ -91,6 +91,7 @@ export function SpeakerSettingsDocument({
   const epoch = useRef(0);
   const controller = useRef(new AbortController());
   const continuation = useRef<(() => void) | undefined>(undefined);
+  const keepEditing = useRef<HTMLButtonElement>(null);
   const operation = useRef<SpeakerUpdate | null>(null);
   const dirty =
     !!snapshot &&
@@ -163,8 +164,10 @@ export function SpeakerSettingsDocument({
     () =>
       registerDocumentLeave(
         () => root.current,
-        (proceed) => {
-          if (latest.current.busy) return false;
+        (proceed, intent) => {
+          // Switching Project tabs must not throw away an unsettled receipt.
+          // Actual document exit still uses explicit abandonment confirmation.
+          if (pending.current || latest.current.busy || (intent === "tab" && latest.current.uncertain)) return false;
           if (latest.current.dirty || latest.current.uncertain) {
             continuation.current = proceed;
             setDiscard(true);
@@ -187,6 +190,15 @@ export function SpeakerSettingsDocument({
     window.addEventListener("beforeunload", unload);
     return () => window.removeEventListener("beforeunload", unload);
   }, []);
+  useLayoutEffect(() => {
+    if (!discard) return;
+    const opener = document.activeElement;
+    keepEditing.current?.focus();
+    keepEditing.current?.scrollIntoView({ block: "nearest" });
+    return () => {
+      if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
+    };
+  }, [discard]);
   const change = (name: string, binding?: SpeakerBinding) => {
     setDraft((value) => {
       const next = { ...value };
@@ -324,6 +336,7 @@ export function SpeakerSettingsDocument({
         <>
           <p role="status" className="inline-notice">
             {t("speakers.uncertain")}
+            {scope.kind === "project" && ` ${t("speakers.projectTabUncertain")}`}
           </p>
           {operation.current && (
             <button
@@ -590,6 +603,7 @@ export function SpeakerSettingsDocument({
         <div role="alertdialog" aria-label={t("speakers.discardTitle")}>
           <p>{t("speakers.discardHint")}</p>
           <button
+            ref={keepEditing}
             type="button"
             className="ghost-btn"
             onClick={() => {

@@ -75,7 +75,7 @@ async function remote(page: Page): Promise<Remote> {
 
 async function setup(
   page: Page,
-  options: { httpTimeoutMs?: number; locale?: string } = {},
+  options: { httpTimeoutMs?: number; locale?: string; automatic?: boolean } = {},
 ) {
   page.on("pageerror", (error) => {
     throw error;
@@ -158,6 +158,7 @@ window.translator={registry,view,mount,mountVariant,blockVariants,observed,
   );
   await page.goto("/translator-acceptance");
   await page.waitForFunction(() => (window as any).translatorReady);
+  if (options.automatic !== false) await control(page, { auto_translate: true });
   await expect(page.getByTestId("plugin-webview")).toHaveAttribute(
     "data-status",
     "ready",
@@ -328,6 +329,21 @@ test("actual Worker publishes one exact-source variant and canonical native Mark
   expect(http.calls).toHaveLength(1);
 });
 
+test("defaults to manual and translates only the explicitly requested block", async ({ page }) => {
+  const http = await remote(page);
+  await setup(page, { automatic: false });
+  await expect(frame(page).locator("#auto_translate")).not.toBeChecked();
+  await settle(page, [block("chosen"), block("untouched")]);
+  expect(http.calls).toHaveLength(0);
+  expect((await state(page, "chosen"))?.status).toBe("cancelled");
+  await variantAction(page, "block.retry", "chosen");
+  await expect.poll(async () => (await state(page, "chosen"))?.status).toBe("completed");
+  expect((await state(page, "untouched"))?.status).toBe("cancelled");
+  expect(http.calls).toHaveLength(1);
+  await mount(page, "setting-page");
+  await expect(frame(page).locator("#auto_translate")).not.toBeChecked();
+});
+
 test("same-language prose with API terms skips without HTTP; exact visible force requests once", async ({
   page,
 }) => {
@@ -427,6 +443,55 @@ test("HTTP errors are explicit, Retry is one request, MyMemory and input bounds 
   await expect
     .poll(async () => (await state(page, "too-long-output"))?.error)
     .toContain("32KiB");
+});
+
+test("empty assistant text does not fault the actual Worker or block the next prompt", async ({
+  page,
+}) => {
+  const http = await remote(page);
+  await setup(page, { automatic: false });
+  await settle(page, [block("image-only", ""), block("full", "Original prose")]);
+  expect(await blockVariants(page, "image-only")).toEqual([]);
+  expect((await state(page, "full"))?.status).toBe("cancelled");
+  expect(
+    await page.evaluate(() => {
+      const t = (window as any).translator;
+      return t.registry.beforeSubmit("Keep this exact draft");
+    }),
+  ).toEqual({ input: "Keep this exact draft" });
+  expect(http.calls).toHaveLength(0);
+});
+
+test("before-submit never republishes a cached historical variant whose source became truncated", async ({
+  page,
+}) => {
+  const http = await remote(page);
+  await setup(page, { automatic: false });
+  await settle(page, [block("prior", "Original full source")]);
+  expect((await state(page, "prior"))?.status).toBe("cancelled");
+  const text = "Original";
+  const observed = await page.evaluate(
+    async (replacement) => {
+      const t = (window as any).translator;
+      const input = t.registry.beforeSubmit("New prompt");
+      // The Host knows the replacement immediately, before the serialized
+      // settlement callback can tell the guest to drop its old source.
+      t.phase("settled-blocks", { blocks: [replacement] });
+      const result = await input;
+      await t.registry.render(t.status().manifest.id, "sidebar", true);
+      return { result, variants: t.blockVariants("prior"), status: t.status().status };
+    },
+    block("prior", text, {
+      source_digest: createHash("sha256").update(text).digest("hex"),
+      text_truncated: true,
+    }),
+  );
+  expect(observed).toEqual({
+    result: { input: "New prompt" },
+    variants: [],
+    status: "ready",
+  });
+  expect(http.calls).toHaveLength(0);
 });
 
 test("explicit settings Save keeps secret Host-owned, exact ACK clears draft, and test uses saved configuration", async ({

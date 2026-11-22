@@ -1,3 +1,4 @@
+import { mergeExecutionCertificates } from "./tool-execution-display";
 import type { NativeMessage, NativeSnapshot } from "./types";
 
 interface LoadedHistory {
@@ -46,8 +47,12 @@ export function sameSelectedHistory(
 
 function authoritative(
   message: NativeMessage,
+  sessionId: string,
   previous?: NativeMessage,
 ): NativeMessage {
+  const current = previous
+    ? mergeExecutionCertificates(message, previous, sessionId)
+    : message;
   // IDs are content-addressed. A deliberately abbreviated projection cannot erase
   // a previously received full body; current status/position metadata still wins.
   if (
@@ -58,13 +63,25 @@ function authoritative(
     message.content_truncated
   )
     return {
-      ...message,
+      ...current,
       text: previous.text,
       parts: previous.parts,
-      tool_calls: previous.tool_calls,
+      tool_calls: (previous.tool_calls ?? []).map((call, index) => {
+        const updated = current.tool_calls?.[index];
+        return current.canonical_source_id !== previous.canonical_source_id ||
+          (updated && updated.id !== call.id)
+          ? { ...call, execution_id: undefined, execution_status: undefined }
+          : updated
+            ? {
+                ...call,
+                execution_id: updated.execution_id,
+                execution_status: updated.execution_status,
+              }
+            : call;
+      }),
       content_truncated: false,
     };
-  return message;
+  return current;
 }
 
 /** A page contributes history facts only, never a second source of Session state.
@@ -121,7 +138,7 @@ export function retainLoadedMessages<T extends LoadedHistory>(
     previous.messages.map((message) => [message.id, message]),
   );
   const messages = incoming.messages.map((message) =>
-    authoritative(message, old.get(message.id)),
+    authoritative(message, incoming.session.id, old.get(message.id)),
   );
   incoming = { ...incoming, messages };
   if (previous.history_view && incoming.history_view) {
@@ -213,7 +230,8 @@ export function retainLoadedMessages<T extends LoadedHistory>(
         history_gap: historyGap,
         history_view: { ...before },
       });
-      if (newEnd < oldStart && agrees) return keepPrevious(previous.history_gap);
+      if (newEnd < oldStart && agrees)
+        return keepPrevious(previous.history_gap);
       if (newStart > oldEnd && agrees) return keepPrevious(true);
       // Conflicting overlap is not append proof; never splice its identities.
     }

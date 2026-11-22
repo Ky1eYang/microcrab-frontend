@@ -179,6 +179,31 @@ test("explicit baseline, disable and inherit stay distinct; helper invalid synta
   expect(writes[1].overrides).toEqual({});
 });
 
+test("action review highlights user intent and applied mode separately from the operation", async ({
+  page,
+}) => {
+  await setup(page);
+  await page
+    .getByTestId("prompt-mode-action_review_template")
+    .selectOption("custom");
+  const review = page.getByTestId("prompt-setting-action_review_template");
+  await expect(review).toContainText("最近一条已接纳的真实用户文本");
+  await expect(review).toContainText("发起会话中已生效的模式及其原文指令");
+  const bindings = [
+    "{{ tool }}",
+    "{{ tool_name }}",
+    "{{ tool_args }}",
+    "{{ user_input }}",
+    "{{ operation_kind }}",
+    "{{ mode }}",
+    "{{ mode_prompt }}",
+  ];
+  const unsupported = ["{{ permission_request }}", "{{ mode | safe }}"];
+  await review.getByRole("textbox").fill([...bindings, ...unsupported].join("\n"));
+  await expect(review.locator(".prompt-token-variable")).toHaveText(bindings);
+  await expect(review.locator(".prompt-token-invalid")).toHaveText(unsupported);
+});
+
 test("prompt edits preserve authored CRLF bytes and Session admission omits inherited prompt fields", async ({
   page,
 }) => {

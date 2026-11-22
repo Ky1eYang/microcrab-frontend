@@ -192,13 +192,27 @@ resource reference. Actual component imports remain necessary independently.
 ## Resource configuration and credentials
 
 The generic `resources` import provides queued `resource-list` and
-`resource-configure`. Configuration is available through the MCP plugin's declared
-HTML SettingPage. The authenticated owner's explicit Add/Update action creates or revokes a
-grant; there is no extra permission dialog. A grant binds the application server
-origin, owner, plugin ID, exact artifact digest, configured server ID, exact full
-HTTP(S) endpoint, POST method, and config revision. Endpoint changes never inherit
-credentials from another endpoint. No wildcard origins, redirects, cookies,
-ambient credential headers, or arbitrary HTTP methods are admitted.
+`resource-configure`. Together with the actual `net` Component import it lets any
+plugin use owner-approved HTTP(S) endpoints, even outside its static
+`network_origins`. The authenticated owner's explicit surface action is required to
+configure a grant. A grant binds the application server origin, owner, plugin ID,
+exact artifact digest, resource ID, exact full URL (including path and query),
+allowed HTTP methods, and `config_pin` revision. No endpoint prefixes or wildcards
+are granted; endpoint changes never inherit another endpoint's credential.
+
+`resource-configure` optionally takes `methods`, a nonempty distinct uppercase
+list drawn from `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`, and `OPTIONS`.
+An enabled resource supplied with this field requires a separate localized Host
+approval showing the plugin, exact endpoint and methods, but not the authorization
+header. Decline, scope retirement, or the 60-second approval deadline cannot save
+that draft. Missing `methods` means `['POST']`, with the established explicit
+Add/Update action (no additional prompt) for legacy MCP and Output Translator.
+`resource-list` reports approved methods, never the saved credential. `net.request`
+`http` requests use `resource`, `config_pin`, and the desired `method` (default
+`POST` for resources). If supplied, `url` must be exactly the stored URL. A
+registered grant allows follow-up requests in the original current scope without
+another click; model tool dispatch cannot configure it or use direct-origin egress.
+Existing static `network_origins` requests retain their original policy.
 
 Configuration and authorization persist in browser LocalStorage under the exact
 application-server/owner/plugin namespace. Persisted credentials are host-owned and
@@ -216,8 +230,36 @@ Corrupt storage and unavailable/quota-exceeded LocalStorage produce bounded
 errors; the existing destructive plugin local-data reset clears resource storage
 without needing to parse it.
 
-Browser CORS and mixed-content restrictions still apply. The plugin cannot bypass
-them; an HTTPS application generally cannot connect to a plain HTTP server.
+Browser fetch uses CORS, rejects redirects, omits cookies and browser HTTP-auth
+credentials, and sends no referrer or frontend login token. Mixed-content rules
+still apply; an HTTPS application generally cannot connect to a plain HTTP server.
+
+### Incremental SSE
+
+Set `response_mode: "sse"` on an `http` request with an exact configured resource;
+`response_id` (the separate MCP JSON-RPC matching mode) must be absent. The Host
+requests `Accept: text/event-stream`. Each complete data event arrives through
+`on-phase("event-result", ...)` as `{request_id,ok:true,value:{type:"sse-event",event,data,id?}}`.
+Unnamed events use `message`; multiline data uses LF; `id` is the last valid SSE
+ID once set. A stream is not an EventSource and does not automatically reconnect.
+SSE wire bytes are capped at 2 MiB, frames at 64 KiB, and events at 4096. There is
+one active stream per plugin Worker. The first frame is delivered at least 500 ms
+after response headers, and the next at least 500 ms after the previous Worker
+acknowledgement, without dropping frames. Comments do not generate callbacks. Incomplete trailing
+frames at EOF are discarded. The stream response excludes credential headers and
+redacts literal echoes of the saved authorization value and conventional token;
+this is not detection of encoded, split or transformed secrets, so approve only
+trusted endpoints.
+
+Normal EOF returns one usual terminal `{request_id,ok:true,value:{status,headers,body:""}}`
+after all delivered frames. Non-2xx responses return that status without any
+frames; 2xx without an SSE body is an error. Current-scope transport, parsing,
+quota and timeout failures use the usual `{request_id,ok:false,error}`. The plugin
+HTTP timeout is an absolute deadline for fetch, frame delivery and EOF (10 seconds
+by default; owner adjustable up to 300); a model invocation can shorten it further.
+Session/history/owner/surface/tool retirement aborts the original request and drops
+stale callbacks; revoking or reconfiguring the resource aborts and fences its frames.
+No effect is replayed, no network is delegated to the Server, and ABI 0.4 is unchanged.
 
 ## MCP service contract
 

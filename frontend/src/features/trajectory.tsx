@@ -9,6 +9,7 @@ import {
   presentationIdentityChanged,
 } from "./conversation/presentationIdentity";
 import { terminalSummary } from "./trajectoryStopReason";
+import { toolDisplayStatus } from "./tool-status";
 import { measuredDuration } from "./trajectoryTiming";
 import {
   useInternalAssistantAudit,
@@ -23,7 +24,6 @@ import {
   elapsed,
   isCompactResult,
   isSubagent,
-  lower,
   type FeatureBlock,
 } from "./shared";
 
@@ -159,7 +159,9 @@ function labelOf(block: FeatureBlock, kind: string) {
   if (kind === "model-generation") return t("timeline.modelGeneration");
   if (kind === "internal-assistant") return block.payload.auditAssistant;
   if (kind === "thought") return "思考";
-  if (kind === "tool") return block.tool?.name ?? "工具";
+  if (block.tool && (kind === "tool" || kind === "subagent"))
+    return block.tool.name;
+  if (kind === "tool") return "工具";
   if (kind === "subagent") return "助手";
   if (kind === "compaction") return "压缩";
   if (kind === "error") return "错误";
@@ -228,7 +230,15 @@ function statusOf(block: FeatureBlock) {
     block.payload.stopReason?.reason === "cancelled"
   )
     return "cancelled";
-  if (block.tool) return lower(block.tool.status) || "unknown";
+  if (block.tool) {
+    if (block.displayExecutionStatus) return block.displayExecutionStatus;
+    const status = toolDisplayStatus(block.tool.status);
+    const outcome = block.payload.auditToolOutcome;
+    if (status === "cancelled" || status === "interrupted") return status;
+    if (outcome === "cancelled") return "cancelled";
+    if (status === "failed" || outcome === "failed") return "failed";
+    return outcome === "succeeded" ? "succeeded" : status;
+  }
   if (block.kind === "reasoning") {
     if (
       block.payload.auditStatus === "failed" ||
@@ -251,9 +261,10 @@ function statusLabel(status: string) {
   if (status === "cancelled") return t("stopReason.cancelled");
   if (status === "awaiting-result") return "尚无结果";
   if (status === "unknown") return "状态未确认";
-  if (["error", "failed"].includes(status)) return "失败";
-  if (["running", "thinking", "pending"].includes(status)) return "进行中";
-  return "已完成";
+  if (isFailed(status)) return t("tools.status.failed");
+  if (status === "thinking") return "进行中";
+  if (status === "done") return t("tools.status.succeeded");
+  return t(`tools.status.${toolDisplayStatus(status)}`);
 }
 
 function stamp(ms?: number | null) {
@@ -271,6 +282,14 @@ function timeRange(block: FeatureBlock) {
 
 function hasRequestDelta(item: TrajectoryItem) {
   return (
+    (item.kind === "model-request" || item.kind === "internal-assistant") &&
+    typeof item.block.payload.auditSelector?.call_id === "string" &&
+    Boolean(item.block.payload.auditSelector.call_id)
+  );
+}
+
+function hasRequestInfo(item: TrajectoryItem) {
+  return (
     item.kind === "user" ||
     item.kind === "tool" ||
     (item.kind === "subagent" && Boolean(item.block.tool)) ||
@@ -279,6 +298,46 @@ function hasRequestDelta(item: TrajectoryItem) {
     item.kind === "internal-assistant" ||
     item.kind === "model-request" ||
     item.kind === "model-generation"
+  );
+}
+
+function toolNumber(item: TrajectoryItem) {
+  const id = item.block.displayExecutionId ?? item.block.executionId;
+  return item.block.tool &&
+    typeof id === "number" &&
+    Number.isSafeInteger(id) &&
+    id > 0
+    ? `#${id}`
+    : null;
+}
+
+function itemTitle(item: TrajectoryItem) {
+  const number = toolNumber(item);
+  return number ? `${item.label} ${number}` : item.label;
+}
+
+function isFailed(status: string) {
+  return status === "error" || status === "failed";
+}
+
+function TrajectoryTitle({ item }: { item: TrajectoryItem }) {
+  const number = toolNumber(item);
+  const sent = hasRequestDelta(item);
+  return (
+    <span className="trajectory-title" title={itemTitle(item)}>
+      <span className="trajectory-title-text">{item.label}</span>
+      {number && <span className="trajectory-title-number">{number}</span>}
+      {sent && (
+        <span
+          className="trajectory-title-send"
+          role="img"
+          aria-label={t("timeline.requestSent")}
+          title={t("timeline.requestSent")}
+        >
+          <Icon name="send" size={12} aria-hidden="true" />
+        </span>
+      )}
+    </span>
   );
 }
 
@@ -296,8 +355,8 @@ function tabsFor(item: TrajectoryItem) {
           ["preview", "预览"],
           ["raw", "原始内容"],
         ];
-  if (hasRequestDelta(item)) tabs.push(["delta", "请求增量"]);
-  if (hasRequestDelta(item) || item.kind === "subagent")
+  if (hasRequestDelta(item)) tabs.push(["delta", t("timeline.requestDelta")]);
+  if (hasRequestInfo(item) || item.kind === "subagent")
     tabs.push(["request-info", "请求信息"]);
   return tabs;
 }
@@ -531,6 +590,9 @@ export function TrajectoryView({
     history: transcript.historyView,
     reset: transcript.historyResetRevision,
   };
+  const auditPresentationScope = transcript.historyView
+    ? `${trajectoryScope}:${presentationScope}`
+    : undefined;
   const currentScope = useRef(trajectoryScope);
   currentScope.current = trajectoryScope;
   useEffect(() => {
@@ -948,7 +1010,7 @@ export function TrajectoryView({
     : items;
   const visible = needle
     ? ranged.filter((item) =>
-        `${item.label} ${item.summary} ${item.content}`
+        `${itemTitle(item)} ${item.summary} ${item.content}`
           .toLowerCase()
           .includes(needle),
       )
@@ -988,6 +1050,7 @@ export function TrajectoryView({
     const item = allItems.find((item) => item.block.id === id);
     if (!item) return;
     pauseInspection();
+    if (selected?.block.id === id) return;
     selection.current = {
       block: item.block,
       scope: presentationScope,
@@ -1033,7 +1096,7 @@ export function TrajectoryView({
       `- 执行时长: ${timeOf(totalDuration)}`,
       "",
       ...items.map(
-        (item) => `## #${item.index} ${item.label}\n${item.content}`,
+        (item) => `## #${item.index} ${itemTitle(item)}\n${item.content}`,
       ),
     ].join("\n");
   return (
@@ -1220,15 +1283,11 @@ export function TrajectoryView({
                       data-testid="trajectory-seg"
                       data-lane={lane}
                       data-status={item.status}
-                      aria-label={
-                        ["error", "failed"].includes(item.status)
-                          ? `选中 #${item.index} ${item.label}，失败`
-                          : `选中 #${item.index} ${item.label}`
-                      }
+                      aria-label={`选中 #${item.index} ${itemTitle(item)}${isFailed(item.status) ? `，${statusLabel(item.status)}` : ""}`}
                       data-current={selected?.block.id === item.block.id}
                       data-duration-ms={elapsed(item.block) ?? undefined}
                       data-started-ms={item.block.startedMs ?? undefined}
-                      title={`${item.label} · ${item.time}`}
+                      title={`${itemTitle(item)} · ${item.time}${isFailed(item.status) ? ` · ${statusLabel(item.status)}` : ""}`}
                       style={{
                         left: `${((item.start - origin) / domain) * 100}%`,
                         width: `${Math.max(0.45, ((item.end - item.start) / domain) * 100)}%`,
@@ -1296,10 +1355,13 @@ export function TrajectoryView({
                       data-kind={item.kind}
                       data-status={item.status}
                       data-selected={selected?.block.id === item.block.id}
+                      aria-current={
+                        selected?.block.id === item.block.id || undefined
+                      }
                       onClick={() => select(item.block.id)}
                     >
                       <span className="trajectory-entry-kind">
-                        {item.label}
+                        <TrajectoryTitle item={item} />
                       </span>
                       <span className="trajectory-entry-text">
                         {item.summary || item.label}
@@ -1308,7 +1370,9 @@ export function TrajectoryView({
                         className="trajectory-entry-time"
                         data-status={item.status}
                       >
-                        {item.time}
+                        {isFailed(item.status)
+                          ? statusLabel(item.status)
+                          : item.time}
                       </span>
                     </button>
                   </div>
@@ -1328,8 +1392,8 @@ export function TrajectoryView({
             >
               <header>
                 <strong>
-                  {selected.label}
-                  <span>
+                  <TrajectoryTitle item={selected} />
+                  <span className="trajectory-step-label">
                     {selected.turnKey
                       ? `第 ${selected.turn} 轮`
                       : selected.kind === "internal-assistant"
@@ -1468,19 +1532,31 @@ export function TrajectoryView({
                     <Payload
                       variant="trajectory"
                       value={selected.block.payload.text}
+                      status={isFailed(selected.status) ? "error" : undefined}
                       fillBody
                       empty="未记录结果"
                     />
                   </div>
                 )}
                 {tab === "schema" && (
-                  <RequestAudit block={selected.block as any} schema />
+                  <RequestAudit
+                    block={selected.block as any}
+                    presentationScope={auditPresentationScope}
+                    schema
+                  />
                 )}
                 {tab === "delta" && (
-                  <RequestAudit block={selected.block as any} />
+                  <RequestAudit
+                    block={selected.block as any}
+                    presentationScope={auditPresentationScope}
+                  />
                 )}
                 {tab === "request-info" && (
-                  <RequestAudit block={selected.block as any} metadata />
+                  <RequestAudit
+                    block={selected.block as any}
+                    presentationScope={auditPresentationScope}
+                    metadata
+                  />
                 )}
               </div>
             </aside>

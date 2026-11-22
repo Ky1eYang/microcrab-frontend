@@ -617,6 +617,38 @@ test("existing pinned mode uses CAS and waits for backend confirmation across re
   await expect(page.getByTestId("composer-agent-pill")).toBeEnabled();
 });
 
+test("ordered applied mode is not overwritten by an older HTTP acknowledgement or the owner list", async ({ page }) => {
+  await mount(page);
+  await page.evaluate(async () => {
+    const h = (window as any).h;
+    await h.existing();
+    h.manual = h.defer("session.set_mode");
+    h.modeCall = h.store.dispatch({ type: "SetAgentMode", mode: "plan" });
+  });
+  await expect.poll(() => page.evaluate(() =>
+    (window as any).h.calls.some((call: any) => call.method === "session.set_mode"),
+  )).toBe(true);
+  await page.evaluate(async () => {
+    const h = (window as any).h;
+    const watch = h.store.subscription;
+    h.store.receive({ v: 1, type: "event", event: "session.meta", session_id: "s",
+      subscription_id: watch.subscription_id, generation: watch.generation,
+      sequence: watch.sequence + 1, data: {
+        session: h.native("s", { mode: "build", configured_mode: "default", revision: 7 }),
+      },
+    });
+    h.manual.resolve(h.snapshot("s", {
+      session: h.native("s", { mode: "plan", configured_mode: "plan", revision: 8 }),
+    }));
+    await h.modeCall;
+    h.store.applySessionChange({ event: "sessions.changed", data: { op: "upsert",
+      session: h.native("s", { mode: null, configured_mode: "plan", revision: 8 }),
+    } });
+  });
+  await expect(page.getByTestId("composer-agent-pill")).toContainText("build");
+  expect(await page.evaluate(() => (window as any).h.store.state.sessions[0].mode)).toBe("build");
+});
+
 test("clipboard images retain text show removable thumbnails and revoke removed URLs", async ({
   page,
 }) => {

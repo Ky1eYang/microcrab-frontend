@@ -3,6 +3,7 @@ import { useAppFields } from "../state";
 import { Composer } from "../features/composer";
 import { WorkspacePicker } from "../features/home/WorkspacePicker";
 import { t } from "../i18n";
+import "../styles/home-page.css";
 
 export function HomePage() {
   const { state, dispatch } = useAppFields([

@@ -7,6 +7,7 @@ import {
 } from "./component";
 import { PluginNetwork } from "./network";
 import { PluginResources } from "./resources";
+import { approveNetworkGrant } from "./network-approval";
 import { identityKey } from "./tool-hub";
 import {
   assertJson,
@@ -82,6 +83,7 @@ interface Pending {
   sessionId: string | null;
   context: PluginContext;
   surfaceRevision?: number;
+  isCurrent?: () => boolean;
   resolve: (r: WorkerReply) => void;
   reject: (e: Error) => void;
   timer: ReturnType<typeof setTimeout>;
@@ -109,6 +111,9 @@ export class PluginRegistry implements PluginRegistryAPI {
     return operation;
   }
   private resultContexts = new WeakMap<PluginResult, PluginContext>();
+  // Streams and native consent have a live user-facing lifecycle. Keep the
+  // existing bounded receipt observation for ordinary, potentially mutating HTTP.
+  private cancelOnSurfaceHide = new WeakSet<AbortController>();
   private pending = new Map<number, Pending>();
   private cleanupTools = new Map<
     string,
@@ -404,6 +409,7 @@ export class PluginRegistry implements PluginRegistryAPI {
         const pending = this.pending.get(data.callId);
         if (
           !pending ||
+          (pending.isCurrent && !pending.isCurrent()) ||
           pending.worker !== worker ||
           pending.generation !== data.generation ||
           pending.historyGeneration !== this.historyGeneration ||
@@ -473,6 +479,7 @@ export class PluginRegistry implements PluginRegistryAPI {
       | Omit<Extract<WorkerRequest, { type: "load" }>, "generation" | "callId">
       | Omit<Extract<WorkerRequest, { type: "call" }>, "generation" | "callId">,
     timeout: number,
+    isCurrent?: () => boolean,
   ): Promise<WorkerReply> {
     if (this.pending.size >= LIMITS.pending)
       return Promise.reject(new Error("plugin exceeds 128 pending calls"));
@@ -497,6 +504,7 @@ export class PluginRegistry implements PluginRegistryAPI {
         historyGeneration: this.historyGeneration,
         sessionId: data.context.session_id,
         context: structuredClone(data.context),
+        isCurrent,
         surfaceRevision: data.context.surface
           ? [...this.live.values()]
               .find((live) => live.worker === worker)
@@ -1033,6 +1041,7 @@ export class PluginRegistry implements PluginRegistryAPI {
     timeout: number,
     surface?: PluginSurfaceDescriptor,
     captured?: PluginContext,
+    isCurrent?: () => boolean,
   ): Promise<PluginResult> {
     if (this.live.get(id) !== instance)
       throw new StalePluginCall("stale plugin instance");
@@ -1057,6 +1066,7 @@ export class PluginRegistry implements PluginRegistryAPI {
       instance.generation,
       { type: "call", method, args, context },
       timeout,
+      isCurrent,
     );
     if (
       this.live.get(id) !== instance ||
@@ -1387,7 +1397,12 @@ export class PluginRegistry implements PluginRegistryAPI {
       visible,
       revision: ++instance.surfaceSequence,
     });
-    if (!visible) instance.trees.delete(surface.surface_id);
+    if (!visible) {
+      instance.trees.delete(surface.surface_id);
+      for (const [controller, surfaceId] of instance.controllers)
+        if (surfaceId === surface.surface_id && this.cancelOnSurfaceHide.has(controller))
+          controller.abort(new Error("plugin network surface retired"));
+    }
     instance.network.retireStale();
     this.publish();
   }
@@ -2039,9 +2054,11 @@ export class PluginRegistry implements PluginRegistryAPI {
     value?: Json,
     error?: string,
     origin?: PluginContext,
-  ): void {
+    current?: () => boolean,
+  ): void | Promise<void> {
     if (
       this.live.get(id) !== instance ||
+      (current && !current()) ||
       (origin && !this.currentContext(instance, origin))
     )
       return;
@@ -2060,9 +2077,10 @@ export class PluginRegistry implements PluginRegistryAPI {
       this.fault(id, cause);
       return;
     }
-    void this.enqueue(id, async (live) => {
+    const completion = this.enqueue(id, async (live) => {
       if (
         live !== instance ||
+        (current && !current()) ||
         (origin && !this.currentContext(instance, origin)) ||
         history !== this.historyGeneration ||
         session !== this.sessionId ||
@@ -2085,12 +2103,16 @@ export class PluginRegistry implements PluginRegistryAPI {
         LIMITS.callMs,
         origin?.surface,
         origin?.tool_invocation ? origin : undefined,
+        current,
       );
-      this.apply(id, live, r, undefined, origin);
+      // An async response inherits scope, not the original user gesture.
+      if (!current || current())
+        this.apply(id, live, r, undefined, origin && { ...origin, user_action: false });
     }).catch((e) => {
       if (!(e instanceof StalePluginCall) && this.live.get(id) === instance)
         this.fault(id, e);
     });
+    return completion;
   }
   private async effect(
     id: string,
@@ -2117,7 +2139,8 @@ export class PluginRegistry implements PluginRegistryAPI {
           !effect.payload ||
           typeof effect.payload !== "object" ||
           Array.isArray(effect.payload) ||
-          effect.payload.response_mode !== "discard"
+          effect.payload.response_mode !== "discard" ||
+          (effect.payload.method !== undefined && effect.payload.method !== "POST")
         )
           throw Error(
             "Cancellation cleanup permits one bounded resource notification only",
@@ -2195,9 +2218,15 @@ export class PluginRegistry implements PluginRegistryAPI {
     };
     // The invocation's trusted host context is the shared guest/host snapshot.
     // Changing a preference never shortens an already admitted request.
+    const payload = effect.payload && typeof effect.payload === "object" && !Array.isArray(effect.payload)
+      ? effect.payload : undefined;
+    const asksNetworkApproval = effect.kind === "resource-configure" &&
+      payload?.methods !== undefined && payload.enabled === true && payload.remove !== true;
+    const streaming = effect.kind === "http" && payload?.response_mode === "sse";
+    if (asksNetworkApproval || streaming) this.cancelOnSurfaceHide.add(controller);
     const requestTimeout = effect.kind === "http"
       ? validateHttpRequestTimeout(context.host_http_timeout_ms ?? HTTP_REQUEST_TIMEOUT.defaultMs)
-      : 10_000;
+      : asksNetworkApproval ? 60_000 : 10_000;
     const timeout = Math.max(1, Math.min(
       requestTimeout,
       context.tool_cleanup ? 1000
@@ -2222,9 +2251,16 @@ export class PluginRegistry implements PluginRegistryAPI {
       let value: Json;
       if (effect.kind === "resource-list") value = instance.resources.list();
       else if (effect.kind === "resource-configure")
-        value = instance.resources.configure(
+        value = await instance.resources.configure(
           effect.payload,
           context.user_action === true && !context.tool_invocation,
+          (endpoint, methods) => approveNetworkGrant(
+            `${this.require(id).manifest.name} (${id})`,
+            endpoint,
+            methods,
+            controller.signal,
+          ),
+          controller.signal,
         );
       else if (effect.kind.startsWith("storage-")) {
         const p = effect.payload;
@@ -2270,7 +2306,7 @@ export class PluginRegistry implements PluginRegistryAPI {
             isCurrent: () =>
               this.live.get(id) === instance &&
               this.currentContext(instance, context),
-            event: (requestId, value) =>
+            event: (requestId, value, current) =>
               this.completion(
                 id,
                 instance,
@@ -2279,6 +2315,7 @@ export class PluginRegistry implements PluginRegistryAPI {
                 value,
                 undefined,
                 context,
+                current,
               ),
           },
         );

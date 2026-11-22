@@ -183,10 +183,12 @@ export function RequestAudit({
   block,
   schema = false,
   metadata = false,
+  presentationScope,
 }: {
   block: Block;
   schema?: boolean;
   metadata?: boolean;
+  presentationScope?: string;
 }) {
   const { state, dispatch } = useApp();
   const [record, setRecord] = useState<{
@@ -208,7 +210,7 @@ export function RequestAudit({
     selector,
     block.sessionId,
     scope?.parentId,
-    state.history,
+    presentationScope ?? state.history,
   ]);
   const currentScope = useRef(key);
   currentScope.current = key;
@@ -216,7 +218,6 @@ export function RequestAudit({
   useEffect(() => {
     let active = true;
     const isCurrent = () => active && currentScope.current === key;
-    setRecord(null);
     setError("");
     if (!selector) return;
     setLoading(true);
@@ -242,7 +243,7 @@ export function RequestAudit({
     return () => {
       active = false;
     };
-  }, [key, block.sessionId, scope?.parentId, state.auditRevision]);
+  }, [key, block.sessionId, scope?.parentId, state.auditRevision, state.history]);
   if (!selector)
     return <p role="status">此历史消息没有持久位置映射，无法可靠定位请求。</p>;
   const attempt = selectedAttempt(response);
@@ -252,9 +253,9 @@ export function RequestAudit({
   const deltaView = !metadata && !schema;
   const evidence = (
     <>
-      {loading && <p role="status">正在读取持久请求证据…</p>}
+      {loading && !response && <p role="status">正在读取持久请求证据…</p>}
       {error && <p role="alert">{error}</p>}
-      {!loading && !error && response && (
+      {response && (
         <>
           {response.status !== "available" && (
             <p role="status">
@@ -265,6 +266,7 @@ export function RequestAudit({
           {attempt && !metadata && (
             <>
               <Payload
+                key={key}
                 variant="trajectory"
                 fillBody
                 value={value}
@@ -344,8 +346,8 @@ export function RequestAudit({
           ) : (
             evidence
           )}
-          {!loading && !error && metadata && attempt && (
-            <>
+          {metadata && attempt && (
+            <div key={key} className="request-audit-metadata-body">
               <dl>
                 <dt>请求 ID</dt>
                 <dd>{attempt.request_hash}</dd>
@@ -394,7 +396,7 @@ export function RequestAudit({
                   empty="尚无模型返回证据"
                 />
               </details>
-            </>
+            </div>
           )}
         </>
       )}

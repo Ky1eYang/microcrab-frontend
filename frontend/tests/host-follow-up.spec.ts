@@ -71,6 +71,7 @@ test("two pinned Projects resolve their own Host locator on switch and normal re
   await open(page);
   await expect(page.getByLabel("Host WebSocket 地址")).toHaveCount(0);
   await expect(page.getByTestId("host-fixed-project")).toHaveText("Assigned");
+  await expect(page.getByTestId("host-saved-transport")).toContainText("WebSocket");
   await page
     .getByRole("button", { name: "关闭连接对话框", exact: true })
     .click();
@@ -120,6 +121,24 @@ test("two pinned Projects resolve their own Host locator on switch and normal re
       .filter((command) => command.method === "host.relay_attach")
       .at(-1)?.params.project_id,
   ).toBe("project-1");
+});
+
+test("a rejected resume asks for a fresh code without sending Pair automatically", async ({ page }) => {
+  const backend = await nativeBackend(page, { projects, rejectHostResume: true });
+  await seed(page);
+  await page.goto("/");
+  await open(page);
+  const dialog = page.getByRole("dialog");
+  const connect = dialog.getByRole("button", { name: "连接 Host", exact: true });
+  await connect.click();
+  await expect(dialog.getByTestId("host-recovery-guidance")).toContainText("复制当前配对码");
+  const attempts = () => backend.commands.filter((command) => command.method === "host.relay_attach");
+  expect(attempts().every((command) => !command.params.token)).toBe(true);
+  const previous = attempts().length;
+  await dialog.locator("#host-code").fill("fixture-new-pair-code");
+  await dialog.getByRole("button", { name: /配对并连接/ }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(attempts().slice(previous).map((command) => command.params.token)).toEqual(["fixture-new-pair-code"]);
 });
 
 test("missing map requires explicit setup and another account cannot use saved Host map", async ({

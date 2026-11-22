@@ -1,5 +1,4 @@
-// Beautify 0.1.6 r3 polish: glyphs replaced by aria-hidden icons, and the
-// transcript's scroll-padding keeps focused content clear of the composer.
+// Glyphs use aria-hidden icons, and focused transcript content clears the composer.
 import { test, expect, type Page } from "@playwright/test";
 import { nativeBackend } from "./native-fixture";
 import { connectHostUI } from "./host-fixture";
@@ -110,14 +109,17 @@ for (const width of [1440, 390]) {
   });
 }
 
-const composerHeight = (page: Page) =>
+const conversationGeometry = (page: Page) =>
   page.evaluate(() => {
-    const list = document.querySelector<HTMLElement>(".transcript")!;
-    const wrap = document.querySelector(".conversation-input-outer-wrap")!;
+    const list = document.querySelector(".transcript")!.getBoundingClientRect();
+    const footer = document
+      .querySelector(".conversation-input-outer-wrap")!
+      .getBoundingClientRect();
     return {
-      variable: list.style.getPropertyValue("--composer-height"),
-      padding: getComputedStyle(list).scrollPaddingBottom,
-      height: `${Math.ceil(wrap.getBoundingClientRect().height)}px`,
+      transcriptHeight: list.height,
+      transcriptBottom: list.bottom,
+      footerHeight: footer.height,
+      footerTop: footer.top,
     };
   });
 
@@ -126,9 +128,8 @@ test("a focused code-card copy button scrolls clear of the composer at 1440", as
 }) => {
   await page.setViewportSize({ width: 1440, height: 700 });
   await session(page);
-  const state = await composerHeight(page);
-  expect(state.variable).toBe(state.height);
-  expect(state.padding).toBe(state.height);
+  const state = await conversationGeometry(page);
+  expect(state.transcriptBottom).toBeLessThanOrEqual(state.footerTop);
   const copy = page.locator(".assistant-turn .code-block-copy-btn").last();
   // Start with the card under the composer, then reach the button with Tab.
   const covered = async () => {
@@ -150,23 +151,23 @@ test("a focused code-card copy button scrolls clear of the composer at 1440", as
   await expect.poll(covered).toBeLessThanOrEqual(1);
 });
 
-test("--composer-height follows the composer when it grows", async ({
+test("the transcript viewport yields space when the composer grows", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await session(page);
   await connectHostUI(page);
   await expect(page.getByLabel("消息", { exact: true })).toBeEnabled();
-  const before = await composerHeight(page);
+  const before = await conversationGeometry(page);
   await page
     .locator(".home-composer-textarea")
     .fill(Array.from({ length: 6 }, (_, i) => `line ${i}`).join("\n"));
   await expect
-    .poll(async () => (await composerHeight(page)).variable)
-    .not.toBe(before.variable);
-  const after = await composerHeight(page);
-  expect(after.variable).toBe(after.height);
-  expect(parseInt(after.height)).toBeGreaterThan(parseInt(before.height));
+    .poll(async () => (await conversationGeometry(page)).footerHeight)
+    .toBeGreaterThan(before.footerHeight);
+  const after = await conversationGeometry(page);
+  expect(after.transcriptHeight).toBeLessThan(before.transcriptHeight);
+  expect(after.transcriptBottom).toBeLessThanOrEqual(after.footerTop);
 });
 
 test("former text glyphs are aria-hidden icons and names keep their text", async ({

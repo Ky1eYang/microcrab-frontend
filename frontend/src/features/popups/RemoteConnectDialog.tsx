@@ -3,6 +3,7 @@ import { useApp, useAppStore } from "../../state";
 import { hostReadiness } from "../../state/host-readiness";
 import { t } from "../../i18n";
 import { hostTerminalCode } from "../../client/host-quarantine";
+import { CommandError } from "../../client/errors";
 import {
   hostCarrier,
   hostLocator,
@@ -45,6 +46,7 @@ export function hostStatusLabel(status: string): string {
 const hostReasonKeys = new Set<string>([
   "loading_catalog",
   "pairing_expired",
+  "host_pairing_expired",
   "pairing_rejected",
   "resume_rejected",
   "bridge_upgrade_required",
@@ -67,7 +69,7 @@ export const hostReason: Record<string, string> = new Proxy(
   {
     get: (_, k) =>
       typeof k === "string" && hostReasonKeys.has(k)
-        ? t("host.reason." + k)
+        ? t("host.reason." + (k === "host_pairing_expired" ? "pairing_expired" : k))
         : undefined,
     has: (_, k) => typeof k === "string" && hostReasonKeys.has(k),
   },
@@ -109,6 +111,7 @@ export function RemoteConnectDialog() {
     (mode === "grpc" && locatorCarrier !== "grpc") ||
     (mode === "relay" && locatorCarrier === "grpc");
   const connected = connection?.connected === true;
+  const canControl = connection?.localControl !== false;
   useEffect(() => {
     setEndpoint(locator ?? state.popup.endpoint ?? "");
     setRecover(false);
@@ -171,7 +174,12 @@ export function RemoteConnectDialog() {
           transport: mode === "grpc" ? "grpc" : "relay",
         });
       }
-      setError(e instanceof Error ? e.message : String(e));
+      const errorCode = e instanceof CommandError ? e.code : undefined;
+      if (errorCode === "resume_rejected" || errorCode === "pairing_required") {
+        setError(hostReason[errorCode]);
+      } else {
+        setError(e instanceof Error ? e.message : String(e));
+      }
     } finally {
       pending.current = false;
       setBusy(false);
@@ -306,6 +314,13 @@ export function RemoteConnectDialog() {
                     <small className="host-connect-hint">
                       {t("hostDlg.pinnedHint")}
                     </small>
+                    {locatorCarrier && (
+                      <small className="host-connect-hint" data-testid="host-saved-transport">
+                        {t("hostDlg.savedTransport", {
+                          transport: t(`hostDlg.${locatorCarrier}`),
+                        })}
+                      </small>
+                    )}
                   </div>
                 )}
                 {showAddress ? (
@@ -374,7 +389,12 @@ export function RemoteConnectDialog() {
                     status: hostStatusLabel(readiness.status),
                   })}
                 </strong>
-                {connection?.connected && connection.effectiveTransport && (
+                {connection?.connected && connection.carrierMode && (
+                  <div data-testid="host-carrier-mode">
+                    {t(`host.carrier.${connection.carrierMode}`)}
+                  </div>
+                )}
+                {connection?.connected && !connection.carrierMode && connection.effectiveTransport && (
                   <div data-testid="host-effective-transport">
                     {t(`hostDlg.effective.${connection.effectiveTransport}`)}
                   </div>
@@ -458,7 +478,7 @@ export function RemoteConnectDialog() {
                   </div>
                 </div>
               )}
-              {connected && (
+              {connection && (connected || connection.observeRoute) && (
                 <div className="host-connect-create-actions">
                   <button
                     className="ghost-btn"
@@ -471,11 +491,11 @@ export function RemoteConnectDialog() {
                       })
                     }
                   >
-                    {t("hostDlg.refresh")}
+                    {t(connected && canControl ? "hostDlg.refresh" : "hostDlg.observe")}
                   </button>
                   <button
                     className="ghost-btn"
-                    disabled={busy}
+                    disabled={busy || !connected}
                     onClick={() =>
                       void dispatch({ type: "RetryHostCatalog", projectId })
                     }
@@ -542,7 +562,7 @@ export function RemoteConnectDialog() {
             <>
               <button
                 className="ghost-btn"
-                disabled={busy || !connection || !project}
+                disabled={busy || !connection || !project || !canControl}
                 onClick={() =>
                   void dispatch({ type: "DisconnectHost", projectId })
                 }

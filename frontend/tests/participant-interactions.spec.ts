@@ -315,6 +315,27 @@ test("lease change during a captured bind snapshot uses one trailing refresh", a
   ).toBe(false);
 });
 
+test("automatic handoff buffers the first live tool until the new lease is acknowledged", async () => {
+  const requested = { ...call("plugin", {}), invocation_id: "first-after-handoff" };
+  const rebind = deferred<ClientBinding>();
+  let binds = 0;
+  const h = harness(requested, "participant", (method, params) => {
+    expect(params.lease_id).toBe("new-executor-lease");
+    if (method === "client_tools.arguments")
+      return { invocation_id: requested.invocation_id, arguments: { certified: true } };
+    expect(method).toBe("client_tools.result");
+    return { ...requested, status: "completed" };
+  }, () => ++binds === 1 ? { ...h.binding, calls: [], pending: [] } : rebind.promise);
+  await h.controller.bind("root", h.binding);
+  h.controller.leaseChanged(true);
+  h.controller.receive("client_tool.requested", requested);
+  expect(h.external).toHaveLength(0);
+  rebind.resolve({ ...h.binding, role: "executor", lease_id: "new-executor-lease" });
+  await expect.poll(() => h.external).toEqual([{ certified: true }]);
+  h.controller.receive("client_tool.requested", requested);
+  await expect.poll(() => h.commands.filter(({ method }) => method === "client_tools.result")).toHaveLength(1);
+});
+
 test("obsolete bind failure cannot release a newer bind's event buffer", async () => {
   const obsolete = deferred<ClientBinding>();
   const fresh = deferred<ClientBinding>();

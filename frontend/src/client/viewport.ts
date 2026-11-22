@@ -57,7 +57,7 @@ const FOCUSABLE =
 export function trapFocus(root: HTMLElement | null, event: KeyboardEvent) {
   if (!root || event.key !== "Tab") return false;
   const items = [...root.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(
-    (el) => el.offsetParent !== null || el === document.activeElement,
+    (el) => el.tabIndex >= 0 && el.offsetParent !== null && !el.matches(":disabled"),
   );
   if (!items.length) {
     event.preventDefault();

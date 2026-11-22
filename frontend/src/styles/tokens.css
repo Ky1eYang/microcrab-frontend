@@ -13,11 +13,11 @@
   --border: #363636;
   --border-strong: #4a4a4a;
   /* Boundary of controls whose outline identifies them (WCAG 1.4.11 ≥3:1). */
-  --control-border: #7a7a7a;
+  --control-border: #828282;
   /* text and ink */
   --text: #ececec;
   --text-2: #a3a3a3;
-  --text-3: #767676;
+  --text-3: #929292;
   --ink: #ececec;
   --ink-contrast: #1f1f1f;
   /* Restrained source syntax only; never interface/status chrome. */
@@ -70,10 +70,10 @@
   --border: #e5e5e5;
   --border-strong: #d0d0d0;
   /* Boundary of controls whose outline identifies them (WCAG 1.4.11 ≥3:1). */
-  --control-border: #8a8a8a;
+  --control-border: #858585;
   --text: #171717;
   --text-2: #5f5f5f;
-  --text-3: #9a9a9a;
+  --text-3: #656565;
   --ink: #171717;
   --ink-contrast: #ffffff;
   /* Document structure stays neutral; values carry restrained type cues.
@@ -227,6 +227,14 @@ button:disabled {
 :focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
+}
+
+@media (forced-colors: active) {
+  :root,
+  [data-theme] {
+    --control-border: ButtonText;
+    --focus: Highlight;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

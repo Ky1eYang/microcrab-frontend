@@ -1,35 +1,158 @@
 import { LIMITS } from "./types";
-/** Bounded incremental POST response reader; returns on the exact RPC response,
- * cancelling the stream even if the server keeps the connection open. */
+
+export interface SseEvent {
+  type: "sse-event";
+  event: string;
+  data: string;
+  id?: string;
+}
+
+function isSse(response: Response): boolean {
+  return (
+    response.headers
+      .get("content-type")
+      ?.split(";", 1)[0]
+      ?.trim()
+      .toLowerCase() === "text/event-stream"
+  );
+}
+
+async function* readBody(response: Response, signal: AbortSignal) {
+  const reader = response.body?.getReader();
+  if (!reader) return;
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  let total = 0;
+  const cancel = () => void reader.cancel().catch(() => {});
+  signal.addEventListener("abort", cancel, { once: true });
+  try {
+    for (;;) {
+      if (signal.aborted) throw Error("HTTP response cancelled");
+      const part = await reader.read();
+      if (signal.aborted) throw Error("HTTP response cancelled");
+      total += part.value?.byteLength ?? 0;
+      if (total > LIMITS.networkBytes)
+        throw Error("HTTP response exceeds 2 MiB");
+      const text = decoder.decode(part.value, { stream: !part.done });
+      if (text) yield text;
+      if (part.done) return;
+    }
+  } finally {
+    signal.removeEventListener("abort", cancel);
+    cancel();
+    reader.releaseLock();
+  }
+}
+
+/** Single-pass SSE line parser (CR, LF and CRLF, including split delimiters).
+ * Only a blank line dispatches an event. EOF never publishes partial data. */
+async function* readSse(
+  response: Response,
+  signal: AbortSignal,
+  eventLimit: number,
+) {
+  const encoder = new TextEncoder();
+  let partial = "",
+    skipLF = false,
+    count = 0,
+    dataUnits = 0;
+  let event = "",
+    id: string | undefined;
+  let data: string[] = [];
+  for await (const chunk of readBody(response, signal)) {
+    let start = 0;
+    for (let i = 0; i < chunk.length; i++) {
+      const c = chunk.charCodeAt(i);
+      if (skipLF) {
+        skipLF = false;
+        if (c === 10) {
+          start = i + 1;
+          continue;
+        }
+      }
+      if (c !== 10 && c !== 13) continue;
+      const line = partial + chunk.slice(start, i);
+      partial = "";
+      start = i + 1;
+      skipLF = c === 13;
+      if (line.length > eventLimit)
+        throw Error("HTTP SSE line exceeds byte quota");
+      if (line === "") {
+        if (data.length) {
+          if (++count > 4096) throw Error("HTTP SSE event limit exceeded");
+          const text = data.join("\n");
+          if (
+            encoder.encode(text).length +
+              encoder.encode(event).length +
+              encoder.encode(id ?? "").length >
+            eventLimit
+          )
+            throw Error("HTTP SSE frame exceeds byte quota");
+          yield {
+            type: "sse-event",
+            event: event || "message",
+            data: text,
+            ...(id !== undefined ? { id } : {}),
+          } satisfies SseEvent;
+        }
+        data = [];
+        dataUnits = 0;
+        event = "";
+      } else if (!line.startsWith(":")) {
+        const colon = line.indexOf(":");
+        const field = colon < 0 ? line : line.slice(0, colon);
+        const value = colon < 0 ? "" : line.slice(colon + 1).replace(/^ /, "");
+        if (field === "data") {
+          dataUnits += value.length + Number(data.length > 0);
+          if (dataUnits > eventLimit || data.length >= eventLimit)
+            throw Error("HTTP SSE frame exceeds byte quota");
+          data.push(value);
+        } else if (field === "event") event = value;
+        else if (field === "id" && !value.includes("\0")) id = value;
+      }
+    }
+    partial += chunk.slice(start);
+    if (partial.length > eventLimit)
+      throw Error("HTTP SSE line exceeds byte quota");
+  }
+}
+
+/** Stream mode carries application events, not necessarily JSON-RPC. */
+export async function deliverHttpSse(
+  response: Response,
+  signal: AbortSignal,
+  deliver: (event: SseEvent) => Promise<void>,
+): Promise<void> {
+  if (!response.ok || !isSse(response) || !response.body) {
+    await response.body?.cancel();
+    if (response.ok)
+      throw Error("HTTP SSE requires a text/event-stream response body");
+    return;
+  }
+  for await (const event of readSse(response, signal, 64 * 1024)) {
+    if (signal.aborted) throw Error("HTTP response cancelled");
+    await deliver(event);
+  }
+}
+
+/** Legacy buffered HTTP and exact JSON-RPC response matching (no frame callbacks). */
 export async function readHttpResponse(
   response: Response,
   matchId: string | number | undefined,
   signal: AbortSignal,
 ): Promise<string> {
-  const sse =
-    response.headers
-      .get("content-type")
-      ?.split(";", 1)[0]
-      ?.trim()
-      .toLowerCase() === "text/event-stream";
-  if (sse && matchId === undefined)
+  if (!isSse(response)) {
+    let body = "";
+    for await (const chunk of readBody(response, signal)) body += chunk;
+    return body;
+  }
+  if (matchId === undefined) {
+    await response.body?.cancel();
     throw Error("SSE response requires an exact response identity");
-  const reader = response.body?.getReader();
-  if (!reader) return "";
-  const decoder = new TextDecoder("utf-8", { fatal: true });
-  let total = 0,
-    buffer = "",
-    events = 0,
-    skipLF = false;
-  let data: string[] = [];
-  const frame = (): string | undefined => {
-    if (!data.length) return;
-    if (++events > 4096) throw Error("HTTP SSE event limit exceeded");
-    const text = data.join("\n");
-    data = [];
+  }
+  for await (const { data } of readSse(response, signal, LIMITS.networkBytes)) {
     let value: unknown;
     try {
-      value = JSON.parse(text);
+      value = JSON.parse(data);
     } catch {
       throw Error("Invalid JSON in HTTP SSE response");
     }
@@ -41,59 +164,8 @@ export async function readHttpResponse(
     ) {
       if (value.id !== matchId)
         throw Error("HTTP SSE response identity does not match the request");
-      return text;
+      return data;
     }
-  };
-  const take = (): string | undefined => {
-    for (;;) {
-      const delimiter = /[\r\n]/.exec(buffer);
-      if (!delimiter) return;
-      const index = delimiter.index;
-      const line = buffer.slice(0, index);
-      const cr = buffer[index] === "\r";
-      buffer = buffer.slice(index + 1);
-      if (cr) {
-        if (buffer.startsWith("\n")) buffer = buffer.slice(1);
-        else if (!buffer) skipLF = true;
-      }
-      if (!line) {
-        const result = frame();
-        if (result !== undefined) return result;
-      } else if (line === "data" || line.startsWith("data:"))
-        data.push(line === "data" ? "" : line.slice(5).replace(/^ /, ""));
-    }
-  };
-  const cancel = () => {
-    void reader.cancel().catch(() => {});
-  };
-  signal.addEventListener("abort", cancel, { once: true });
-  try {
-    for (;;) {
-      if (signal.aborted) throw Error("HTTP response cancelled");
-      const part = await reader.read();
-      if (signal.aborted) throw Error("HTTP response cancelled");
-      const chunk = decoder.decode(part.value, { stream: !part.done });
-      if (!part.done) {
-        total += part.value.byteLength;
-        if (total > LIMITS.networkBytes)
-          throw Error("HTTP response exceeds 2 MiB");
-      }
-      if (sse && skipLF && chunk.length) {
-        buffer += chunk.startsWith("\n") ? chunk.slice(1) : chunk;
-        skipLF = false;
-      } else buffer += chunk;
-      if (sse) {
-        const result = take();
-        if (result !== undefined) return result;
-      }
-      if (part.done) {
-        if (!sse) return buffer;
-        throw Error("HTTP SSE stream ended without the matching response");
-      }
-    }
-  } finally {
-    signal.removeEventListener("abort", cancel);
-    await reader.cancel().catch(() => {});
-    reader.releaseLock();
   }
+  throw Error("HTTP SSE stream ended without the matching response");
 }

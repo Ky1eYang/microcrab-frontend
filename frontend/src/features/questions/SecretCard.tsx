@@ -1,45 +1,185 @@
-import { useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import type { PendingQuestion } from "../../client/types";
+import { activeLocale, subscribeLocale, t } from "../../i18n";
 import { useAppSelector, useAppStore } from "../../state";
-import { t } from "../../i18n";
+import { Icon } from "../shared";
+import "./secret-card.css";
+
+const visibilityLabels = {
+  en: {
+    reveal: (label: string) => `Reveal ${label}`,
+    remask: (label: string) => `Hide ${label}`,
+  },
+  "zh-CN": {
+    reveal: (label: string) => `显示：${label}`,
+    remask: (label: string) => `隐藏：${label}`,
+  },
+};
+
+type SecretField = NonNullable<PendingQuestion["secret"]>["secrets"][number];
+
+function SecretInput({
+  field,
+  inputs,
+  disabled,
+  scope,
+  locale,
+}: {
+  field: SecretField;
+  inputs: Map<string, HTMLInputElement>;
+  disabled: boolean;
+  scope: string;
+  locale: ReturnType<typeof activeLocale>;
+}) {
+  const { key, label, description } = field;
+  const id = useId();
+  const [revealedScope, setRevealedScope] = useState<string | null>(null);
+  const revealed = !disabled && revealedScope === scope;
+  useLayoutEffect(() => {
+    if (revealedScope !== null && (disabled || revealedScope !== scope))
+      setRevealedScope(null);
+  }, [disabled, revealedScope, scope]);
+  const selection = useRef<
+    [number, number, HTMLInputElement["selectionDirection"]] | null
+  >(null);
+  const inputRef = useCallback(
+    (input: HTMLInputElement | null) => {
+      if (input) inputs.set(key, input);
+      else {
+        const previous = inputs.get(key);
+        if (previous) {
+          previous.type = "password";
+          previous.value = "";
+        }
+        inputs.delete(key);
+      }
+    },
+    [inputs, key],
+  );
+  useLayoutEffect(() => {
+    const saved = selection.current;
+    selection.current = null;
+    if (saved && !disabled)
+      inputs
+        .get(key)
+        ?.setSelectionRange(saved[0], saved[1], saved[2] ?? undefined);
+  }, [disabled, inputs, key, revealed]);
+  const visibilityLabel =
+    visibilityLabels[locale][revealed ? "remask" : "reveal"](label);
+  return (
+    <div className="secret-field">
+      <label htmlFor={id}>{label}</label>
+      {description && (
+        <span id={`${id}-hint`} className="settings-input-hint">
+          {description}
+        </span>
+      )}
+      <div className="secret-field-controls">
+        <input
+          id={id}
+          type={revealed ? "text" : "password"}
+          name={key}
+          aria-describedby={description ? `${id}-hint` : undefined}
+          autoComplete="new-password"
+          spellCheck={false}
+          autoCapitalize="off"
+          autoCorrect="off"
+          disabled={disabled}
+          maxLength={8192}
+          ref={inputRef}
+        />
+        <button
+          className="ghost-btn secret-visibility"
+          type="button"
+          disabled={disabled}
+          aria-controls={id}
+          aria-label={visibilityLabel}
+          title={visibilityLabel}
+          onPointerDown={(event) => {
+            // Pointer toggles don't interrupt editing; keyboard users retain button focus.
+            if (
+              event.button === 0 &&
+              document.activeElement === inputs.get(key)
+            )
+              event.preventDefault();
+          }}
+          onClick={() => {
+            const input = inputs.get(key);
+            if (
+              input &&
+              input.selectionStart != null &&
+              input.selectionEnd != null
+            ) {
+              selection.current = [
+                input.selectionStart,
+                input.selectionEnd,
+                input.selectionDirection,
+              ];
+            }
+            setRevealedScope(revealed ? null : scope);
+          }}
+        >
+          <Icon
+            name={revealed ? "eye-off" : "eye"}
+            size={16}
+            aria-hidden="true"
+            focusable="false"
+          />
+        </button>
+      </div>
+    </div>
+  );
+}
 
 /** Plaintext lives only in native uncontrolled inputs and the one-shot sideband
  * request. No action payload, AppState, browser persistence or settled card owns it. */
 export function SecretCard({ value }: { value: PendingQuestion }) {
   const store = useAppStore();
-  const scope = useAppSelector((state) => JSON.stringify([
-    state.authSession?.principal?.owner, state.apiBase, state.sessionId,
-    state.transcript.historyView?.lineage, state.transcript.historyResetRevision,
-  ]));
+  const viewScope = useAppSelector((state) =>
+    JSON.stringify([
+      state.authSession?.principal?.owner,
+      state.apiBase,
+      state.sessionId,
+      state.transcript.historyView?.lineage,
+      state.transcript.historyResetRevision,
+    ]),
+  );
+  const [replyRevision, setReplyRevision] = useState(0);
+  const scope = JSON.stringify([
+    viewScope,
+    value.id,
+    value.parentSessionId,
+    value.sessionId,
+    value.callId,
+    value.epoch,
+    replyRevision,
+  ]);
   const inputs = useRef(new Map<string, HTMLInputElement>());
-  const inputCallbacks = useRef(new Map<string, (input: HTMLInputElement | null) => void>());
-  const inputRef = (key: string) => {
-    let callback = inputCallbacks.current.get(key);
-    if (!callback) {
-      callback = (input) => {
-        if (input) inputs.current.set(key, input);
-        else {
-          const previous = inputs.current.get(key);
-          if (previous) previous.value = "";
-          inputs.current.delete(key);
-        }
-      };
-      inputCallbacks.current.set(key, callback);
-    }
-    return callback;
-  };
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const locale = useSyncExternalStore(
+    subscribeLocale,
+    activeLocale,
+    activeLocale,
+  );
   const request = value.secret;
-  const clear = () => {
+  const disabled = value.disabled || value.awaitingConfirmation || submitting;
+  const clear = useCallback(() => {
     for (const input of inputs.current.values()) input.value = "";
-  };
-  useEffect(() => { clear(); return () => clear(); }, [value.id, scope]);
-  useEffect(() => {
-    if (value.disabled || value.awaitingConfirmation) clear();
-  }, [value.disabled, value.awaitingConfirmation]);
+  }, []);
+  // Clear live DOM values before a changed scope can paint.
+  useLayoutEffect(clear, [clear, scope]);
+  useLayoutEffect(() => {
+    if (disabled) clear();
+  }, [clear, disabled]);
   if (!request) return null;
-  const disabled = value.disabled || submitting;
   const reply = async (decline: boolean) => {
     if (disabled) return;
     setError("");
@@ -56,6 +196,8 @@ export function SecretCard({ value }: { value: PendingQuestion }) {
       }
     }
     clear();
+    // Remask even if a failed operation starts and finishes in the same render batch.
+    setReplyRevision((revision) => revision + 1);
     setSubmitting(true);
     try {
       if (decline) await store.declineSecret(value.id);
@@ -69,32 +211,68 @@ export function SecretCard({ value }: { value: PendingQuestion }) {
     }
   };
   return (
-    <article className="flow-card" data-testid="secret-request" data-invocation-id={value.id}>
-      <h3>{t("secret.title")}</h3>
+    <article
+      className="flow-card secret-card"
+      data-testid="secret-request"
+      data-invocation-id={value.id}
+    >
+      <h3 className="secret-card-title">
+        <Icon name="key" size={16} aria-hidden="true" focusable="false" />
+        {t("secret.title")}
+      </h3>
       <p>{request.reason}</p>
-      <p className="inline-notice">{t("secret.private")}</p>
+      <p className="secret-card-private">{t("secret.private")}</p>
       {value.observer && <p role="status">{t("secret.observer")}</p>}
-      {value.awaitingConfirmation && <p role="status">{t("secret.awaiting")}</p>}
-      <form autoComplete="off" onSubmit={(event) => { event.preventDefault(); void reply(false); }}>
-        {request.secrets.map(({ key, label, description }) => (
-          <label className="settings-field" key={key}>
-            <span>{label}</span>
-            {description && <span className="settings-input-hint">{description}</span>}
-            <input type="password" name={key} aria-label={label}
-              autoComplete="new-password" spellCheck={false} autoCapitalize="off"
-              disabled={disabled} maxLength={8192}
-              ref={inputRef(key)} />
-          </label>
+      {value.awaitingConfirmation && (
+        <p role="status">{t("secret.awaiting")}</p>
+      )}
+      <form
+        autoComplete="off"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void reply(false);
+        }}
+      >
+        {request.secrets.map((field) => (
+          <SecretInput
+            key={field.key}
+            field={field}
+            inputs={inputs.current}
+            disabled={disabled}
+            scope={scope}
+            locale={locale}
+          />
         ))}
-        {error && <p role="alert" className="inline-notice">{error}</p>}
+        {error && (
+          <p role="alert" className="inline-notice">
+            {error}
+          </p>
+        )}
         <div className="settings-actions-row">
-          <button className="ghost-btn" type="button" disabled={disabled}
-            onClick={() => void reply(true)}>{t("secret.decline")}</button>
-          <button className="primary-btn" type="submit" disabled={disabled}>{t("secret.submit")}</button>
-          {value.awaitingConfirmation && <button type="button" className="ghost-btn"
-            onClick={() => void store.observeSecret(value.id).catch(() => setError(t("secret.unconfirmed")))}>
-            {t("secret.observe")}
-          </button>}
+          <button
+            className="ghost-btn"
+            type="button"
+            disabled={disabled}
+            onClick={() => void reply(true)}
+          >
+            {t("secret.decline")}
+          </button>
+          <button className="primary-btn" type="submit" disabled={disabled}>
+            {t("secret.submit")}
+          </button>
+          {value.awaitingConfirmation && (
+            <button
+              type="button"
+              className="ghost-btn"
+              onClick={() =>
+                void store
+                  .observeSecret(value.id)
+                  .catch(() => setError(t("secret.unconfirmed")))
+              }
+            >
+              {t("secret.observe")}
+            </button>
+          )}
         </div>
       </form>
     </article>

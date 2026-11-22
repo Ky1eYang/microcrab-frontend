@@ -40,9 +40,23 @@ test("user first request and tool continuation have separate deltas; pending usa
   await page.route("**/api/v1/sessions/s1/audit/requests", (route) => {
     const selector = route.request().postDataJSON();
     if (selector.internal_assistants)
-      return route.fulfill({ json: { status: "missing", attempts: [] } });
+      return route.fulfill({
+        json: {
+          status: "available",
+          attempts: [],
+          timeline: [1, 2].map((round) => ({
+            epoch: 2,
+            turn: 6,
+            round,
+            sequence: round,
+            call_id: `provider-${round}`,
+            request_hash: round === 1 ? "initial" : "continuation",
+            completion: answered ? "succeeded" : "pending",
+          })),
+        },
+      });
     selectors.push(selector);
-    const continuation = !!selector.tool_call_id;
+    const continuation = selector.call_id === "provider-2";
     return route.fulfill({
       json: {
         status: "available",
@@ -68,14 +82,19 @@ test("user first request and tool continuation have separate deltas; pending usa
   });
   await page.goto("/#session/s1");
   await page.getByRole("tab", { name: "轨迹", exact: true }).click();
-  await page
-    .locator('[data-testid="trajectory-entry"][data-kind="user"]')
-    .click();
+  const requests = page.locator(
+    '[data-testid="trajectory-entry"][data-kind="model-request"]',
+  );
+  await expect(requests).toHaveCount(2);
+  await expect(
+    requests.first().getByRole("img", { name: "已发送模型请求" }),
+  ).toBeVisible();
+  await requests.first().click();
   await page.getByRole("tab", { name: "请求增量", exact: true }).click();
   await expect(page.getByTestId("historical-request-diff")).toContainText(
     "ONLY_USER_DELTA",
   );
-  expect(selectors.at(-1)).toEqual({ epoch: 2, turn: 6, round: 1 });
+  expect(selectors.at(-1)).toEqual({ epoch: 2, call_id: "provider-1" });
   await expect(
     page.getByTestId("request-token-delta").locator("dd"),
   ).toHaveText(["-", "-", "-", "-", "-"]);
@@ -104,14 +123,24 @@ test("user first request and tool continuation have separate deltas; pending usa
   answered = true;
   backend.event("audit.available", { epoch: 2, turn: 6, round: 1 });
   await expect(page.locator('[data-token="input_tokens"]')).toHaveText("+12");
-  await page
-    .locator('[data-testid="trajectory-entry"][data-kind="tool"]')
-    .click();
+  for (const kind of ["user", "tool", "model-generation"]) {
+    const row = page.locator(
+      `[data-testid="trajectory-entry"][data-kind="${kind}"]`,
+    );
+    await row.click();
+    await expect(
+      page.getByRole("tab", { name: "请求增量", exact: true }),
+    ).toHaveCount(0);
+    await expect(row.getByRole("img", { name: "已发送模型请求" })).toHaveCount(
+      0,
+    );
+  }
+  await requests.last().click();
   await page.getByRole("tab", { name: "请求增量", exact: true }).click();
   await expect(page.getByTestId("historical-request-diff")).toContainText(
     "ONLY_TOOL_RESULT_DELTA",
   );
-  expect(selectors.at(-1)).toEqual({ epoch: 2, turn: 6, tool_call_id: "c" });
+  expect(selectors.at(-1)).toEqual({ epoch: 2, call_id: "provider-2" });
   await expect(page.getByLabel("请求尝试")).toHaveCount(0);
 });
 
@@ -128,6 +157,17 @@ test("failed retries select the final result while helpers retain exact assistan
       return route.fulfill({
         json: {
           status: "available",
+          timeline: [
+            {
+              epoch: 2,
+              turn: 6,
+              round: 1,
+              sequence: 2,
+              call_id: "failed-provider",
+              request_hash: "failed_2",
+              completion: "failed",
+            },
+          ],
           attempts: [
             {
               request_hash: "helper",
@@ -179,7 +219,7 @@ test("failed retries select the final result while helpers retain exact assistan
   await page.goto("/#session/s1");
   await page.getByRole("tab", { name: "轨迹", exact: true }).click();
   await page
-    .locator('[data-testid="trajectory-entry"][data-kind="user"]')
+    .locator('[data-testid="trajectory-entry"][data-kind="model-request"]')
     .click();
   await page.getByRole("tab", { name: "请求增量", exact: true }).click();
   await expect(page.getByTestId("historical-request-diff")).toContainText(
@@ -204,9 +244,24 @@ test("failed retries select the final result while helpers retain exact assistan
   });
   await page.getByRole("tab", { name: "请求信息", exact: true }).click();
   await page.getByText("模型返回", { exact: true }).click();
-  await expect(page.getByTestId("request-audit-metadata")).toContainText(
-    "SESSION_TITLE",
-  );
+  const metadata = page.getByTestId("request-audit-metadata");
+  await expect(metadata).toContainText("SESSION_TITLE");
+  const disclosure = metadata
+    .locator("details")
+    .filter({ hasText: "模型返回" });
+  await expect(disclosure).toHaveAttribute("open", "");
+  await disclosure.evaluate((node) => {
+    (window as any).__auditDisclosure = node;
+  });
+  const beforeRefresh = selectors.length;
+  backend.event("audit.available", { epoch: 2 });
+  await expect.poll(() => selectors.length).toBeGreaterThan(beforeRefresh);
+  await expect(disclosure).toHaveAttribute("open", "");
+  expect(
+    await disclosure.evaluate(
+      (node) => node === (window as any).__auditDisclosure,
+    ),
+  ).toBe(true);
 });
 
 test("internal request without a terminal result is never labelled completed", async ({

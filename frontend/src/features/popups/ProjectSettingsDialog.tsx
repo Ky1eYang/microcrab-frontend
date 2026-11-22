@@ -1,25 +1,47 @@
 import { ExternalSpeakersSettings } from "./ExternalSpeakersSettings";
-import { OwnerSettings } from "./OwnerSettings";
+import { OwnerSettings, type ProjectSettingsSection } from "./OwnerSettings";
 import { ReferencesSettings } from "./ReferencesSettings";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { ReactNode } from "react";
-import { useApp } from "../../state";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
+import { useApp, useAppStore } from "../../state";
 import { Icon } from "../shared";
-import { trapFocus } from "../../client/viewport";
+import { trapFocus, useNarrowViewport } from "../../client/viewport";
 import { hostLocator, hostPreferenceScope } from "../../client/host-locators";
 import { hostReason, hostStatusLabel } from "./RemoteConnectDialog";
 import { hostReadiness } from "../../state/host-readiness";
 import { t } from "../../i18n";
 import type { AgentInfo, NativeProject } from "../../client/types";
+import "../../styles/project-settings.css";
 
-type ProjectTab = "host" | "references" | "permissions" | "agents";
+type ProjectTab = ProjectSettingsSection | "host" | "speakers" | "references";
 
-const TABS: { id: ProjectTab; labelKey: string }[] = [
-  { id: "host", labelKey: "project.settings.tab.host" },
-  { id: "references", labelKey: "project.settings.tab.references" },
-  { id: "permissions", labelKey: "project.settings.tab.permissions" },
-  { id: "agents", labelKey: "project.settings.tab.agents" },
+const TABS: readonly ProjectTab[] = [
+  "host",
+  "agents",
+  "models",
+  "prompts",
+  "speakers",
+  "permissions",
+  "references",
 ];
+const TAB_ICONS: Record<ProjectTab, string> = {
+  host: "database",
+  agents: "bot",
+  models: "model",
+  prompts: "file",
+  speakers: "send",
+  permissions: "check",
+  references: "folder",
+};
+
+function ownerSection(tab: ProjectTab): ProjectSettingsSection | null {
+  return tab === "agents" ||
+    tab === "models" ||
+    tab === "prompts" ||
+    tab === "permissions"
+    ? tab
+    : null;
+}
 
 function Row({
   label,
@@ -31,13 +53,9 @@ function Row({
   mono?: boolean;
 }) {
   return (
-    <div className="settings-row">
-      <div className="settings-row-info">
-        <div className="settings-row-label">{label}</div>
-        <div className={`settings-row-sub${mono ? " monospace-text" : ""}`}>
-          {children}
-        </div>
-      </div>
+    <div className="project-host-fact">
+      <dt>{label}</dt>
+      <dd className={mono ? "monospace-text" : undefined}>{children}</dd>
     </div>
   );
 }
@@ -128,7 +146,6 @@ function HostPane({
               className="ghost-btn"
               data-testid="project-host-reconnect"
               onClick={() => {
-                dispatch({ type: "DismissPopup" });
                 dispatch({ type: "OpenRemoteConnectDialog", projectId });
               }}
             >
@@ -136,74 +153,71 @@ function HostPane({
             </button>
           </>,
         )}
-      {catalogError &&
-        tip(
-          "danger",
-          <span style={{ color: "var(--danger)" }}>{catalogError}</span>,
-        )}
-      <Row label={t("project.settings.host.name")}>{project?.name ?? "—"}</Row>
-      <Row label={t("project.settings.host.id")} mono>
-        <span className="project-settings-inline">
-          <span>{projectId}</span>
-          <button
-            type="button"
-            className="ghost-btn"
-            onClick={() => void copy(projectId)}
-          >
-            {t("project.settings.host.copy")}
-          </button>
-        </span>
-      </Row>
-      <Row label={t("project.settings.host.root")} mono>
-        {project?.root || "—"}
-      </Row>
-      <Row label={t("project.settings.host.status")}>
-        <span data-host-state={statusKey}>{statusLabel}</span>
-      </Row>
-      {reason && <Row label={t("project.settings.host.reason")}>{reason}</Row>}
-      <Row label={t("project.settings.host.workspace")} mono>
-        {(matched && connection?.workspace) || "—"}
-      </Row>
-      <Row label={t("project.settings.host.endpoint")} mono>
-        <span className="project-settings-inline">
-          <span>{endpoint || "—"}</span>
-          {!!endpoint && (
+      {catalogError && tip("danger", <span>{catalogError}</span>)}
+      <dl className="project-host-facts">
+        <Row label={t("project.settings.host.name")}>{project?.name ?? "—"}</Row>
+        <Row label={t("project.settings.host.id")} mono>
+          <span className="project-settings-inline">
+            <span>{projectId}</span>
             <button
               type="button"
               className="ghost-btn"
-              onClick={() => void copy(endpoint)}
+              onClick={() => void copy(projectId)}
             >
               {t("project.settings.host.copy")}
             </button>
-          )}
-        </span>
-      </Row>
-      {project?.host_id && (
-        <Row label={t("project.settings.host.hostId")} mono>
-          {project.host_id}
+          </span>
         </Row>
-      )}
-      {project?.workspace_id && (
-        <Row label={t("project.settings.host.workspaceId")} mono>
-          {project.workspace_id}
+        <Row label={t("project.settings.host.root")} mono>
+          {project?.root || "—"}
         </Row>
-      )}
-      <Row label={t("project.settings.host.catalog")}>
-        {catalogError
-          ? t("project.settings.host.catalogError")
-          : catalogReady
-            ? t("project.settings.host.catalogReady", {
-                count: state.agents.length,
-              })
-            : t("project.settings.host.catalogPending")}
-      </Row>
+        <Row label={t("project.settings.host.status")}>
+          <span data-host-state={statusKey}>{statusLabel}</span>
+        </Row>
+        {reason && <Row label={t("project.settings.host.reason")}>{reason}</Row>}
+        <Row label={t("project.settings.host.workspace")} mono>
+          {(matched && connection?.workspace) || "—"}
+        </Row>
+        <Row label={t("project.settings.host.endpoint")} mono>
+          <span className="project-settings-inline">
+            <span>{endpoint || "—"}</span>
+            {!!endpoint && (
+              <button
+                type="button"
+                className="ghost-btn"
+                onClick={() => void copy(endpoint)}
+              >
+                {t("project.settings.host.copy")}
+              </button>
+            )}
+          </span>
+        </Row>
+        {project?.host_id && (
+          <Row label={t("project.settings.host.hostId")} mono>
+            {project.host_id}
+          </Row>
+        )}
+        {project?.workspace_id && (
+          <Row label={t("project.settings.host.workspaceId")} mono>
+            {project.workspace_id}
+          </Row>
+        )}
+        <Row label={t("project.settings.host.catalog")}>
+          {catalogError
+            ? t("project.settings.host.catalogError")
+            : catalogReady
+              ? t("project.settings.host.catalogReady", {
+                  count: state.agents.length,
+                })
+              : t("project.settings.host.catalogPending")}
+        </Row>
+      </dl>
       <div className="settings-actions-row">
         <button
           type="button"
           className="ghost-btn"
           data-testid="project-host-reconnect"
           onClick={() => {
-            dispatch({ type: "DismissPopup" });
             dispatch({ type: "OpenRemoteConnectDialog", projectId });
           }}
         >
@@ -230,32 +244,24 @@ function HostPane({
   );
 }
 
-function ReferencesPane({ projectId }: { projectId: string }) {
-  return <ReferencesSettings projectId={projectId} />;
-}
-
-function PermissionsPane({ projectId }: { projectId: string }) {
+function SessionPermissionsLink({ projectId }: { projectId: string }) {
   const { state, dispatch } = useApp();
   const current = state.sessions.find((item) => item.id === state.sessionId);
   const matches = !!current && current.projectID === projectId;
   return (
-    <div className="providers-stack">
-      <div className="settings-section-head">
-        <h4 className="settings-section-title">
-          {t("project.settings.perm.projectDefault")}
-        </h4>
-        <button
-          type="button"
-          className="ghost-btn"
-          disabled={!matches}
-          title={!matches ? t("sessionPermissions.projectMismatch") : undefined}
-          onClick={() => dispatch({ type: "OpenSessionPermissionsDialog" })}
-        >
-          {t("sessionPermissions.openSession")}
-        </button>
-      </div>
-      <OwnerSettings scope={{ kind: "project", id: projectId }} />
-      <ExternalSpeakersSettings scope={{ kind: "project", id: projectId }} />
+    <div className="settings-section-head project-session-permissions">
+      <h4 className="settings-section-title">
+        {t("project.settings.perm.projectDefault")}
+      </h4>
+      <button
+        type="button"
+        className="ghost-btn"
+        disabled={!matches}
+        title={!matches ? t("sessionPermissions.projectMismatch") : undefined}
+        onClick={() => dispatch({ type: "OpenSessionPermissionsDialog" })}
+      >
+        {t("sessionPermissions.openSession")}
+      </button>
     </div>
   );
 }
@@ -310,9 +316,7 @@ function AgentsPane({ projectId }: { projectId: string }) {
             agent.modes?.filter((mode) => mode.role !== "sub_agent") ?? [];
           const current = state.draftAgent === agent.name;
           const component =
-            typeof agent.component === "string"
-              ? agent.component.split(/[\\/]/).pop()
-              : "—";
+            typeof agent.component === "string" ? agent.component : "—";
           return (
             <div className="project-agent-row" key={agent.name}>
               <div className="project-agent-main">
@@ -323,6 +327,24 @@ function AgentsPane({ projectId }: { projectId: string }) {
                 <span className="project-agent-modes">
                   {t("project.settings.agents.modes")}: {modes.length}
                 </span>
+                {!!agent.modes?.length && (
+                  <details className="project-agent-mode-details">
+                    <summary>
+                      {t("project.settings.agents.modeDetails")}
+                    </summary>
+                    <ul>
+                      {agent.modes.map((mode) => (
+                        <li key={mode.name}>
+                          {mode.name}
+                          {(mode.role === "main_agent" ||
+                            mode.role === "sub_agent" ||
+                            mode.role === "both") &&
+                            ` · ${t(`project.settings.agents.role.${mode.role}`)}`}
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
                 {current && (
                   <span className="project-agent-current">
                     {t("project.settings.agents.current")}
@@ -340,7 +362,7 @@ function AgentsPane({ projectId }: { projectId: string }) {
                   dispatch({ type: "SetAgent", value: agent.name })
                 }
               >
-                {t("project.settings.agents.setDefault")}
+                {t("project.settings.agents.useInDraft")}
               </button>
             </div>
           );
@@ -366,25 +388,77 @@ function AgentsPane({ projectId }: { projectId: string }) {
 }
 
 export function ProjectSettingsDialog() {
+  const { state } = useApp();
+  const store = useAppStore();
+  const api = store.api;
+  const projectId = String(state.popup.projectId ?? "");
+  const lifecycle = useRef({ api, generation: 0 });
+  if (lifecycle.current.api !== api)
+    lifecycle.current = { api, generation: lifecycle.current.generation + 1 };
+  const identity = JSON.stringify([
+    state.apiBase,
+    state.authSession?.principal?.owner,
+    state.authSession?.authenticated,
+    state.authRequired,
+    projectId,
+    lifecycle.current.generation,
+  ]);
+  return <ProjectSettingsDocument key={identity} projectId={projectId} />;
+}
+
+function ProjectSettingsDocument({ projectId }: { projectId: string }) {
   const { state, dispatch } = useApp();
-  const popup = state.popup;
-  const projectId = String(popup.projectId ?? "");
-  const tab = (popup.tab as ProjectTab) || "host";
+  const tab = TABS.find((candidate) => candidate === state.popup.tab) ?? "host";
+  const section = ownerSection(tab);
   const project = state.projects.find((item) => item.id === projectId);
   const dialog = useRef<HTMLDivElement>(null);
   const body = useRef<HTMLDivElement>(null);
+  const tabs = useRef<HTMLDivElement>(null);
+  const prefix = useId();
+  const narrow = useNarrowViewport();
+  const [visitedOwner, setVisitedOwner] = useState(false);
+  const [visitedReferences, setVisitedReferences] = useState(false);
   const title = project?.name
     ? t("project.settings.titleWithName", { name: project.name })
     : t("project.settings.title");
+  const dismiss = () => dispatch({ type: "DismissPopup" });
+  const activate = (value: ProjectTab) => {
+    if (value !== tab) void dispatch({ type: "SetProjectSettingsTab", value });
+  };
+  const tabButton = (candidate: ProjectTab) =>
+    tabs.current?.querySelector<HTMLButtonElement>(
+      `[data-project-tab="${candidate}"]`,
+    );
+  // Manual activation keeps keyboard browsing from opening a different document
+  // or triggering a Speaker leave confirmation before the user selects a tab.
+  const browseTabs = (event: ReactKeyboardEvent, index: number) => {
+    let next = index;
+    if (event.key === "Home") next = 0;
+    else if (event.key === "End") next = TABS.length - 1;
+    else if (event.key === (narrow ? "ArrowRight" : "ArrowDown")) next++;
+    else if (event.key === (narrow ? "ArrowLeft" : "ArrowUp")) next--;
+    else return;
+    event.preventDefault();
+    tabButton(TABS[(next + TABS.length) % TABS.length])?.focus();
+  };
   useLayoutEffect(() => {
     if (body.current) body.current.scrollTop = 0;
-  }, [tab]);
+    if (narrow)
+      tabButton(tab)?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [tab, narrow]);
+  useLayoutEffect(() => {
+    if (section) setVisitedOwner(true);
+    if (tab === "references") setVisitedReferences(true);
+  }, [tab, section]);
   useEffect(() => {
-    const opener =
-      document.activeElement instanceof HTMLElement
-        ? document.activeElement
-        : null;
+    const opener = document.activeElement;
+    tabs.current
+      ?.querySelector<HTMLButtonElement>('[aria-selected="true"]')
+      ?.focus();
     const onKey = (event: KeyboardEvent) => {
+      const confirmation = dialog.current?.querySelector<HTMLElement>(
+        '[role="alertdialog"]',
+      );
       if (
         event.key === "Escape" &&
         event.target instanceof Element &&
@@ -393,47 +467,26 @@ export function ProjectSettingsDialog() {
         return;
       if (event.key === "Tab") {
         event.stopPropagation();
-        trapFocus(dialog.current, event);
+        trapFocus(confirmation ?? dialog.current, event);
         return;
       }
       if (event.key !== "Escape" || event.defaultPrevented) return;
       event.preventDefault();
       event.stopPropagation();
-      dispatch({ type: "DismissPopup" });
+      if (confirmation)
+        confirmation.querySelector<HTMLButtonElement>("button")?.click();
+      else void dismiss();
     };
     window.addEventListener("keydown", onKey, true);
     return () => {
       window.removeEventListener("keydown", onKey, true);
-      if (opener && opener.isConnected) opener.focus();
+      if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const pane = useMemo(() => {
-    if (tab === "references") return <ReferencesPane projectId={projectId} />;
-    if (tab === "permissions")
-      return (
-        <PermissionsPane
-          projectId={projectId}
-          key={JSON.stringify([
-            projectId,
-            state.apiBase,
-            state.authSession,
-            state.sessionId,
-          ])}
-        />
-      );
-    if (tab === "agents") return <AgentsPane projectId={projectId} />;
-    return <HostPane project={project} projectId={projectId} />;
-  }, [
-    tab,
-    project,
-    projectId,
-    state.apiBase,
-    state.authSession,
-    state.sessionId,
-  ]);
+  const tabId = (item: ProjectTab) => `${prefix}-tab-${item}`;
+  const panelId = (item: ProjectTab) => `${prefix}-panel-${item}`;
   return (
-    <div className="overlay" onClick={() => dispatch({ type: "DismissPopup" })}>
+    <div className="overlay" onClick={dismiss}>
       <div
         className="settings-dialog project-settings-dialog"
         ref={dialog}
@@ -447,56 +500,36 @@ export function ProjectSettingsDialog() {
           <div className="settings-nav-title" title={project?.name}>
             {t("project.settings.title")}
           </div>
-          <div className="settings-nav-group">
-            {TABS.map((item) => (
+          <div
+            className="settings-nav-group"
+            ref={tabs}
+            role="tablist"
+            aria-label={t("project.settings.title")}
+            aria-orientation={narrow ? "horizontal" : "vertical"}
+          >
+            {TABS.map((item, index) => (
               <button
-                key={item.id}
+                key={item}
+                id={tabId(item)}
                 type="button"
                 className="settings-nav-item"
-                data-active={tab === item.id}
-                data-testid={`project-settings-tab-${item.id}`}
+                data-active={tab === item}
+                data-project-tab={item}
+                data-testid={`project-settings-tab-${item}`}
                 role="tab"
-                aria-selected={tab === item.id}
-                onClick={() =>
-                  dispatch({ type: "SetProjectSettingsTab", value: item.id })
-                }
+                tabIndex={tab === item ? 0 : -1}
+                aria-selected={tab === item}
+                aria-controls={panelId(item)}
+                onClick={() => activate(item)}
+                onKeyDown={(event) => browseTabs(event, index)}
               >
-                <svg
+                <Icon
+                  name={TAB_ICONS[item]}
+                  size={16}
                   className="settings-nav-icon"
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
                   aria-hidden="true"
-                >
-                  {item.id === "host" ? (
-                    <>
-                      <rect x="2" y="3" width="20" height="7" rx="2" />
-                      <rect x="2" y="14" width="20" height="7" rx="2" />
-                      <line x1="6" y1="6.5" x2="6.01" y2="6.5" />
-                      <line x1="6" y1="17.5" x2="6.01" y2="17.5" />
-                    </>
-                  ) : item.id === "references" ? (
-                    <>
-                      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-                      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
-                    </>
-                  ) : item.id === "permissions" ? (
-                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-                  ) : (
-                    <>
-                      <rect x="3" y="11" width="18" height="10" rx="2" />
-                      <circle cx="12" cy="5" r="2" />
-                      <path d="M12 7v4" />
-                    </>
-                  )}
-                </svg>
-                <span>{t(item.labelKey)}</span>
+                />
+                <span>{t(`project.settings.tab.${item}`)}</span>
               </button>
             ))}
           </div>
@@ -508,9 +541,10 @@ export function ProjectSettingsDialog() {
             </h3>
             <button
               className="settings-close-btn"
+              type="button"
               title={t("project.settings.close")}
               aria-label={t("project.settings.close")}
-              onClick={() => dispatch({ type: "DismissPopup" })}
+              onClick={dismiss}
             >
               <Icon name="close" size={18} />
             </button>
@@ -518,11 +552,46 @@ export function ProjectSettingsDialog() {
           <div className="settings-body" ref={body}>
             <div
               className="settings-tab-pane project-settings-pane"
+              data-project-section={tab}
               data-testid="project-settings-pane"
+              id={panelId(tab)}
+              aria-labelledby={tabId(tab)}
               role="tabpanel"
+              tabIndex={0}
             >
-              {pane}
+              {tab === "host" && (
+                <HostPane project={project} projectId={projectId} />
+              )}
+              {tab === "agents" && <AgentsPane projectId={projectId} />}
+              {tab === "permissions" && (
+                <SessionPermissionsLink projectId={projectId} />
+              )}
+              {tab === "speakers" && (
+                <ExternalSpeakersSettings
+                  scope={{ kind: "project", id: projectId }}
+                />
+              )}
+              {(tab === "references" || visitedReferences) && (
+                <div hidden={tab !== "references"}>
+                  <ReferencesSettings projectId={projectId} />
+                </div>
+              )}
+              {(section || visitedOwner) && (
+                <OwnerSettings
+                  scope={{ kind: "project", id: projectId }}
+                  projectView={{ section, onSectionChange: activate }}
+                />
+              )}
             </div>
+            {TABS.filter((item) => item !== tab).map((item) => (
+              <div
+                key={item}
+                id={panelId(item)}
+                role="tabpanel"
+                aria-labelledby={tabId(item)}
+                hidden
+              />
+            ))}
           </div>
         </section>
       </div>

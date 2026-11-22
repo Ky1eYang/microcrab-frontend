@@ -49,7 +49,10 @@ export interface NativeSession {
   project_id: string | null;
   status: "idle" | "running" | "faulted" | "closed";
   agent: string | null;
+  /** Runtime-applied mode when the Server has scoped evidence. */
   mode: string | null;
+  /** Creator configuration, distinct from an Agent's runtime choice. */
+  configured_mode?: string | null;
   model: string;
   model_selection?: NativeModelSelection;
   applied_model_selection?: NativeModelSelection | null;
@@ -174,6 +177,12 @@ export type NativeInputSource =
   | { agent: { agent_id: string; exchange?: { exchange_id: string; intent: "send" | "reply" } } }
   | { external: { identity: string } };
 
+export type DisplayExecutionStatus = "failed" | "cancelled" | "interrupted";
+export interface DisplayExecutionCertificate {
+  id: number;
+  status?: DisplayExecutionStatus;
+}
+
 export interface NativeMessage {
   /** Exact trusted submission admission certificate; absent in historical bytes. */
   submission_operation_id?: string;
@@ -201,7 +210,16 @@ export interface NativeMessage {
     name: string;
     arguments: unknown;
     builtin?: "delegate" | null;
+    /** Display certificate for this exact selected call in the owning Session. */
+    execution_id?: number;
+    execution_status?: DisplayExecutionStatus;
   }[];
+  /** Tool result display certificate, including its owner and admitted call slot. */
+  execution_id?: number;
+  execution_status?: DisplayExecutionStatus;
+  execution_session_id?: string;
+  execution_call_source_id?: string;
+  execution_call_index?: number;
   tool_builtin?: "delegate" | null;
   call_id?: string;
   tool_name?: string;
@@ -302,6 +320,7 @@ export interface PermissionSettled {
   tool?: string;
   owning_session_id?: string;
   controller_id?: number;
+  responder_socket?: string | null;
   decision: "allow" | "deny";
   source?: "user" | "review" | "unavailable" | "cancelled" | "timeout";
   review_reason?: string | null;
@@ -857,6 +876,7 @@ export interface NativeSubscription {
 }
 export interface Capabilities {
   protocol: number;
+  build?: { version?: string; sha256?: string | null };
   methods: string[];
   features: Record<string, unknown>;
   limits: Record<string, number>;
@@ -969,6 +989,13 @@ export interface Block {
   partId: string;
   clientInvocationId?: string | null;
   callId?: string;
+  /** Canonical call slot, independent of any presentation or provider ID. */
+  toolCallIndex?: number;
+  /** Label only; does not authorize runtime lookup, hydration, or actions. */
+  displayExecutionId?: number;
+  displayExecutionStatus?: DisplayExecutionStatus;
+  /** Exact assistant occurrence certified by a canonical tool result. */
+  resultExecutionCall?: { sourceId: string; index: number };
   role: string;
   kind: string;
   isCompact: boolean;
@@ -1021,10 +1048,16 @@ export interface Transcript {
   turnLifecycle?: {
     sessionId: string;
     operations: Record<string, "active" | "terminal">;
+    /** Browser receipt time for previously witnessed work, not historical reads. */
+    terminalObservedAt?: Record<string, number>;
+    /** Server wall clock from the exact terminal receipt, when supplied. */
+    terminalAt?: Record<string, number>;
     activeOperationIds: string[];
     completionRevision: number;
   };
   displayGraph?: import("./display-graph").DisplayGraphState;
+  /** Selected canonical call certificates, shared with bound graph rows. */
+  displayExecutionCertificates?: ReadonlyMap<string, DisplayExecutionCertificate>;
   displayReplay?: DisplayReplayState;
   displayCoverage?: "available" | "missing" | "unavailable";
   historyView?: NativeHistoryView;
@@ -1064,6 +1097,9 @@ export interface AppAction {
 import type {
   HostReadiness as NativeHostReadiness,
   HostReadinessCause as NativeHostCause,
+  ObservedHostDescriptor,
+  ProjectHostCarrier,
+  ProjectHostCarrierMode,
 } from "./host";
 export type {
   HostReadiness as NativeHostReadiness,
@@ -1072,12 +1108,18 @@ export type {
 } from "./host";
 
 export interface NativeHostState {
+  project_id?: string;
+  carrier_mode?: ProjectHostCarrier;
+  connection_generation?: string | null;
+  descriptor?: ObservedHostDescriptor | null;
   connected: boolean;
   ready: boolean;
   reconciling?: boolean;
-  readiness?: NativeHostReadiness;
+  readiness?: NativeHostReadiness | null;
   reconciliation_error?: NativeHostCause | null;
 }
+
+export type SessionViewMode = "chat" | "trajectory" | "state" | "prompt";
 
 export interface AppState {
   statistics: NativeStatistics | null;
@@ -1098,6 +1140,13 @@ export interface AppState {
     endpoint?: string;
     transport?: "relay" | "grpc";
     effectiveTransport?: "relay" | "grpc" | "outbound";
+    carrierMode?: ProjectHostCarrierMode;
+    connectionGeneration?: string | null;
+    descriptor?: ObservedHostDescriptor;
+    /** Whether this browser explicitly established the exact current route. */
+    localControl?: boolean;
+    /** H1 observation was attempted, never authority to auto-connect on failure/loss. */
+    observeRoute?: boolean;
     workspace?: string;
     connected?: boolean;
     catalogError?: string;
@@ -1192,7 +1241,7 @@ export interface AppState {
   showWorkspaceDropdown: boolean;
   menuProject: string | null;
   isCreatingSession: boolean;
-  viewMode: "chat" | "trajectory";
+  viewMode: SessionViewMode;
   sessionPluginTab?: SessionPluginTab | null;
   showRunningToolsMenu: boolean;
   showSubagentsMenu: boolean;

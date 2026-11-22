@@ -44,8 +44,20 @@ test("trajectory selects successful retry and historical schema for each exact r
         committed_sequence: 20,
         incomplete_tail: false,
         selected_request_hash: "immutable_second",
+        timeline: [
+          {
+            epoch: 7,
+            turn: 3,
+            round: 2,
+            sequence: 2,
+            call_id: "provider-second",
+            request_hash: "immutable_second",
+            completion: "succeeded",
+          },
+        ],
         attempts: ["immutable_first", "immutable_second"].map((hash, i) => ({
           request_hash: hash,
+          call_id: i === 1 ? "provider-second" : "provider-first",
           completion: i === 1 ? "succeeded" : "failed",
           usage: i === 1 ? { input_tokens: 120, output_tokens: 8 } : null,
           token_delta: i === 1 ? { input_tokens: 23, output_tokens: -2 } : null,
@@ -83,7 +95,7 @@ test("trajectory selects successful retry and historical schema for each exact r
   await expect(page.getByText("historical_only", { exact: false })).toBeVisible(
     { timeout: 30000 },
   );
-  expect(selectors.at(-1)).toEqual({ epoch: 7, turn: 3, round: 2 });
+  expect(selectors.at(-1)).toEqual({ epoch: 7, call_id: "provider-second" });
   await expect(page.getByTestId("request-audit-schema")).not.toContainText(
     "请求 ID",
   );
@@ -102,15 +114,17 @@ test("trajectory selects successful retry and historical schema for each exact r
   });
   await expect.poll(() => selectors.length).toBeGreaterThan(1);
   await expect(page.getByLabel("请求尝试")).toHaveCount(0);
+  await expect(
+    page.getByRole("tab", { name: "请求增量", exact: true }),
+  ).toHaveCount(0);
+  await page
+    .locator('[data-testid="trajectory-entry"][data-kind="model-request"]')
+    .click();
   await page.getByRole("tab", { name: "请求增量", exact: true }).click();
   await expect(
     page.getByText("delta_attempt_1", { exact: false }),
   ).toBeVisible();
-  expect(selectors.at(-1)).toEqual({
-    epoch: 7,
-    turn: 3,
-    tool_call_id: "call_historical",
-  });
+  expect(selectors.at(-1)).toEqual({ epoch: 7, call_id: "provider-second" });
   await expect(page.getByTestId("request-audit-diff")).not.toContainText(
     "historical baseline",
   );
@@ -132,10 +146,14 @@ test("trajectory selects successful retry and historical schema for each exact r
   await expect(metadata).not.toContainText("delta_attempt_0");
   await metadata.getByText("实际发送请求", { exact: true }).click();
   await expect(metadata).toContainText("actual historical sent request");
+  await page
+    .locator('[data-testid="trajectory-entry"][data-kind="tool"]')
+    .click();
+  await page.getByRole("tab", { name: "请求信息", exact: true }).click();
   await page.getByLabel("请求范围").selectOption("schema");
   await expect
     .poll(() => selectors.at(-1))
-    .toEqual({ epoch: 7, turn: 3, round: 2 });
+    .toEqual({ epoch: 7, call_id: "provider-second" });
 });
 
 test("unavailable request diff never falls back to displaying the full baseline", async ({
@@ -158,6 +176,17 @@ test("unavailable request diff never falls back to displaying the full baseline"
         status: "omitted",
         committed_sequence: 3,
         incomplete_tail: false,
+        timeline: [
+          {
+            epoch: 2,
+            turn: 1,
+            round: 1,
+            sequence: 1,
+            call_id: "omitted-provider",
+            request_hash: "omitted_request",
+            completion: "succeeded",
+          },
+        ],
         attempts: [
           {
             request_hash: "omitted_request",
@@ -175,7 +204,7 @@ test("unavailable request diff never falls back to displaying the full baseline"
   await page.goto("/#session/s1");
   await page.getByRole("tab", { name: "轨迹", exact: true }).click();
   await page
-    .locator('[data-testid="trajectory-entry"][data-kind="user"]')
+    .locator('[data-testid="trajectory-entry"][data-kind="model-request"]')
     .click();
   await page.getByRole("tab", { name: "请求增量", exact: true }).click();
   const diff = page.getByTestId("request-audit-diff");
@@ -206,6 +235,17 @@ test("request diff preserves unified context hunks and identifies an initial emp
         status: "available",
         committed_sequence: 4,
         incomplete_tail: false,
+        timeline: [
+          {
+            epoch: 3,
+            turn: 1,
+            round: 1,
+            sequence: 1,
+            call_id: "initial-provider",
+            request_hash: "initial_hash",
+            completion: "succeeded",
+          },
+        ],
         attempts: [
           {
             request_hash: "initial_hash",
@@ -224,7 +264,7 @@ test("request diff preserves unified context hunks and identifies an initial emp
   await page.goto("/#session/s1");
   await page.getByRole("tab", { name: "轨迹", exact: true }).click();
   await page
-    .locator('[data-testid="trajectory-entry"][data-kind="user"]')
+    .locator('[data-testid="trajectory-entry"][data-kind="model-request"]')
     .click();
   await page.getByRole("tab", { name: "请求增量", exact: true }).click();
   await expect(page.getByTestId("request-audit-diff")).not.toContainText(

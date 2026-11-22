@@ -1,4 +1,4 @@
-export type LeaveGuard = (proceed?: () => void) => boolean;
+export type LeaveGuard = (proceed?: () => void, intent?: "tab") => boolean;
 export type DocumentDraft = Readonly<{ label: string; text: string }>;
 type Registration = {
   root: () => HTMLElement | null;
@@ -72,6 +72,7 @@ export function registerDocumentLeave(
 export function requestGuardedLeave(
   guards: () => LeaveGuard[],
   proceed: () => void,
+  intent?: "tab",
 ): boolean {
   const revision = ++intentRevision;
   let completed = false;
@@ -90,7 +91,7 @@ export function requestGuardedLeave(
             return;
           resumed = true;
           advance();
-        })
+        }, intent)
       )
         return false;
     }
@@ -105,6 +106,7 @@ export function requestGuardedLeave(
 export function requestDocumentLeave(
   proceed: () => void,
   selector?: string,
+  intent?: "tab",
 ): boolean {
   return requestGuardedLeave(
     () =>
@@ -115,5 +117,6 @@ export function requestDocumentLeave(
         })
         .map((entry) => entry.guard),
     proceed,
+    intent,
   );
 }

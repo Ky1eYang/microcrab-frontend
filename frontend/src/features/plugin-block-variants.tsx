@@ -399,7 +399,17 @@ export function PluginAnswerVariants({
             : t("variants.originalAndVariant", { label: variant.label }),
       checked: chosenGroup === key && mode === value,
       disabled: !visible,
-      onSelect: () => update(key, value),
+      onSelect: () => {
+        update(key, value);
+        if (value === "original") return;
+        // A deferred variant has no result to display yet. The same explicit
+        // menu gesture can start it via the guest's certified block action.
+        for (const item of available) {
+          if (groupKey(item) !== key || item.status !== "cancelled") continue;
+          const action = actionFor(item);
+          if (action) void invoke(item, action);
+        }
+      },
     }));
     for (const item of available.filter((item) => groupKey(item) === key)) {
       const action = actionFor(item);

@@ -111,6 +111,7 @@ async function storePage(page: Page) {
       capabilities: { methods: ["agent.catalog", "project.list", "project.create"], features: {}, limits: {} } });
     rememberHost(hostPreferenceScope(store.api.base, auth), "h1", "project-1", endpoint);
     store.api.request = async (method: string) => {
+      if (method === "project.host_state") return { connected: false, ready: false, reconciling: false, carrier_mode: "detached", connection_generation: null };
       if (method === "agent.catalog") return { items: [{ name: "coding", component: "component", modes: [{ name: "plan" }] }] };
       if (method === "project.list") return { items: projects };
       if (method === "settings.get" || method === "project.settings.get") return { effective: {} };

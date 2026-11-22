@@ -165,9 +165,7 @@ function Layout() {
                     role: "tabpanel",
                     "aria-labelledby": selectedPlugin
                       ? `view-tab-plugin-${selectedPlugin}`
-                      : state.viewMode === "trajectory"
-                        ? "view-tab-trajectory"
-                        : "view-tab-chat",
+                      : `view-tab-${state.viewMode}`,
                   }
                 : {})}
             >

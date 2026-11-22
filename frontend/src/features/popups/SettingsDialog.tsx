@@ -15,6 +15,8 @@ import { trapFocus } from "../../client/viewport";
 import { unsupported } from "../../client/unsupported";
 import type { ReactNode } from "react";
 import { ClientToolsSettings } from "../ClientToolsSettings";
+import { buildSha256, frontendSha256 } from "../../client/build-identity";
+import "../../styles/settings-dialog.css";
 
 const THEME_OPTIONS: [ThemePreference, string][] = [
   ["light", "settingsDlg.theme.light"],
@@ -212,6 +214,9 @@ export function SettingsDialog() {
         (node) => node !== dialog.current && node.getClientRects().length > 0,
       );
       if (nested) return;
+      const speakerConfirmation = dialog.current?.querySelector<HTMLElement>(
+        '[data-testid="external-speakers"] [role="alertdialog"]',
+      );
       if (
         event.key === "Escape" &&
         event.target instanceof Element &&
@@ -220,13 +225,15 @@ export function SettingsDialog() {
         return;
       if (event.key === "Tab") {
         event.stopPropagation();
-        trapFocus(dialog.current, event);
+        trapFocus(speakerConfirmation ?? dialog.current, event);
         return;
       }
       if (event.key !== "Escape" || event.defaultPrevented) return;
       event.preventDefault();
       event.stopPropagation();
-      dispatch({ type: "DismissPopup" });
+      if (speakerConfirmation)
+        speakerConfirmation.querySelector<HTMLButtonElement>("button")?.click();
+      else dispatch({ type: "DismissPopup" });
     };
     window.addEventListener("keydown", onKey, true);
     return () => {
@@ -362,7 +369,7 @@ export function SettingsDialog() {
   return (
     <div className="overlay">
       <div
-        className="settings-dialog"
+        className="settings-dialog user-settings-dialog"
         ref={dialog}
         role="dialog"
         aria-modal="true"
@@ -774,14 +781,31 @@ export function SettingsDialog() {
               {p.tab === "about" && (
                 <div className="settings-card">
                   <div className="about-brand-section">
-                    <div className="about-logo">microcrab</div>
+                    <div className="about-logo" translate="no">microcrab</div>
                     <div className="about-tagline">Local Agent Runtime</div>
-                    <div className="about-version">
-                      {t("settingsDlg.version", {
-                        version:
-                          state.board.version ||
-                          t("settingsDlg.versionMissing"),
-                      })}
+                    <div className="about-build-details">
+                      <div className="about-build-group">
+                        <div className="about-build-label">
+                          {t("settingsDlg.backendVersion", {
+                            version:
+                              (typeof state.capabilities?.build?.version === "string" &&
+                                state.capabilities.build.version.trim()) ||
+                              t("settingsDlg.versionMissing"),
+                          })}
+                        </div>
+                        <div className="about-version">
+                          {t("settingsDlg.backendSha256", {
+                            hash: buildSha256(state.capabilities?.build?.sha256) ??
+                              t("settingsDlg.versionMissing"),
+                          })}
+                        </div>
+                      </div>
+                      <div className="about-build-group">
+                        <div className="about-build-label">{t("settingsDlg.frontendSha256")}</div>
+                        <div className="about-version">
+                          {frontendSha256() ?? t("settingsDlg.frontendSha256Missing")}
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>

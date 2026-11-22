@@ -200,6 +200,24 @@ for (const width of [390, 1440])
     ).toBe(true);
   });
 
+test("selecting a deferred translation starts it once and retains the chosen display", async ({ page }) => {
+  await setup(page);
+  await setVariant(page, { status: "cancelled", text: "", retry_action: "start" });
+  await choose(page, "原文");
+  const actions = () => page.evaluate(() => (window as any).variantFixture.actions.map(({ a }: any) => a));
+  expect(await actions()).toEqual([]);
+  await choose(page, "译文");
+  expect(await actions()).toEqual(["start"]);
+  await setVariant(page, { status: "pending", text: "" });
+  await expect(page.locator('[data-block="b1"]')).toContainText("Original paragraph.");
+  await choose(page, "译文");
+  expect(await actions()).toEqual(["start"]);
+  await setVariant(page);
+  await expect(page.locator('[data-block="b1"]')).toContainText("译文段落。");
+  await choose(page, "译文");
+  expect(await actions()).toEqual(["start"]);
+});
+
 test("pending preference survives completion; skipped force and error retry are explicit fenced actions", async ({
   page,
 }) => {

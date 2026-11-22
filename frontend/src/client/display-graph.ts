@@ -1,6 +1,13 @@
 import { isDirectUserSource } from "./input-source";
 import { messageBlocks } from "./native-message-blocks";
 import { createBlock } from "./create-block";
+import { settledToolStatus } from "./tool-outcome";
+import {
+  callOccurrenceKey,
+  mergeDisplayExecution,
+  preferDisplayExecution,
+  resultOccurrenceKey,
+} from "./tool-execution-display";
 import type { Block, NativeDisplayObservation, Transcript } from "./types";
 
 /** Immutable display identity. Bodies grow through byte-addressed observations;
@@ -741,6 +748,27 @@ export function composeDisplayGraph(
         (block) => block.displayGraphId && !visited.has(block.displayGraphId),
       );
   const projected: Block[] = [];
+  const exactCalls = new Map<string, Block>();
+  const settledCalls = new Set<Block>();
+  const registerCall = (block: Block) => {
+    if (block.role !== "assistant") return;
+    const key = callOccurrenceKey(block);
+    if (!key) return;
+    const selected = transcript.displayExecutionCertificates?.get(key);
+    if (selected) preferDisplayExecution(block, selected);
+    if (
+      block.displayExecutionId != null &&
+      block.executionId != null &&
+      block.displayExecutionId !== block.executionId
+    ) {
+      delete block.executionId;
+      delete block.execution;
+      delete block.canonicalContent;
+      delete block.payload.observedToolOutcome;
+      if (block.tool) block.tool = { ...block.tool, status: undefined };
+    }
+    exactCalls.set(key, block);
+  };
   const coveredSources = new Set<string>(
     retained.flatMap((block) =>
       block.canonicalSourceId ? [block.canonicalSourceId as string] : [],
@@ -818,21 +846,33 @@ export function composeDisplayGraph(
         row.position =
           canonicalPositions.get(row.canonicalSourceId) ?? row.position;
         if (row.role === "tool") {
-          const call = [...projected]
-            .reverse()
-            .find(
-              (candidate) =>
-                (candidate.kind === "tool" || candidate.kind === "child") &&
-                candidate.callId === row.callId &&
-                candidate.role === "assistant",
-            );
+          const exact = resultOccurrenceKey(row);
+          const call = exact
+            ? exactCalls.get(exact)
+            : row.displayExecutionId == null
+              ? [...projected].reverse().find(
+                  (candidate) =>
+                    (candidate.kind === "tool" || candidate.kind === "child") &&
+                    candidate.callId === row.callId &&
+                    candidate.role === "assistant" &&
+                    !settledCalls.has(candidate),
+                )
+              : undefined;
           if (call) {
+            if (exact) {
+              mergeDisplayExecution(call, row.displayExecutionId, row.displayExecutionStatus);
+              registerCall(call);
+            }
+            // A selected call occurrence consumes one result, as in snapshot projection.
+            const occurrence = callOccurrenceKey(call);
+            if (occurrence) exactCalls.delete(occurrence);
+            settledCalls.add(call);
             call.payload = {
               ...call.payload,
               text: row.payload.text,
               structured: row.payload.structured,
             };
-            call.tool = { ...call.tool, status: "completed" };
+            call.tool = { ...call.tool, status: settledToolStatus(call) };
             call.displaySourceIds = [
               ...new Set([
                 ...(call.displaySourceIds ?? []),
@@ -843,6 +883,7 @@ export function composeDisplayGraph(
             continue;
           }
         }
+        registerCall(row);
         projected.push(row);
       }
       continue;
@@ -865,6 +906,11 @@ export function composeDisplayGraph(
     if (!content.present) continue;
     const block: Block = { ...node.block, payload: { ...node.block.payload } };
     if (toolNode) {
+      // Producer rows may be reused after a remap; call slots and historical
+      // numbers are derived again from the currently selected binding below.
+      delete block.toolCallIndex;
+      delete block.displayExecutionId;
+      delete block.displayExecutionStatus;
       const explicitId = segments.find(
         (segment) => segment.toolCallId,
       )?.toolCallId;
@@ -893,13 +939,21 @@ export function composeDisplayGraph(
       sourceBinding && remap ? { ...sourceBinding, ...remap } : sourceBinding;
     if (binding) {
       if (toolNode) {
-        const index = /^tool:(\d+)$/.exec(node.identity.stream_key)?.[1];
+        const index = Number(
+          /^tool:(\d+)$/.exec(node.identity.stream_key)?.[1],
+        );
         const acceptedCall =
-          index == null ? undefined : binding.message.tool_calls[Number(index)];
+          binding.message.role === "assistant" && Number.isSafeInteger(index)
+            ? binding.message.tool_calls?.[index]
+            : undefined;
         if (
           acceptedCall &&
-          (!block.callId || block.callId === acceptedCall.id)
+          segments.every(
+            (segment) => !segment.toolCallId || segment.toolCallId === acceptedCall.id,
+          ) &&
+          binding.tool_call_ids.includes(acceptedCall.id)
         ) {
+          block.toolCallIndex = index;
           block.callId = acceptedCall.id;
           block.tool = {
             ...block.tool,
@@ -919,7 +973,9 @@ export function composeDisplayGraph(
       ).find(
         (candidate) =>
           candidate.kind === (toolNode ? "tool" : block.kind) &&
-          (!toolNode || candidate.callId === block.callId),
+          (!toolNode ||
+            (candidate.callId === block.callId &&
+              candidate.toolCallIndex === block.toolCallIndex)),
       );
       if (canonical) {
         block.position = canonical.position;
@@ -930,8 +986,11 @@ export function composeDisplayGraph(
             ...block.payload,
             providerMetadata: canonical.payload.providerMetadata,
           };
-          block.executionId = canonical.executionId ?? block.executionId;
-          block.execution = canonical.execution ?? block.execution;
+          mergeDisplayExecution(
+            block,
+            canonical.displayExecutionId,
+            canonical.displayExecutionStatus,
+          );
           block.clientInvocationId =
             canonical.clientInvocationId ?? block.clientInvocationId;
         }
@@ -968,6 +1027,7 @@ export function composeDisplayGraph(
     block.displayIncomplete =
       !block.validated &&
       (block.stream === "stopped" || !content.contiguous || !!node.invalid);
+    registerCall(block);
     projected.push(block);
   }
   const loadedSources = new Set<string>(transcript.displayWindowSources ?? []);

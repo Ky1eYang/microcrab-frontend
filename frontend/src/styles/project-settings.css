@@ -1,0 +1,332 @@
+/* Project defaults share editors with other settings surfaces; keep layout and
+   control treatment local to this dialog. */
+.project-settings-dialog {
+  --project-section-gap: var(--sp-4);
+  --project-section-padding: var(--sp-4);
+}
+
+.project-settings-dialog .settings-nav {
+  width: 192px;
+  min-width: 192px;
+  padding: var(--sp-5) var(--sp-3);
+  border-right: 0;
+  border-inline-end: 1px solid var(--border);
+  overscroll-behavior: contain;
+}
+
+.project-settings-dialog .settings-nav-title {
+  margin: 0;
+  padding: 0 var(--sp-3) var(--sp-3);
+  border: 0;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+.project-settings-dialog .settings-nav-group {
+  gap: var(--sp-1);
+  margin: 0;
+}
+
+.project-settings-dialog .settings-nav-item {
+  min-height: 40px;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-inline-start: 2px solid transparent;
+  font-size: var(--fs-sm);
+  line-height: 1.4;
+  text-align: start;
+  transition: none;
+}
+
+.project-settings-dialog .settings-nav-item[aria-selected="true"] {
+  border-inline-start-color: var(--ink);
+}
+
+.project-settings-dialog .settings-nav-item[aria-selected="true"] .settings-nav-icon {
+  opacity: 1;
+}
+
+.project-settings-dialog .settings-header {
+  gap: var(--sp-3);
+  flex-shrink: 0;
+  padding: var(--sp-4) var(--sp-5);
+}
+
+.project-settings-dialog .settings-tab-heading {
+  min-width: 0;
+  font-size: var(--fs-xl);
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+}
+
+.project-settings-dialog .settings-close-btn {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  transition: none;
+}
+
+.project-settings-dialog .settings-body {
+  min-height: 0;
+  overscroll-behavior: contain;
+  padding: var(--sp-5);
+}
+
+.project-settings-dialog .project-settings-pane {
+  gap: var(--project-section-gap);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.project-settings-dialog .settings-ergonomics:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+  gap: var(--project-section-gap);
+  min-width: 0;
+}
+
+.project-settings-dialog .settings-ergonomics > .settings-description + .settings-description {
+  margin-block-start: calc(var(--sp-1) - var(--project-section-gap));
+}
+
+.project-settings-dialog .settings-description {
+  max-inline-size: 70ch;
+}
+
+.project-settings-dialog .settings-section-card {
+  gap: var(--sp-3);
+  min-width: 0;
+  padding: var(--project-section-padding);
+  border-radius: var(--r-md);
+}
+
+.project-settings-dialog .settings-subpanel {
+  padding-inline: 0;
+  border: 0;
+  border-block-start: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+}
+
+.project-settings-dialog .settings-section-title {
+  font-size: var(--fs-lg);
+  line-height: 1.35;
+  text-wrap: pretty;
+}
+
+.project-settings-dialog .settings-model-default {
+  margin-block: 0;
+}
+
+.project-settings-dialog .settings-form-grid,
+.project-settings-dialog .limits-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(230px, 100%), 1fr));
+}
+
+.project-settings-dialog .settings-form-grid-3 {
+  grid-template-columns: repeat(auto-fit, minmax(min(170px, 100%), 1fr));
+}
+
+.project-settings-dialog .settings-form-group,
+.project-settings-dialog .settings-row-info,
+.project-settings-dialog .settings-input {
+  min-width: 0;
+}
+
+.project-settings-dialog .settings-actions-row {
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.project-settings-dialog :is(.ghost-btn, .primary-btn, .danger-btn) {
+  max-inline-size: 100%;
+  min-height: 32px;
+  padding-block: var(--sp-1);
+  line-height: 1.35;
+  white-space: normal;
+}
+
+.project-settings-dialog .settings-input:focus-visible,
+.project-settings-dialog .settings-close-btn:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.project-settings-dialog .project-settings-tip {
+  gap: var(--sp-1) var(--sp-2);
+  margin: 0;
+  padding-block: var(--sp-1);
+}
+
+.project-settings-dialog .project-settings-tip > span {
+  flex: 1 1 16ch;
+  min-width: 0;
+}
+
+.project-settings-dialog .project-settings-tip-danger {
+  color: var(--danger);
+}
+
+.project-settings-dialog .project-host-facts {
+  margin: 0;
+  border-block-start: 1px solid var(--border);
+}
+
+.project-settings-dialog .project-host-fact {
+  display: grid;
+  grid-template-columns: minmax(0, 12rem) minmax(0, 1fr);
+  align-items: baseline;
+  gap: var(--sp-1) var(--sp-4);
+  padding-block: var(--sp-2);
+  border-block-end: 1px solid var(--border);
+}
+
+.project-settings-dialog .project-host-fact > dt {
+  color: var(--text-2);
+  font-weight: 500;
+  font-size: var(--fs-sm);
+}
+
+.project-settings-dialog .project-host-fact > dd {
+  margin: 0;
+  font-size: var(--fs-sm);
+}
+
+.project-settings-dialog .project-settings-inline {
+  flex-wrap: wrap;
+  align-items: baseline;
+  max-inline-size: 100%;
+}
+
+.project-settings-dialog .project-settings-inline > span {
+  overflow: visible;
+}
+
+.project-settings-dialog .project-settings-inline .ghost-btn {
+  min-height: 24px;
+}
+
+.project-settings-dialog :is(.project-agent-list, .project-ref-list) {
+  gap: 0;
+  margin: 0;
+}
+
+.project-settings-dialog :is(.project-agent-row, .project-ref-row) {
+  gap: var(--sp-2) var(--sp-3);
+  padding: var(--sp-3) 0;
+  border: 0;
+  border-block-start: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+}
+
+.project-settings-dialog .project-agent-component {
+  flex-basis: 100%;
+}
+
+.project-settings-dialog .project-agent-current {
+  color: var(--text-2);
+  font-weight: 600;
+}
+
+.project-settings-dialog .project-agent-mode-details > ul {
+  margin: var(--sp-1) 0 0;
+  padding-inline-start: var(--sp-5);
+  color: var(--text-2);
+}
+
+.project-settings-dialog .project-ref-add {
+  margin: 0;
+}
+
+.project-settings-dialog .project-ref-kind {
+  min-width: 0;
+  color: var(--text-2);
+}
+
+.project-settings-dialog .project-ref-main {
+  overflow: visible;
+  white-space: normal;
+}
+
+.project-settings-dialog .project-ref-list > p {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+.project-settings-dialog .project-session-permissions {
+  padding-block-end: var(--sp-3);
+  border-block-end: 1px solid var(--border);
+}
+
+.project-settings-dialog [data-project-section="speakers"] fieldset > label {
+  display: grid;
+  gap: var(--sp-1);
+  margin-block: var(--sp-2);
+}
+
+.project-settings-dialog [data-project-section="speakers"] .settings-row-info > .settings-actions-row {
+  justify-content: flex-start;
+}
+
+@media (max-width: 767.98px) {
+  .project-settings-dialog {
+    --project-section-padding: var(--sp-3);
+  }
+
+  .project-settings-dialog .settings-nav {
+    width: auto;
+    min-width: 0;
+    border-inline-end: 0;
+    padding: var(--sp-2) var(--sp-3);
+  }
+
+  .project-settings-dialog .settings-nav-item {
+    border-inline-start: 0;
+    border-block-end: 2px solid transparent;
+  }
+
+  .project-settings-dialog .settings-nav-item[aria-selected="true"] {
+    border-block-end-color: var(--ink);
+  }
+
+  .project-settings-dialog .settings-header,
+  .project-settings-dialog .settings-body {
+    padding: var(--sp-3) var(--sp-4);
+  }
+
+  .project-settings-dialog .settings-tab-heading {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    font-size: var(--fs-lg);
+  }
+}
+
+@media (max-width: 540px) {
+  .project-settings-dialog .project-host-fact {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .project-settings-dialog .project-agent-row {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .project-settings-dialog .project-agent-main {
+    flex-basis: 100%;
+  }
+
+  .project-settings-dialog .project-ref-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .project-settings-dialog .project-ref-kind {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+}

@@ -182,22 +182,20 @@ test("vacancy elects this participant with one rebind and never replays a recove
   expect((await state(page)).clientTools.pending.find((item: ClientInvocation) => item.invocation_id === recovered.invocation_id)?.status).toBe("pending");
 });
 
-test("Server busy takeover rejection leaves this page participating in its pending question", async ({ page }) => {
-  const active = binding([call()]);
-  const backend = await nativeBackend(page, { owner: "same-owner", clientTools: active,
-    extraMethods: ["client_tools.takeover"], sessionCommand: (command) => command.method === "client_tools.takeover"
-      ? { error: { code: "busy", message: "Executor is busy; takeover requires idle execution" } } : undefined,
+test("an owner participant can answer without a plugin-executor takeover control", async ({ page }) => {
+  const backend = await nativeBackend(page, {
+    owner: "same-owner",
+    clientTools: binding([call()]),
+    extraMethods: ["client_tools.takeover"],
   });
   await mount(page);
   const option = page.getByRole("button", { name: "First page answer", exact: true });
-  await expect(option).toBeEnabled(); await option.click();
-  const takeover = page.getByRole("button", { name: "接管插件执行端", exact: true });
-  await expect(takeover).toBeEnabled();
-  await takeover.click();
-  await expect.poll(() => backend.commands.filter((command) => command.method === "client_tools.takeover").length).toBe(1);
-  await expect(takeover).toBeEnabled();
-  await expect(option).toBeEnabled(); await expect(option).toHaveAttribute("aria-pressed", "true");
+  await expect(option).toBeEnabled();
+  await option.click();
+  await expect(option).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "接管插件执行端" })).toHaveCount(0);
+  await expect(page.getByText(/插件执行权与浏览器工作区归属/)).toHaveCount(0);
   expect((await state(page)).clientTools.role).toBe("participant");
   expect((await state(page)).clientTools.lease_id).toBeUndefined();
-  expect(backend.commands.some((command) => ["client_tools.arguments", "client_tools.result"].includes(command.method))).toBe(false);
+  expect(backend.commands.some((command) => ["client_tools.takeover", "client_tools.arguments", "client_tools.result"].includes(command.method))).toBe(false);
 });

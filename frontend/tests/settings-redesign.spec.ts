@@ -79,6 +79,80 @@ async function setup(page: Page, items = [provider(), provider("user:beta")]) {
 const model = (page: Page, id: string) =>
   page.locator(`.model-row-card[data-model-id="${id}"]`);
 
+test("private Providers are reachable without editing or copying a startup Provider", async ({
+  page,
+}) => {
+  const shared: PublicProvider = {
+    ...provider("gateway"),
+    name: "Startup Gateway",
+    scope: "admin",
+    read_only: true,
+    revision: 0,
+  };
+  const items = [shared, provider()];
+  const { writes } = await setup(page, items);
+  // The actual Server lists startup Providers first.
+  await expect(page.getByTestId("provider-id")).toHaveValue("user:alpha");
+  await expect(page.getByTestId("provider-save")).toBeEnabled();
+  await page.locator('[data-provider-id="gateway"]').click();
+  await expect(page.getByTestId("provider-save")).toBeDisabled();
+  await expect(page.getByTestId("provider-discover")).toBeDisabled();
+  await expect(page.getByTestId("providers-settings")).toContainText(
+    "创建独立的私有配置",
+  );
+
+  await page.route("**/api/v1/providers/user%3Agateway", async (route) => {
+    const body = route.request().postDataJSON();
+    writes.push(body);
+    expect(route.request().method()).toBe("PUT");
+    const current = items.find((item) => item.id === "user:gateway");
+    const saved: PublicProvider = {
+      ...body.provider,
+      id: "user:gateway",
+      scope: "user",
+      revision: (current?.revision ?? 0) + 1,
+      read_only: false,
+      api_key_configured: false,
+      discovered: [],
+    };
+    if (current) Object.assign(current, saved);
+    else items.push(saved);
+    await route.fulfill({ json: saved });
+  });
+  await page.getByRole("button", { name: "+ 新建服务商", exact: true }).click();
+  await expect(page.getByTestId("provider-name")).toHaveValue("");
+  await expect(page.getByTestId("provider-endpoint")).toHaveValue("");
+  await expect(page.getByTestId("provider-secret")).toHaveCount(0);
+  await page.getByTestId("provider-id").fill("admin:gateway");
+  await page.getByTestId("provider-save").click();
+  await expect(page.getByTestId("provider-id")).toHaveAttribute(
+    "aria-invalid",
+    "true",
+  );
+  expect(writes).toHaveLength(0);
+  await page.getByTestId("provider-id").fill("gateway");
+  await page.getByTestId("provider-name").fill("My Gateway");
+  await page.getByTestId("provider-endpoint").fill("https://mine.example/v1");
+  await page.getByTestId("provider-save").click();
+  await expect(page.getByTestId("provider-id")).toHaveValue("user:gateway");
+  await expect(page.getByTestId("provider-id")).toBeDisabled();
+  expect(writes[0]).toMatchObject({
+    expected_revision: 0,
+    provider: { models: [] },
+  });
+  expect(writes[0]).not.toHaveProperty("api_key");
+
+  await page.getByTestId("provider-name").fill("My Renamed Gateway");
+  await page.getByTestId("provider-save").click();
+  await expect.poll(() => writes.length).toBe(2);
+  expect(writes[1]).toMatchObject({
+    expected_revision: 1,
+    provider: { name: "My Renamed Gateway" },
+  });
+  expect(writes[1]).not.toHaveProperty("api_key");
+  expect(shared.name).toBe("Startup Gateway");
+});
+
 test("catalog disclosure is pure; editing saves only sparse explicit overrides and retains focus", async ({
   page,
 }) => {

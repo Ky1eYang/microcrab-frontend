@@ -227,9 +227,6 @@
   font-size: var(--fs-sm);
   color: var(--text-2);
 }
-.conversation-input-outer-wrap {
-  overflow-anchor: none;
-}
 .statistics-help {
   border: 0;
   background: transparent;
