@@ -1658,12 +1658,36 @@
 }
 
 .composer-offline-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
   padding: var(--sp-2) var(--sp-3);
   background: transparent;
   border-bottom: 1px solid var(--border);
+  border-left: 2px solid var(--warn);
   border-radius: 0;
   font-size: var(--fs-xs);
   color: var(--text-2);
+}
+
+/* v0.1.20 ComposerHostNotice keeps its reviewed icon row. */
+.composer-offline-left {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--text-2);
+}
+
+.composer-offline-left .offline-icon {
+  color: var(--text-2);
+  flex-shrink: 0;
+}
+
+/* ExpandableNotice rows inside the composer stay on one line when collapsed. */
+.composer-offline-banner.expandable-notice {
+  flex-wrap: nowrap;
 }
 
 /* Generic one-line status notice (ExpandableNotice). The status color lives
