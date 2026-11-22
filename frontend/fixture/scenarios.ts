@@ -28,6 +28,7 @@ import {
   waitFor,
   waitText,
 } from "./driver";
+import { CLIENT_TOOL_DEFINITIONS } from "../src/client/client-tools";
 
 /* Review fixtures show realistic ages. The shared nativeSnapshot keeps its
  * ordinal stamps (1/2) because ~38 Playwright specs order sessions against
@@ -71,6 +72,193 @@ const openPermissions = async () => {
     await click('[data-testid="composer-session-permissions"]');
     await new Promise((r) => setTimeout(r, 150));
   }
+};
+/** New chat with recent sessions across projects, including long strings. */
+const LONG_PROJECT =
+  "microcrab-frontend-very-long-project-name-for-recent-session-cards";
+const recentStage = async (
+  page: Page,
+  opts: { emptyCurrent?: boolean } = {},
+) => {
+  history.replaceState(null, "", `${location.pathname}${location.search}#home`);
+  const now = Date.now();
+  const projects = [
+    {
+      id: "project-1",
+      name: "microcrab",
+      root: "/srv/microcrab",
+      host_id: "h1",
+      workspace_id: "w1",
+    },
+    {
+      id: "project-2",
+      name: LONG_PROJECT,
+      root: `/home/dev/${LONG_PROJECT}`,
+      host_id: "h1",
+      workspace_id: "w2",
+    },
+    {
+      id: "project-3",
+      name: "docs-site",
+      root: "/srv/docs-site",
+      host_id: "h1",
+      workspace_id: "w3",
+    },
+  ];
+  const at = (minutes: number) => now - minutes * 60_000;
+  const view = (
+    id: string,
+    title: string,
+    project: string,
+    minutes: number,
+    status = "idle",
+  ) => {
+    const v = structuredClone(nativeSnapshot);
+    Object.assign(v.session, {
+      id,
+      title,
+      project_id: project,
+      status,
+      created_at_ms: at(minutes + 5),
+      updated_at_ms: at(minutes),
+    });
+    return v;
+  };
+  const current = "project-1"; // the fixture always selects projects[0]
+  const sessions = [
+    view(
+      "r1",
+      "重构 RecentSessions 卡片布局并补齐窄屏单列样式与长标题两行截断的测试用例覆盖",
+      current,
+      3,
+      "running",
+    ),
+    view(
+      "r2",
+      "Investigate flaky e2e: a-really-long-identifier-without-spaces-0123456789abcdefghijklmnopqrstuvwxyz",
+      "project-2",
+      18,
+      "faulted",
+    ),
+    view("r3", "权限卡片：通用摘要", current, 60 * 3),
+    view("r4", "Trace view column widths", "project-2", 60 * 26),
+    view("r5", "侧栏抽屉焦点返回", current, 60 * 50),
+    view("r6", "Docs: changelog for v0.1.18", "project-2", 60 * 75),
+    view(
+      "r7",
+      "Seventh session is cut by the six-card limit",
+      current,
+      60 * 100,
+    ),
+  ].filter((v) => !opts.emptyCurrent || v.session.project_id !== current);
+  const b = await nativeBackend(page, {
+    projects,
+    sessions,
+    extraMethods: ["turn.retry", "inbox.update", "inbox.remove"],
+  });
+  Object.assign(b.snapshot().session, {
+    project_id: "project-2",
+    updated_at_ms: at(60 * 200),
+  });
+  return b;
+};
+/** Workspace picker P1: few or many projects plus sandbox runtime states. */
+type SandboxMode = "available" | "not_ready" | "loading" | "error" | "hidden";
+const VALID_MANIFEST = {
+  schema: 1,
+  kind: "browser-host",
+  wasmsh_version: "0.5.1",
+  hash: "a".repeat(64),
+  entry: "supervisor.mjs",
+  base_url: `/browser-host/${"a".repeat(64)}/`,
+  files: [],
+};
+const PICKER_NAMES = [
+  "东亚资本市场研究与交易执行工作区-香港与新加坡联合团队",
+  "customer-onboarding-and-kyc-review-pipeline-production",
+  "microcrab",
+  "docs-site",
+  "AuthPortal 身份认证与单点登录门户",
+  "billing-service",
+  "zeta-tools",
+  "alpha-console",
+  "数据平台",
+  "mobile-app",
+];
+const pickerStage = async (
+  page: Page,
+  opts: { many?: boolean; sandbox?: SandboxMode } = {},
+) => {
+  history.replaceState(null, "", `${location.pathname}${location.search}#home`);
+  const count = opts.many ? 64 : 4;
+  const projects = Array.from({ length: count }, (_, i) => ({
+    id: `project-${i + 1}`,
+    name:
+      PICKER_NAMES[i] ??
+      `service-${String(i).padStart(2, "0")}-${["api", "web", "worker", "infra"][i % 4]}`,
+    root:
+      i === 1
+        ? ""
+        : `/srv/workspaces/${(PICKER_NAMES[i] ?? `service-${i}`).replace(/\s+/g, "-")}`,
+    host_id: i === 3 ? undefined : "h1",
+    workspace_id: `w${i + 1}`,
+  }));
+  const now = Date.now();
+  const sessions = projects.slice(0, opts.many ? 7 : 3).map((project, i) => {
+    const v = structuredClone(nativeSnapshot);
+    Object.assign(v.session, {
+      id: `ps${i}`,
+      title: `Session ${i}`,
+      project_id: project.id,
+      updated_at_ms: now - (i + 1) * 3_600_000,
+    });
+    return v;
+  });
+  const mode = opts.sandbox ?? "available";
+  if (mode === "hidden") (WebAssembly as any).Suspending = undefined;
+  let manifestCalls = 0;
+  await page.route("**/browser-host/current.json", async (route) => {
+    manifestCalls++;
+    if (mode === "available") return route.fulfill({ json: VALID_MANIFEST });
+    if (mode === "loading" && manifestCalls > 1) return new Promise(() => {});
+    return route.fulfill({ status: 404, body: "not installed" });
+  });
+  const b = await nativeBackend(page, {
+    projects,
+    sessions,
+    extraMethods: ["turn.retry", "inbox.update", "inbox.remove"],
+  });
+  Object.assign(b.snapshot().session, { updated_at_ms: now - 30 * 60_000 });
+  return b;
+};
+const openPicker = () => click(".home-workspace-badge-btn");
+/** Under 768px the account card lives in the header-opened drawer. Bootstrap can
+ * re-render the shell and close the drawer, so retry until the menu is open. */
+const accountMenuOpen = () =>
+  [...document.querySelectorAll<HTMLElement>("button")].some(
+    (b) =>
+      /^(设置|Settings)$/.test(b.textContent?.trim() ?? "") &&
+      b.getClientRects().length > 0,
+  );
+const openAccountMenu = async () => {
+  await waitFor('[data-testid="header-open-rail"], .user-card-btn');
+  for (let i = 0; i < 30 && !accountMenuOpen(); i++) {
+    const menu = document.querySelector<HTMLElement>(
+      '[data-testid="header-open-rail"]',
+    );
+    if (
+      menu &&
+      menu.getClientRects().length > 0 &&
+      menu.getAttribute("aria-expanded") !== "true"
+    ) {
+      menu.click();
+      await new Promise((r) => setTimeout(r, 150));
+    }
+    const card = document.querySelector<HTMLElement>(".user-card-btn");
+    if (card && card.getClientRects().length > 0) card.click();
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  if (!accountMenuOpen()) throw new Error("fixture: account menu never opened");
 };
 const plain = (page: Page) =>
   nativeBackend(page, {
@@ -177,6 +365,68 @@ export const SCENARIOS: Record<string, Scenario> = {
       await click('[data-testid="permission-request"] summary');
     },
   },
+  "permission-request-actionable": {
+    title:
+      "Permission requests this client can answer: schema-annotated path, generic short field, full-arguments fallback (Deny | Allow once)",
+    stage: (page) =>
+      nativeBackend(page, {
+        clientTools: {
+          role: "executor",
+          lease_id: "lease_permission",
+          catalog_digest: "fixture_digest",
+          definitions: [
+            ...CLIENT_TOOL_DEFINITIONS,
+            {
+              name: "fixture_write_file",
+              description:
+                "Fixture-only tool whose schema carries the optional summary annotation.",
+              parameters: {
+                type: "object",
+                "x-microcrab-summary": { arg: "path", kind: "path" },
+                properties: {
+                  content: { type: "string" },
+                  path: { type: "string" },
+                },
+              },
+              permissions: [],
+              reclaimable: false,
+            },
+          ],
+          calls: [],
+          pending: [],
+        } as any,
+        permissionRequests: [
+          {
+            ...permissionRequest(),
+            request_id: "permission-annotated",
+            session_id: "s1",
+            tool: "fixture_write_file",
+            arguments: {
+              content: "export const answer = 42;",
+              path: "frontend/src/features/home/RecentSessions/a-really-long-generated-file-name-without-any-spaces-0123456789.tsx",
+            },
+          },
+          { ...permissionRequest(), request_id: "permission-generic" },
+          {
+            ...permissionRequest(),
+            request_id: "permission-arguments",
+            session_id: "s1",
+            tool: "fixture_batch",
+            arguments: {
+              steps: [
+                { op: "move", from: "a.txt", to: "b.txt" },
+                { op: "delete", target: "c.txt" },
+              ],
+              dry_run: false,
+            },
+          },
+        ],
+        holdPermissionReply: true,
+      }),
+    steps: async () => {
+      await waitFor('[data-testid="permission-will-run"]');
+    },
+  },
   "round-limit-tools": {
     title: "Round-limit prompt: tool calls",
     stage: (page) =>
@@ -185,6 +435,96 @@ export const SCENARIOS: Record<string, Scenario> = {
         holdRoundLimitReply: true,
       }),
   },
+  "recent-sessions": {
+    title:
+      "New chat: recent session cards, current project (running + long strings)",
+    stage: (page) => recentStage(page),
+    steps: () => waitFor('[data-testid="recent-session-card"]'),
+  },
+  "recent-sessions-all": {
+    title: "New chat: recent session cards, all projects with project tags",
+    stage: (page) => recentStage(page),
+    steps: async () => {
+      await click('[data-testid="recent-scope-all"]');
+      await waitFor('[data-scope="all"] .recent-session-project');
+    },
+  },
+  "recent-sessions-empty": {
+    title: "New chat: current project has no sessions yet",
+    stage: (page) => recentStage(page, { emptyCurrent: true }),
+    steps: () => waitFor('[data-testid="recent-sessions-empty"]'),
+  },
+  "picker-few": {
+    title: "Project picker P1: few projects, default view",
+    stage: (page) => pickerStage(page),
+    steps: openPicker,
+  },
+  "picker-many": {
+    title: "Project picker P1: 64 projects, Recent (5) + All projects (N)",
+    stage: (page) => pickerStage(page, { many: true }),
+    steps: openPicker,
+  },
+  "picker-all": {
+    title: "Project picker P1: All projects · by name, sticky header",
+    stage: (page) => pickerStage(page, { many: true }),
+    steps: async () => {
+      await openPicker();
+      await click('[data-testid="picker-all-projects"]');
+    },
+  },
+  "picker-search": {
+    title: "Project picker P1: search with highlight and match count",
+    stage: (page) => pickerStage(page, { many: true }),
+    steps: async () => {
+      await openPicker();
+      await fill(".picker-search input", "api");
+    },
+  },
+  "picker-nomatch": {
+    title: "Project picker P1: search without results",
+    stage: (page) => pickerStage(page, { many: true }),
+    steps: async () => {
+      await openPicker();
+      await fill(".picker-search input", "zzz-nothing");
+    },
+  },
+  "picker-keyboard": {
+    title: "Project picker P1: keyboard focus ring on the third row",
+    stage: (page) => pickerStage(page, { many: true }),
+    steps: async () => {
+      await openPicker();
+      for (let i = 0; i < 3; i++) {
+        const target = document.activeElement ?? document.body;
+        target.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }),
+        );
+        await new Promise((r) => setTimeout(r, 30));
+      }
+    },
+  },
+  ...Object.fromEntries(
+    (["available", "not_ready", "loading", "error", "hidden"] as const).map(
+      (mode) => [
+        `picker-sandbox-${mode.replace("_", "-")}`,
+        {
+          title: `Project picker: sandbox ${mode}`,
+          stage: (page: Page) =>
+            pickerStage(page, { many: true, sandbox: mode }),
+          steps: async () => {
+            await openPicker();
+            if (mode === "loading" || mode === "error") {
+              await waitFor('[data-sandbox-state="not_ready"]');
+              await click('[data-host-flavor="browser_sandbox"]');
+              await waitFor(`[data-sandbox-state="${mode}"]`);
+            } else if (mode !== "hidden")
+              await waitFor(
+                `[data-sandbox-state="${mode === "available" ? "ready" : mode}"]`,
+              );
+          },
+        } satisfies Scenario,
+      ],
+    ),
+  ),
   "inbox-mixed-draft": {
     title:
       "Busy session: inbox steer/queue/claimed + draft (resize to 390px for the narrow composer)",
@@ -384,7 +724,7 @@ export const SCENARIOS: Record<string, Scenario> = {
     },
     steps: async () => {
       await connectHost();
-      await click(".user-card-btn");
+      await openAccountMenu();
       await clickText("body", /^(设置|Settings)$/);
       await clickText(".settings-dialog", /^(客户端工具|Client tools)$/);
       await waitFor('[data-testid="execution-23"][data-status="failed"]');
@@ -398,28 +738,36 @@ export const SCENARIOS: Record<string, Scenario> = {
     title: "Settings dialog (switch tabs freely)",
     stage: plain,
     steps: async () => {
-      await click(".user-card-btn");
+      await openAccountMenu();
       await clickText("body", /^(设置|Settings)$/);
     },
   },
   "transcript-notices": {
-    title: "Transcript status lines: thinking archive unavailable + history gap (ExpandableNotice, ellipsis below 768px)",
+    title:
+      "Transcript status lines: thinking archive unavailable + history gap (ExpandableNotice, ellipsis below 768px)",
     stage: async (page) => {
       const b = await plain(page);
-      Object.assign(b.snapshot(), { display: { high_water: 0, coverage: "unavailable" }, history_gap: true });
+      Object.assign(b.snapshot(), {
+        display: { high_water: 0, coverage: "unavailable" },
+        history_gap: true,
+      });
       return b;
     },
   },
   "transcript-display-missing": {
-    title: "Transcript status line: no recoverable thinking archive (displayMissing)",
+    title:
+      "Transcript status line: no recoverable thinking archive (displayMissing)",
     stage: async (page) => {
       const b = await plain(page);
-      Object.assign(b.snapshot(), { display: { high_water: 0, coverage: "missing" } });
+      Object.assign(b.snapshot(), {
+        display: { high_water: 0, coverage: "missing" },
+      });
       return b;
     },
   },
   "settings-feedback": {
-    title: "Settings › Backend › Save: long feedback banner (ExpandableNotice) and a held warn toast (2-line clamp below 768px)",
+    title:
+      "Settings › Backend › Save: long feedback banner (ExpandableNotice) and a held warn toast (2-line clamp below 768px)",
     stage: plain,
     steps: async () => {
       await openAccountMenu();
