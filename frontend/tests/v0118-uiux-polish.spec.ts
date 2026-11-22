@@ -91,24 +91,25 @@ test.describe("touch (hover: none) at 390", () => {
 test.describe("narrow 390", () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
-  test("3.3 host-offline notice is one 44px line that expands and collapses", async ({
+  test("3.3 host-offline notice is one line with a disclosure that expands and collapses", async ({
     page,
   }) => {
+    // v0.1.20 keeps the reviewed ComposerHostNotice (one-line ellipsis plus
+    // an explicit disclosure popover) instead of the v0.1.18 ExpandableNotice.
     await scenario(page, "default");
-    const notice = page.locator(".composer-offline-banner").first();
+    const notice = page.locator(".composer-host-notice").first();
     await expect(notice).toBeVisible();
-    await expect(notice).toHaveAttribute("data-expanded", "false");
-    // The composer reveals the banner with a short height transition.
+    const text = notice.locator(".composer-notice-text");
     await expect
-      .poll(() => notice.evaluate((el) => el.getBoundingClientRect().height))
-      .toBeGreaterThanOrEqual(44);
-    const toggle = notice.locator(".expandable-notice-toggle");
-    await expect(toggle).toHaveText(/说明/);
-    await toggle.click();
-    await expect(notice).toHaveAttribute("data-expanded", "true");
-    await expect(toggle).toHaveAttribute("aria-expanded", "true");
-    await toggle.click();
-    await expect(notice).toHaveAttribute("data-expanded", "false");
+      .poll(() => text.evaluate((el) => el.getBoundingClientRect().height))
+      .toBeLessThanOrEqual(24);
+    const reveal = notice.locator(".composer-notice-reveal");
+    await expect(reveal).toBeVisible();
+    await reveal.click();
+    await expect(reveal).toHaveAttribute("aria-expanded", "true");
+    await expect(notice.locator(".composer-notice-popover")).toBeVisible();
+    await reveal.click();
+    await expect(reveal).toHaveAttribute("aria-expanded", "false");
   });
 
   test("3.2 actionable permission cards: Will run, Deny then Allow once, no overflow", async ({
