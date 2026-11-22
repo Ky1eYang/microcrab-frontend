@@ -154,6 +154,25 @@
   color: var(--text-2);
 }
 
+/* Secret variables: the key is listed, the value never is. A grayscale key
+ * glyph marks them in the tree and in the protected-value line. */
+.native-state-key .native-state-secret {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.native-state-detail .native-state-protected {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.native-state-protected > svg {
+  flex: none;
+  color: var(--text-3);
+}
+
 .native-state-detail {
   min-inline-size: 0;
   padding-block-start: var(--sp-4);

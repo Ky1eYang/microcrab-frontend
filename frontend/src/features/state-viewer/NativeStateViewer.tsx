@@ -403,7 +403,10 @@ function StateBranch({
         >
           <code>{node.label}</code>
           {node.metadata.visibility === "secret" ? (
-            <small>{labels.secret}</small>
+            <small className="native-state-secret" data-visibility="secret">
+              <Icon name="key" size={12} aria-hidden="true" />
+              {labels.secret}
+            </small>
           ) : (
             node.type && <small>{labels[node.type]}</small>
           )}
@@ -464,7 +467,10 @@ function StateDetails({
         ))}
       </dl>
       {metadata.visibility === "secret" ? (
-        <p>{labels.protected}</p>
+        <p className="inline-notice native-state-protected" data-tone="neutral">
+          <Icon name="key" size={14} aria-hidden="true" />
+          <span>{labels.protected}</span>
+        </p>
       ) : (
         node.preview !== undefined && (
           <>
