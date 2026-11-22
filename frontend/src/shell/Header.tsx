@@ -160,7 +160,7 @@ export function Header() {
       ? t("plugins.title")
       : state.page === "plugin"
         ? (activePluginName ?? t("plugins.title"))
-        : current?.title || current?.id || "New chat";
+        : current?.title || current?.id || t("rail.newConversation");
   const hiddenChildren = new Set((state.childList?.parent_session_id === state.sessionId ? state.childList.children : []).filter(settledReturnChild).map((child) => child.id));
   const children = (
     state.childList?.parent_session_id === state.sessionId
