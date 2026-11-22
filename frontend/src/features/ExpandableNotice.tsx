@@ -254,7 +254,9 @@ function NoticeText({
           dismiss();
         }}
       >
-        {text}
+        {/* Only the open popover carries a copy, so text queries and the
+            accessibility tree see the message once while it is closed. */}
+        {open ? text : null}
       </span>
     </span>
   );
