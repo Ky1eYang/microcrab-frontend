@@ -71,6 +71,10 @@ test.describe("touch (hover: none) at 390", () => {
     await expect(agent).toBeVisible();
     await expect(model).toBeVisible();
     for (const control of [agent, model]) {
+      // The pills settle after the composer's first layout pass.
+      await expect
+        .poll(async () => (await measureHitArea(control)).hitW)
+        .toBeGreaterThanOrEqual(44);
       const size = await measureHitArea(control);
       // Visual stays compact; only the invisible hit pad grows.
       expect(size.visualH).toBeLessThan(44);
@@ -92,6 +96,11 @@ test.describe("touch (hover: none) at 390", () => {
   }) => {
     const expectHit = async (control: Locator, label: string) => {
       await expect(control, label).toBeVisible();
+      await expect
+        .poll(async () => (await measureHitArea(control)).hitW, {
+          message: `${label} settles`,
+        })
+        .toBeGreaterThanOrEqual(44);
       const size = await measureHitArea(control);
       expect(size.hitW, `${label} hit width`).toBeGreaterThanOrEqual(44);
       expect(size.hitH, `${label} hit height`).toBeGreaterThanOrEqual(44);
