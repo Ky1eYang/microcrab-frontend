@@ -1,3 +1,4 @@
+import { referenceLabels } from "../features/referenceLabels";
 import {
   isConversation,
   projectIdentity,
@@ -13,27 +14,25 @@ import { hostReason } from "../features/popups/RemoteConnectDialog";
 import { projectHostTerminal } from "../state/host-readiness";
 import { UserCard } from "./UserCard";
 import { GlyphIcon } from "../features/shared";
+import { shortRelativeTime } from "../features/home/RecentSessions/recent";
+import {
+  railDrawerTrigger,
+  setRailDrawerOpen,
+  useRailDrawerOpen,
+} from "./rail-drawer";
 import { focusFirst, trapFocus, useNarrowViewport } from "../client/viewport";
 
-const label = (s: SessionView) => s.title.trim() || s.id;
 const basename = (path: string) =>
   path.replace(/\\/g, "/").replace(/\/$/, "").split("/").pop() || path;
-function relativeTime(time?: number | null) {
-  const seconds = Math.max(0, (Date.now() - (time ?? Date.now())) / 1000);
-  return seconds < 60
-    ? "now"
-    : seconds < 3600
-      ? `${Math.floor(seconds / 60)}m`
-      : seconds < 86400
-        ? `${Math.floor(seconds / 3600)}h`
-        : `${Math.floor(seconds / 86400)}d`;
-}
+const relativeTime = shortRelativeTime;
 
 function SessionRow({
   session,
+  title,
   onPick,
 }: {
   session: SessionView;
+  title: string;
   onPick?: () => void;
 }) {
   const { state, dispatch } = useAppFields([
@@ -85,7 +84,7 @@ function SessionRow({
         if (session.reachable === false)
           dispatch({
             type: "WarnUnreachableWorkspace",
-            value: session.directory || label(session),
+            value: session.directory || title,
           });
         act("Attach");
         onPick?.();
@@ -129,13 +128,13 @@ function SessionRow({
       </span>
       <span
         className="session-item-title"
-        title={label(session)}
+        title={title}
         onDoubleClick={(e) => {
           e.stopPropagation();
           act("OpenRename");
         }}
       >
-        {label(session)}
+        {title}
       </span>
       <span className="session-item-time">
         {relativeTime(session.time?.updated)}
@@ -240,13 +239,13 @@ export function SessionRail() {
   const [expandedMore, setExpandedMore] = useState<Set<string>>(new Set());
   const emit = (type: string, value?: unknown) => dispatch({ type, value });
   const narrow = useNarrowViewport();
-  const [drawerOpen, setDrawerOpen] = useState(false);
+  const drawerOpen = useRailDrawerOpen();
+  const setDrawerOpen = (value: boolean) => setRailDrawerOpen(value);
   const drawer = useRef<HTMLElement>(null);
-  const trigger = useRef<HTMLButtonElement>(null);
   const drawerActive = narrow && drawerOpen;
   const closeDrawer = () => {
     setDrawerOpen(false);
-    trigger.current?.focus();
+    railDrawerTrigger()?.focus();
   };
   // Closing the drawer by any path (backdrop, Esc, navigation, widening) also
   // closes its rail menus, so their click-outside backdrop never outlives it.
@@ -279,6 +278,12 @@ export function SessionRail() {
     if (!drawerActive) return;
     focusFirst(drawer.current);
     const onKey = (event: KeyboardEvent) => {
+      const target = event.target as Element | null;
+      if (
+        target?.closest?.('[role="dialog"], [aria-modal="true"]') &&
+        !drawer.current?.contains(target)
+      )
+        return;
       if (event.key === "Escape") {
         event.preventDefault();
         closeDrawer();
@@ -305,17 +310,17 @@ export function SessionRail() {
     >
       <div className="rail-top-actions">
         <button
-          ref={trigger}
           className="rail-icon-btn"
           title={t("rail.expand")}
           aria-label={t("rail.expand")}
-          aria-expanded={narrow ? drawerOpen : false}
+          aria-expanded={false}
           onClick={toggleRail}
         >
           <Icon name="sidebar" size={18} />
         </button>
         <button
           className="rail-icon-btn primary-icon-btn"
+          data-testid="nav-new-chat"
           title={t("rail.newConversation")}
           aria-label={t("rail.newConversation")}
           onClick={() => emit("NewChat")}
@@ -324,6 +329,7 @@ export function SessionRail() {
         </button>
         <button
           className="rail-icon-btn"
+          data-testid="nav-dashboard"
           data-active={state.page === "dashboard"}
           title={t("rail.dashboard")}
           aria-label={t("rail.dashboard")}
@@ -343,6 +349,7 @@ export function SessionRail() {
         </button>
         <button
           className="rail-icon-btn"
+          data-testid="nav-history"
           title={t("rail.search")}
           aria-label={t("rail.search")}
           onClick={() => emit("OpenSearch")}
@@ -361,11 +368,13 @@ export function SessionRail() {
     if (key !== UNKNOWN_PROJECT) groups.set(key, []);
   }
   const conversations: SessionView[] = [];
+  const sessionLabel = referenceLabels("session", state.sessions.map((row) => row.id));
+  const label = (s: SessionView) => s.title.trim() || sessionLabel(s.id);
   const sessions = state.sessions.filter(
     (s) =>
       !s.parentID &&
       (!state.filter ||
-        label(s).toLowerCase().includes(state.filter.toLowerCase())),
+        (label(s).toLowerCase().includes(state.filter.toLowerCase()) || s.id === state.filter.trim())),
   );
   for (const session of sessions) {
     if (
@@ -407,6 +416,7 @@ export function SessionRail() {
       <div className="rail-new-chat-container">
         <button
           className="session-rail-new-btn"
+          data-testid="nav-new-chat"
           data-active={state.page === "home"}
           onClick={() => emit("NewChat")}
         >
@@ -417,6 +427,7 @@ export function SessionRail() {
       <div className="session-rail-subnav">
         <button
           className="subnav-item-btn"
+          data-testid="nav-dashboard"
           data-active={state.page === "dashboard"}
           title={t("rail.dashboard")}
           onClick={() => emit("OpenDashboard")}
@@ -436,8 +447,15 @@ export function SessionRail() {
         </button>
         <button
           className="subnav-item-btn"
+          data-testid="nav-history"
           title={t("rail.history")}
-          onClick={() => emit("OpenSearch")}
+          onClick={() => {
+            if (drawerActive) {
+              setDrawerOpen(false);
+              railDrawerTrigger()?.focus();
+            }
+            emit("OpenSearch");
+          }}
         >
           <Icon name="history" size={15} />
           <span>{t("rail.history")}</span>
@@ -672,7 +690,7 @@ export function SessionRail() {
                           (showAll ? rows : rows.slice(0, 3)).map((s) => (
                             <SessionRow
                               key={s.id}
-                              session={s}
+                              session={s} title={label(s)}
                               onPick={pickSession}
                             />
                           ))
@@ -726,7 +744,7 @@ export function SessionRail() {
                     sessionActiveTime(b as any) - sessionActiveTime(a as any),
                 )
                 .map((s) => (
-                  <SessionRow key={s.id} session={s} onPick={pickSession} />
+                  <SessionRow key={s.id} session={s} title={label(s)} onPick={pickSession} />
                 ))
             ) : (
               <div className="rail-empty-hint">{t("rail.noOrdinary")}</div>
@@ -740,21 +758,16 @@ export function SessionRail() {
     </nav>
   );
   if (narrow)
-    return (
+    return drawerOpen ? (
       <>
-        {collapsedRail}
-        {drawerOpen && (
-          <>
-            <div
-              className="rail-drawer-backdrop"
-              data-testid="rail-drawer-backdrop"
-              aria-hidden="true"
-              onClick={closeDrawer}
-            />
-            {expandedRail}
-          </>
-        )}
+        <div
+          className="rail-drawer-backdrop"
+          data-testid="rail-drawer-backdrop"
+          aria-hidden="true"
+          onClick={closeDrawer}
+        />
+        {expandedRail}
       </>
-    );
+    ) : null;
   return state.railCollapsed ? collapsedRail : expandedRail;
 }

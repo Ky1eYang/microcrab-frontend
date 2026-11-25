@@ -1,14 +1,12 @@
-import {
-  useId,
-  useLayoutEffect,
-  useMemo,
-  useState,
-  type ReactNode,
-} from "react";
+import { t, type ResolvedLocale } from "../../i18n";
+import { sessionInspectionStatus } from "../shared/session-inspection-status";
+import { JsonValueView } from "../content-inspection/JsonValueView";
+import { useId, useMemo, useState, type ReactNode } from "react";
 import { describeSchemaFields } from "./schema-fields";
 import { formatJson, RICH_TEXT_LIMIT } from "../content-inspection/format";
 import type { AppState } from "../../client/types";
 import { useAppSelector, useAppStore } from "../../state";
+import { useScopedPrompt } from "./use-scoped-prompt";
 import {
   readFrozenPrompt,
   type PromptSelection,
@@ -16,6 +14,11 @@ import {
   type ReadFrozenPrompt,
 } from "./frozen-prompt";
 import { promptLabels, type PromptLabels } from "./labels";
+import type {
+  CurrentToolPermissions,
+  ReadCurrentPermissions,
+  ToolPermissionDisplay,
+} from "./tool-permission";
 import "./native-prompt-viewer.css";
 
 function promptScope(state: AppState, sessionId: string | null) {
@@ -29,6 +32,7 @@ function promptScope(state: AppState, sessionId: string | null) {
     !sessionId ||
     state.sessionId !== sessionId ||
     state.sessionAttachingId ||
+    state.sessionTransportRecovery ||
     state.popup?.type === "subagentDetail" ||
     state.historyMutationPending ||
     state.retryPending ||
@@ -54,18 +58,39 @@ function promptScope(state: AppState, sessionId: string | null) {
   };
 }
 
+function permissionReadScope(state: AppState, sessionId: string | null) {
+  if (state.connection !== "ws" || state.modeSelectionPending) return;
+  const session = state.sessions.find((item) => item.id === sessionId);
+  // These are invalidation hints, not facts to display or a substitute for the
+  // server's live catalog and policy proof. Externally changed policy may not
+  // move the local revision, which is why observations expire independently.
+  return JSON.stringify([
+    session?.status === "closed",
+    session?.status === "faulted",
+    session?.archived,
+    session?.mode,
+    state.policy?.revision,
+  ]);
+}
+
 /** Mount this standalone viewer only when the Prompt panel is selected. */
 export function NativePromptViewer({
   sessionId,
   active = true,
   readPrompt,
+  readPermissions,
 }: {
   sessionId: string | null;
   active?: boolean;
   readPrompt?: ReadFrozenPrompt;
+  readPermissions?: ReadCurrentPermissions;
 }) {
   return active ? (
-    <ActivePromptViewer sessionId={sessionId} readPrompt={readPrompt} />
+    <ActivePromptViewer
+      sessionId={sessionId}
+      readPrompt={readPrompt}
+      readPermissions={readPermissions}
+    />
   ) : null;
 }
 
@@ -74,9 +99,11 @@ export default NativePromptViewer;
 function ActivePromptViewer({
   sessionId,
   readPrompt,
+  readPermissions,
 }: {
   sessionId: string | null;
   readPrompt?: ReadFrozenPrompt;
+  readPermissions?: ReadCurrentPermissions;
 }) {
   const store = useAppStore();
   const api = store.api;
@@ -84,12 +111,36 @@ function ActivePromptViewer({
     (state) => promptScope(state, sessionId),
     (a, b) => a?.key === b?.key,
   );
-  const labels = useAppSelector((state) => promptLabels[state.resolvedLocale]);
+  const locale = useAppSelector((state) => state.resolvedLocale);
+  const labels = promptLabels[locale];
+  const status = useAppSelector((state) => sessionInspectionStatus(state, sessionId));
+  const permissionScope = useAppSelector((state) =>
+    permissionReadScope(state, sessionId),
+  );
+  const currentPermissionScope = useMemo(
+    () => () => permissionReadScope(store.getSnapshot(), sessionId),
+    [sessionId, store],
+  );
   const read = useMemo<ReadFrozenPrompt>(
     () =>
       readPrompt ??
       ((selection, signal) => readFrozenPrompt(api, selection, signal)),
     [readPrompt, api],
+  );
+  const readRuntime = useMemo<ReadCurrentPermissions>(
+    () =>
+      readPermissions ??
+      ((invalidation, signal) => {
+        const owner = store.getSnapshot().authSession?.principal?.owner;
+        if (!scope || !owner) return Promise.resolve(undefined);
+        return api.readCurrentPermissions(
+          owner,
+          scope.sessionId,
+          invalidation,
+          signal,
+        );
+      }),
+    [api, scope, store, readPermissions],
   );
   const current = useMemo(
     () => () =>
@@ -103,12 +154,16 @@ function ActivePromptViewer({
         <ScopedPrompt
           key={scope.key}
           labels={labels}
+          locale={locale}
           selection={scope}
           read={read}
+          readPermissions={readRuntime}
           current={current}
+          permissionScope={permissionScope}
+          currentPermissionScope={currentPermissionScope}
         />
       ) : (
-        <p role="status">{labels.outOfScope}</p>
+        <p role="status">{status ? t(status, undefined, locale) : labels.outOfScope}</p>
       )}
     </section>
   );
@@ -116,59 +171,58 @@ function ActivePromptViewer({
 
 function ScopedPrompt({
   labels,
+  locale,
   selection,
   read,
+  readPermissions,
   current,
+  permissionScope,
+  currentPermissionScope,
 }: {
   labels: PromptLabels;
+  locale: ResolvedLocale;
   selection: PromptSelection;
   read: ReadFrozenPrompt;
+  readPermissions: ReadCurrentPermissions;
   current: () => boolean;
+  permissionScope: string | undefined;
+  currentPermissionScope: () => string | undefined;
 }) {
-  const [attempt, setAttempt] = useState(0);
-  const request = useMemo(
-    () => ({ attempt, current, read, selection }),
-    [attempt, current, read, selection],
+  const {
+    prompt,
+    failure,
+    permissions,
+    readingPermissions,
+    canReadPermissions,
+    refresh,
+    retry,
+  } = useScopedPrompt(
+    selection,
+    read,
+    current,
+    readPermissions,
+    permissionScope,
+    currentPermissionScope,
   );
-  const [snapshot, setSnapshot] = useState<{
-    request: typeof request;
-    result: PromptResult;
-  }>();
-  useLayoutEffect(() => {
-    if (!request.current()) return;
-    const controller = new AbortController();
-    const accept = (result: PromptResult) => {
-      if (!controller.signal.aborted && request.current())
-        setSnapshot({ request, result });
-    };
-    async function load() {
-      try {
-        const { sessionId, lineage, epoch } = request.selection;
-        accept(
-          await request.read({ sessionId, lineage, epoch }, controller.signal),
-        );
-      } catch {
-        accept({ status: "failed" });
-      }
-    }
-    void load();
-    return () => controller.abort();
-  }, [request]);
-
-  const result =
-    current() && snapshot?.request === request ? snapshot.result : undefined;
-  if (!result) return <p role="status">{labels.loading}</p>;
-  if (result.status === "available")
-    return <PromptContents result={result} labels={labels} />;
+  if (prompt)
+    return (
+      <PromptContents
+        result={prompt}
+        labels={labels}
+        locale={locale}
+        current={current}
+        permissions={permissions}
+        readingPermissions={readingPermissions}
+        canReadPermissions={canReadPermissions}
+        refresh={refresh}
+      />
+    );
+  if (!failure) return <p role="status">{labels.loading}</p>;
   return (
     <>
-      <p role="status">{labels[result.status]}</p>
-      {result.status === "failed" || result.status === "unavailable" ? (
-        <button
-          type="button"
-          className="ghost-btn"
-          onClick={() => setAttempt((n) => n + 1)}
-        >
+      <p role="status">{labels[failure]}</p>
+      {failure === "failed" || failure === "unavailable" ? (
+        <button type="button" className="ghost-btn" onClick={retry}>
           {labels.retry}
         </button>
       ) : null}
@@ -181,9 +235,24 @@ const PAGE_SIZE = 20;
 function PromptContents({
   result,
   labels,
+  locale,
+  current,
+  permissions,
+  readingPermissions,
+  canReadPermissions,
+  refresh,
 }: {
-  result: Extract<PromptResult, { status: "available" }>;
+  result: Pick<
+    Extract<PromptResult, { status: "available" }>,
+    "system" | "tools"
+  >;
   labels: PromptLabels;
+  locale: ResolvedLocale;
+  current: () => boolean;
+  permissions: CurrentToolPermissions | undefined;
+  readingPermissions: boolean;
+  canReadPermissions: boolean;
+  refresh: () => void;
 }) {
   const [page, setPage] = useState(0);
   const [expanded, setExpanded] = useState<number>();
@@ -215,6 +284,18 @@ function PromptContents({
       <p className="native-prompt-declarations-note">
         {labels.declarationsOnly}
       </p>
+      {result.tools.length > 0 && (
+        <button
+          type="button"
+          className="ghost-btn native-prompt-permission-refresh"
+          aria-disabled={!canReadPermissions || readingPermissions}
+          onClick={() => {
+            if (canReadPermissions && !readingPermissions) refresh();
+          }}
+        >
+          {labels.refreshPermissions}
+        </button>
+      )}
       {!result.tools.length ? (
         <p>{labels.noTools}</p>
       ) : (
@@ -223,6 +304,13 @@ function PromptContents({
             const index = start + offset;
             const open = index === expanded;
             const panelId = `${toolListId}-tool-${index}`;
+            const permissionStatus: ToolPermissionDisplay = readingPermissions
+              ? "loading"
+              : permissions
+                ? (permissions.get(tool.name) ?? "unregistered")
+                : "unavailable";
+            const { label, explanation, tone } =
+              labels.permission(permissionStatus);
             return (
               <li key={index}>
                 <h4>
@@ -231,9 +319,27 @@ function PromptContents({
                     className="native-prompt-tool"
                     aria-expanded={open}
                     aria-controls={panelId}
+                    aria-labelledby={`${panelId}-name`}
+                    aria-describedby={`${panelId}-permission ${panelId}-permission-description`}
                     onClick={() => setExpanded(open ? undefined : index)}
                   >
-                    <code translate="no">{tool.name}</code>
+                    <span className="native-prompt-tool-label">
+                      <code id={`${panelId}-name`} translate="no">
+                        {tool.name}
+                      </code>{" "}
+                      <span
+                        id={`${panelId}-permission`}
+                        className="native-prompt-permission"
+                        data-status={permissionStatus}
+                        data-tone={tone}
+                        title={explanation}
+                      >
+                        {label}
+                      </span>
+                      <span id={`${panelId}-permission-description`} hidden>
+                        {explanation}
+                      </span>
+                    </span>
                   </button>
                 </h4>
                 <div
@@ -247,6 +353,8 @@ function PromptContents({
                       <ParameterSchema
                         source={tool.parameters}
                         labels={labels}
+                        locale={locale}
+                        current={current}
                       />
                     </>
                   )}
@@ -286,9 +394,13 @@ function PromptContents({
 function ParameterSchema({
   source,
   labels,
+  locale,
+  current,
 }: {
   source: string;
+  current: () => boolean;
   labels: PromptLabels;
+  locale: ResolvedLocale;
 }) {
   const summary = useMemo(() => describeSchemaFields(source), [source]);
   const [showSource, setShowSource] = useState(false);
@@ -342,25 +454,32 @@ function ParameterSchema({
       </button>
       <div id={sourceId} hidden={!showSource}>
         {showSource && (
-          <>
-            {formatted !== source || raw ? (
-              <label className="native-prompt-raw-choice">
-                <input
-                  type="checkbox"
-                  checked={raw}
-                  onChange={(event) => setRaw(event.currentTarget.checked)}
-                />
-                {labels.rawSource}
-              </label>
-            ) : null}
-            <pre
-              className="native-prompt-source native-prompt-schema-source"
-              tabIndex={0}
-              aria-label={labels.parameters}
-            >
-              <SchemaSource source={formatted} />
-            </pre>
-          </>
+          <JsonValueView
+            locale={locale}
+            isCurrent={current}
+            source={{ kind: "text", text: source }}
+            renderText={() => (
+              <>
+                {formatted !== source || raw ? (
+                  <label className="native-prompt-raw-choice">
+                    <input
+                      type="checkbox"
+                      checked={raw}
+                      onChange={(event) => setRaw(event.currentTarget.checked)}
+                    />
+                    {labels.rawSource}
+                  </label>
+                ) : null}
+                <pre
+                  className="native-prompt-source native-prompt-schema-source"
+                  tabIndex={0}
+                  aria-label={labels.parameters}
+                >
+                  <SchemaSource source={formatted} />
+                </pre>
+              </>
+            )}
+          />
         )}
       </div>
     </>

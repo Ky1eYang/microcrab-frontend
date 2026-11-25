@@ -72,8 +72,8 @@
   padding: 0;
   color: var(--text);
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
+  border: 1px solid var(--border-strong);
+  border-radius: 14px;
   box-shadow: var(--shadow-modal);
   overflow: hidden;
 }
@@ -90,14 +90,15 @@
   justify-content: space-between;
   gap: var(--sp-3);
   flex: 0 0 auto;
-  padding: var(--sp-3) var(--sp-4);
+  padding: 12px 18px;
   border-bottom: 1px solid var(--border);
+  background: color-mix(in oklab, var(--bg-subtle) 55%, var(--surface));
 }
 .content-dialog-head h2 {
   margin: 0;
   min-width: 0;
   overflow-wrap: anywhere;
-  font-size: var(--fs-lg);
+  font-size: var(--fs-md);
   font-weight: 600;
 }
 .content-dialog-head button {
@@ -123,7 +124,7 @@
   min-width: 0;
   overflow: auto;
   overscroll-behavior: contain;
-  padding: var(--sp-4);
+  padding: 12px 18px 16px;
 }
 .content-dialog :focus-visible {
   outline: 2px solid var(--focus);

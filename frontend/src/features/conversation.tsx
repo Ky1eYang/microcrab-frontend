@@ -4,6 +4,7 @@ import {
 } from "./plugin-block-variants";
 import { isDirectUserSource } from "../client/input-source";
 import { CitationConversationProvider } from "./citations/context";
+import { ExpandableNotice } from "./ExpandableNotice";
 import { useClientPlugins } from "../state";
 import {
   sessionTabPlugins,
@@ -61,6 +62,7 @@ import {
   SubagentAccordionGroup,
   ToolAccordionGroup,
   answerTokenUsage,
+  retryEligible,
   type ToolGroupPresentation,
 } from "./views";
 import {
@@ -267,7 +269,6 @@ function ConversationActionBar({
       );
   const variantActions = useAnswerVariantActions(answer);
   const observed = useRef<{ id?: string; pending: boolean }>({ pending: false });
-  const [settled, setSettled] = useState<{ id: string; at: number }>();
   const output =
     user || readOnly
       ? undefined
@@ -297,33 +298,20 @@ function ConversationActionBar({
         observed.current.id === operationId &&
         observed.current.pending));
   useLayoutEffect(() => {
-    if (
-      operationId &&
-      !pending &&
-      !superseded &&
-      observed.current.pending &&
-      observed.current.id === operationId
-    )
-      setSettled({ id: operationId, at: Date.now() });
     observed.current = { id: operationId, pending };
-  }, [operationId, pending, superseded]);
-  let timestamp: number | null | undefined;
-  for (const block of blocks)
-    timestamp = block.endedMs ?? block.startedMs ?? timestamp;
-  const terminalAt =
-    operationId && !superseded
-      ? exactLifecycle?.terminalAt?.[operationId]
-      : undefined;
-  const observedCompletionAt =
-    operationId && !superseded
-      ? (exactLifecycle?.terminalObservedAt?.[operationId] ??
-        (operationId === settled?.id ? settled.at : undefined))
-      : undefined;
+  }, [operationId, pending]);
+  // Results and operation feedback are not model responses. An unmatched tool
+  // execution card likewise has no response authority, even if it has a clock.
+  const response = user
+    ? undefined
+    : [...blocks].reverse().find(
+        (block) => block.role === "assistant" && block.responseAdmission != null,
+      );
   return (
     <ActionBar
       user={user}
       pending={pending}
-      observedCompletionAt={observedCompletionAt}
+      answerAdmitted={response?.responseAdmission === "admitted"}
       text={user ? first.payload.text : variantActions.text}
       pluginActions={
         user || readOnly ? undefined : variantActions.pluginActions
@@ -332,7 +320,7 @@ function ConversationActionBar({
       timestamp={
         user
           ? (first.startedMs ?? first.endedMs)
-          : (terminalAt ?? (observedCompletionAt == null ? timestamp : undefined))
+          : response?.responseCompletedAtMs
       }
       revertId={
         user &&
@@ -345,10 +333,10 @@ function ConversationActionBar({
       retryId={
         !readOnly &&
         retryOperationId &&
-        blocks.some(
+        blocks.some((block) => retryEligible(block, retryOperationId)) &&
+        !blocks.some(
           (block) =>
-            block.operationId === retryOperationId &&
-            ["error", "cancelled"].includes(block.stream ?? ""),
+            !!block.payload.failure && retryEligible(block, retryOperationId),
         )
           ? retryOperationId
           : undefined
@@ -1577,37 +1565,42 @@ function ConversationList({
       >
         <div className="transcript-inner">
           {historyChanged && (
-            <p
+            <ExpandableNotice
               className="child-content-notice"
+              tone="neutral"
+              marker="none"
               role="status"
               data-testid="history-reading-changed"
-            >
-              {t("conversation.inspectionChanged")}
-            </p>
+              text={t("conversation.inspectionChanged")}
+            />
           )}
           {notices}
           {(transcript.displayCoverage === "unavailable" ||
             transcript.displayCoverage === "missing") && (
-            <div
-              className="transcript-history-fold-banner"
+            <ExpandableNotice
+              className="transcript-history-fold-banner transcript-status-notice"
+              tone={
+                transcript.displayCoverage === "unavailable"
+                  ? "warn"
+                  : "neutral"
+              }
               role="status"
               data-testid="conversation-display-coverage"
-            >
-              {t(
+              text={t(
                 transcript.displayCoverage === "unavailable"
                   ? "conversation.displayUnavailable"
                   : "conversation.displayMissing",
               )}
-            </div>
+            />
           )}
           {transcript.historyGap && (
-            <div
-              className="transcript-history-fold-banner"
+            <ExpandableNotice
+              className="transcript-history-fold-banner transcript-status-notice"
+              tone="neutral"
               role="status"
               data-testid="conversation-history-gap"
-            >
-              {t("conversation.historyGap")}
-            </div>
+              text={t("conversation.historyGap")}
+            />
           )}
           {startTurn === 0 && canLoadRemote && (
             <div className="transcript-history-fold-banner">
@@ -1746,15 +1739,20 @@ function ConversationList({
             );
           })}
           {!readOnly && state.isCreatingSession ? (
-            <div className="session-waiting-banner">
-              <Icon
-                name="spinner"
-                size={16}
-                className="animate-spin"
-                strokeWidth="2.5"
-              />
-              <span>{t("conversation.connecting")}</span>
-            </div>
+            <ExpandableNotice
+              className="session-waiting-banner"
+              tone="neutral"
+              role={null}
+              marker={
+                <Icon
+                  name="spinner"
+                  size={16}
+                  className="animate-spin"
+                  strokeWidth="2.5"
+                />
+              }
+              text={t("conversation.connecting")}
+            />
           ) : !readOnly &&
             isBusy(transcript) &&
             !visible.some((b) => b.role === "assistant" && b.payload.text) ? (

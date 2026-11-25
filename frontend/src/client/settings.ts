@@ -24,6 +24,7 @@ export const LIMIT_FIELDS = [
   "sleep_max_ms",
 ] as const;
 export const DEFAULT_TOOL_IMAGE_BYTES = 1024 * 1024;
+export const DEFAULT_AGENT_WASM_FUEL = 10_000_000;
 export type LimitField = (typeof LIMIT_FIELDS)[number];
 export type Limits = Record<LimitField, number>;
 export interface AutoCompactionPolicy {
@@ -59,6 +60,7 @@ export interface SettingsOverrides {
   review_model?: NativeModelSelection | null;
   auto_compaction?: AutoCompactionPolicy;
   auto_naming?: boolean;
+  agent_wasm_fuel?: number;
 }
 export interface SettingsValues extends Omit<
   SettingsOverrides,
@@ -68,13 +70,18 @@ export interface SettingsValues extends Omit<
   model_selection?: NativeModelSelection | null;
   agent?: string | null;
   mode?: string | null;
+  agent_wasm_fuel: number;
 }
 export interface SettingsSnapshot {
   revision: number;
   overrides: SettingsOverrides;
   effective: SettingsValues;
   sources: Record<string, "admin" | "user" | "project" | "session">;
-  constraints: { limits: Limits };
+  constraints: {
+    limits: Limits;
+    agent_wasm_fuel_default?: number;
+    agent_wasm_fuel_max?: number;
+  };
   desired_effective: SettingsValues;
   applied_revision: number;
   application: "defaults_saved" | "applied" | "deferred";
@@ -169,8 +176,11 @@ export function validateSettingsOverrides(
     "review_model",
     "auto_compaction",
     "auto_naming",
+    "agent_wasm_fuel",
     ...PROMPT_FIELDS,
   ]);
+  if (row.agent_wasm_fuel !== undefined)
+    safeInteger(row.agent_wasm_fuel, "settings.agent_wasm_fuel", 1);
   for (const field of PROMPT_FIELDS)
     if (row[field] != null && typeof row[field] !== "string")
       throw Error(`settings.${field}: expected string or null`);
@@ -289,13 +299,36 @@ export function validateSettingsSnapshot(
       `settings.constraints.limits.${field}`,
     );
   }
+  if (value.constraints.agent_wasm_fuel_default !== undefined)
+    safeInteger(
+      value.constraints.agent_wasm_fuel_default,
+      "settings.constraints.agent_wasm_fuel_default",
+      1,
+    );
+  if (value.constraints.agent_wasm_fuel_max !== undefined)
+    safeInteger(
+      value.constraints.agent_wasm_fuel_max,
+      "settings.constraints.agent_wasm_fuel_max",
+      1,
+    );
 }
-/** Legacy omission selects the canonical 1MiB image default; never alter the wire snapshot or sparse overrides. */
+/** Legacy omission selects the canonical 1MiB image and 10M fuel defaults; never alter the wire snapshot or sparse overrides. */
 export function normalizeSettingsSnapshot(value: unknown): SettingsSnapshot {
   validateSettingsSnapshot(value);
   const view = structuredClone(value);
-  for (const limits of [view.effective.limits, view.desired_effective.limits, view.constraints.limits])
-    if (limits.max_tool_image_bytes === undefined) limits.max_tool_image_bytes = DEFAULT_TOOL_IMAGE_BYTES;
+  for (const resolved of [view.effective, view.desired_effective]) {
+    if (resolved.limits.max_tool_image_bytes === undefined)
+      resolved.limits.max_tool_image_bytes = DEFAULT_TOOL_IMAGE_BYTES;
+    if (resolved.agent_wasm_fuel === undefined)
+      resolved.agent_wasm_fuel = DEFAULT_AGENT_WASM_FUEL;
+  }
+  if (view.constraints.limits.max_tool_image_bytes === undefined)
+    view.constraints.limits.max_tool_image_bytes = DEFAULT_TOOL_IMAGE_BYTES;
+  if (view.constraints.agent_wasm_fuel_default === undefined)
+    view.constraints.agent_wasm_fuel_default = DEFAULT_AGENT_WASM_FUEL;
+  if (view.constraints.agent_wasm_fuel_max === undefined)
+    view.constraints.agent_wasm_fuel_max =
+      view.constraints.agent_wasm_fuel_default;
   return view;
 }
 export function validateProviderConfig(

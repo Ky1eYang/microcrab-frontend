@@ -1,6 +1,5 @@
 import { jsonLanguage } from "@codemirror/lang-json";
 import type { ApiClient } from "../../client/api";
-
 export interface PromptSelection {
   sessionId: string;
   lineage: string;
@@ -8,8 +7,12 @@ export interface PromptSelection {
 }
 
 export type PromptResult =
-  | { status: "available"; system: string; tools: readonly DeclaredTool[] }
-  | { status: "stale" | "unavailable" | "responseLimit" | "failed" };
+  | {
+      status: "available";
+      system: string;
+      tools: readonly DeclaredTool[];
+    }
+  | { status: "stale" | "unavailable" | "responseLimit" | "failed" | "forbidden" };
 
 export interface DeclaredTool {
   name: string;
@@ -60,14 +63,25 @@ function decodePrompt(text: string, selection: PromptSelection): PromptResult {
   if (root?.name !== "Object") return { status: "failed" };
   const slice = ({ from, to }: { from: number; to: number }) =>
     text.slice(from, to);
-  function fields(node: NonNullable<typeof root>) {
-    const result = new Map<string, NonNullable<typeof root>>();
+  type Node = NonNullable<typeof root>;
+  function fields(node: Node) {
+    const result = new Map<string, Node>();
     for (const property of node.getChildren("Property")) {
       const key = JSON.parse(slice(property.firstChild!)) as string;
       if (result.has(key)) return undefined;
       result.set(key, property.lastChild!);
     }
     return result;
+  }
+  function* arrayItems(array: Node) {
+    for (let node = array.firstChild; node; node = node.nextSibling) {
+      if (
+        !node.type.isAnonymous &&
+        !node.type.isSkipped &&
+        !["[", "]", ","].includes(node.name)
+      )
+        yield node;
+    }
   }
   const envelope = fields(root);
   if (!envelope) return { status: "failed" };
@@ -103,13 +117,7 @@ function decodePrompt(text: string, selection: PromptSelection): PromptResult {
   )
     return { status: "failed" };
   const tools: DeclaredTool[] = [];
-  for (let node = declarations.firstChild; node; node = node.nextSibling) {
-    if (
-      node.type.isAnonymous ||
-      node.type.isSkipped ||
-      ["[", "]", ","].includes(node.name)
-    )
-      continue;
+  for (const node of arrayItems(declarations)) {
     if (node.name !== "Object") return { status: "failed" };
     const tool = fields(node);
     if (!tool) return { status: "failed" };
@@ -153,7 +161,8 @@ export async function readFrozenPrompt(
   }
   if (!response.ok) {
     void response.body?.cancel().catch(() => {});
-    if ([401, 403, 404].includes(response.status))
+    if (response.status === 403) return { status: "forbidden" };
+    if ([401, 404].includes(response.status))
       return { status: "unavailable" };
     return { status: "failed" };
   }

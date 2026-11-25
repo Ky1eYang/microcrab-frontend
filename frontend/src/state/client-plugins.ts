@@ -1,5 +1,6 @@
 import { CommandError } from "../client/errors";
 import { failureText } from "../client/failure";
+import { parseStateInspection } from "../client/state-inspection";
 import { isPluginDrawerViewport } from "../client/viewport";
 import { PluginRegistry } from "../plugins/registry";
 import { parseToolRequest } from "../plugins/tool-hub";
@@ -359,13 +360,13 @@ export class ClientPlugins {
       throw Error("Plugin request scope expired");
     if (effect.kind === "state-values" || effect.kind === "state.get")
       this.onStateRead?.(result, sessionId);
-    if (
-      effect.kind === "state-inspection" &&
-      result &&
-      typeof result === "object" &&
-      "values" in result
-    )
-      this.onStateRead?.(result.values, sessionId);
+    if (effect.kind === "state-inspection") {
+      // Keep the existing plugin ABI JSON-only. Validate before publishing any
+      // ordinary values so a malformed overlapping Bytes row cannot leak there.
+      const { ordinary } = parseStateInspection(result);
+      this.onStateRead?.(ordinary.values, sessionId);
+      return ordinary as Json;
+    }
     return result as Json;
   }
   settle(

@@ -836,3 +836,35 @@ test("real Zig Worker rechecks Secret deletion descriptor after confirmation ope
   await expect(frame.locator("#delete-modal")).toHaveClass(/open/);
   expect(writes).toEqual([]);
 });
+
+
+test("real Zig State renders typed short labels without changing exact inspected or custom values", async ({ page }) => {
+  await nativeBackend(page);
+  const bytes = readFileSync(componentPath);
+  const sha256 = createHash("sha256").update(bytes).digest("hex");
+  const file = `${id}/${sha256}/plugin.wasm`;
+  await page.route("**/plugins/current.json", (route) => route.fulfill({ json: {
+    version: 1, plugins: [{ id, sha256, file, default_enabled: true }],
+  } }));
+  await page.route(`**/plugins/${file}`, (route) => route.fulfill({ contentType: "application/wasm", body: bytes }));
+  const stem = "1234567890abcdef12345678";
+  const a = stem + "a".repeat(40);
+  const b = stem + "b".repeat(40);
+  const inspection = stateInspection({ references: [{ content_digest: a }, { content_digest: b }], custom: { content_digest: a } }, { custom: { visibility: "visible" } });
+  inspection.descriptors.references.kind = "reference";
+  await page.route("**/api/v1/sessions/s1/state/inspection", (route) => route.fulfill({ json: inspection }));
+  const webview = await openExpanded(page);
+  const frame = webview.contentFrame();
+  const typed = frame.locator('.var-card[data-key="references"]');
+  const custom = frame.locator('.var-card[data-key="custom"]');
+  const value = typed.locator(".val-preview");
+  await expect(value).toContainText(`${stem}…~1`);
+  await expect(value).toContainText(`${stem}…~2`);
+  await expect(value).not.toContainText(a);
+  await expect(custom.locator(".val-preview")).toContainText(a);
+  await typed.getByRole("button", { name: /Show exact evidence|显示精确证据/ }).click();
+  await expect(value).toContainText(a);
+  await expect(value).toContainText(b);
+  await typed.getByRole("button", { name: /Show compact view|显示简洁视图/ }).click();
+  await expect(value).not.toContainText(a);
+});

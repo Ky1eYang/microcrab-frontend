@@ -1,4 +1,6 @@
-import React, { useState, useMemo } from "react";
+import { JsonValueView } from "../../content-inspection/JsonValueView";
+import { isJsonText } from "../../content-inspection/json-reader-source";
+import React, { useEffect, useState, useMemo } from "react";
 import type { CallLog } from "../types";
 import { mockCallLogs } from "../mockData";
 
@@ -445,11 +447,7 @@ export const UsageLogsView: React.FC = () => {
                       {copiedSection === "args" ? "已复制 ✓" : "复制 JSON"}
                     </button>
                   </div>
-                  <pre className="bg-dash-terminal p-2.5 rounded border border-dash-line text-neutral-300 overflow-x-auto leading-relaxed max-h-40">
-                    {typeof activeLog.argsJson === "string"
-                      ? activeLog.argsJson
-                      : JSON.stringify(activeLog.argsJson, null, 2)}
-                  </pre>
+                  <LogDetailsValue key={`${activeLog.id}:args`} value={activeLog.argsJson} />
                 </div>
 
                 {/* Output */}
@@ -473,11 +471,7 @@ export const UsageLogsView: React.FC = () => {
                       {copiedSection === "output" ? "已复制 ✓" : "复制 JSON"}
                     </button>
                   </div>
-                  <pre className="bg-dash-terminal p-2.5 rounded border border-dash-line text-neutral-300 overflow-x-auto leading-relaxed max-h-40">
-                    {typeof activeLog.outputJson === "string"
-                      ? activeLog.outputJson
-                      : JSON.stringify(activeLog.outputJson, null, 2)}
-                  </pre>
+                  <LogDetailsValue key={`${activeLog.id}:output`} value={activeLog.outputJson} />
                 </div>
               </div>
             </div>
@@ -487,3 +481,25 @@ export const UsageLogsView: React.FC = () => {
     </div>
   );
 };
+
+function LogDetailsValue({ value }: { value: CallLog["argsJson"] }) {
+  const [validated, setValidated] = useState<string>();
+  useEffect(() => {
+    if (typeof value !== "string") return;
+    const controller = new AbortController();
+    void isJsonText(value, controller.signal).then((recognized) => {
+      if (!controller.signal.aborted) setValidated(recognized ? value : undefined);
+    });
+    return () => controller.abort();
+  }, [value]);
+  const recognized = typeof value !== "string" || validated === value;
+  const text = () => <pre className="bg-dash-terminal p-2.5 rounded border border-dash-line text-neutral-300 overflow-x-auto leading-relaxed max-h-40">
+    {typeof value === "string" ? value : JSON.stringify(value, null, 2)}
+  </pre>;
+  if (!recognized) return text();
+  return <JsonValueView
+    source={typeof value === "string" ? { kind: "text", text: value } : { kind: "value", value }}
+    renderText={text}
+    hideRootCopy
+  />;
+}

@@ -33,6 +33,7 @@
   font-size: var(--fs-xl);
   line-height: 1.25;
   overflow-wrap: anywhere;
+  text-wrap: balance;
 }
 
 .user-settings-dialog .settings-close-btn {
@@ -65,6 +66,7 @@
 
 .user-settings-dialog .settings-description {
   max-inline-size: 68ch;
+  text-wrap: pretty;
 }
 
 /* Use the dialog as the frame, with rules separating groups within its pane. */
@@ -102,19 +104,23 @@
 }
 
 .user-settings-dialog :is(.segmented, .mc-seg-group) {
-  border-color: var(--control-border);
-  background: transparent;
+  border-color: var(--border-strong);
+  background: var(--bg-subtle);
+  padding: 2px;
+  border-radius: var(--r-md);
 }
 
 .user-settings-dialog :is(.segmented-option, .mc-seg-btn, .preset-btn, .mc-state-btn) {
   min-block-size: 28px;
+  border-radius: 6px;
 }
 
 .user-settings-dialog .segmented-option[aria-checked="true"],
 .user-settings-dialog .mc-seg-btn[aria-pressed="true"] {
-  background: var(--bg-muted);
+  background: var(--surface);
   color: var(--text);
   font-weight: 600;
+  box-shadow: var(--shadow-card);
   text-decoration: underline;
   text-underline-offset: 0.2em;
 }

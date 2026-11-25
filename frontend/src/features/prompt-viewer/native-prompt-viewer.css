@@ -111,6 +111,45 @@
   content: "−" / "";
 }
 
+.native-prompt-tool-label {
+  min-inline-size: 0;
+}
+
+.native-prompt-permission {
+  display: inline-block;
+  max-inline-size: 100%;
+  padding-inline: 0.45em;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  color: var(--text-2);
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.native-prompt-permission[data-tone="allow"] {
+  border-color: var(--success);
+}
+
+.native-prompt-permission[data-tone="ask"] {
+  border-color: var(--warn);
+}
+
+.native-prompt-permission[data-tone="deny"] {
+  border-color: var(--danger);
+}
+
+.native-prompt-permission-refresh {
+  margin-block-end: var(--sp-2);
+  min-block-size: 32px;
+}
+
+.native-prompt-permission-refresh[aria-disabled="true"] {
+  color: var(--text-2);
+  cursor: default;
+}
+
 .native-prompt-tool:hover {
   background: var(--bg-subtle);
 }

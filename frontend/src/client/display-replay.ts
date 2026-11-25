@@ -383,6 +383,7 @@ export function composeDisplayReasoning(transcript: Transcript) {
       userMessageId: user?.messageId ?? "",
       assistantOrdinal: 0,
     };
+    block.responseAdmission = "preview";
     block.displayAttemptId = attemptId;
     block.callId = event.call_id;
     block.validated = attempt.terminal === "validated" && complete;

@@ -1,8 +1,12 @@
 import { childTurnPath, validateChildOperationId, validateChildTurnOperation, type ChildTurnScope, type ChildTurnRequest, type ChildTurnOperation } from "./child-turns";
-import { speakerPath, validateSpeakerSnapshot, validateSpeakerOperation, validateSpeakerUpdate, validateSpeakerKey, validSpeakerIdentity, type SpeakerScope, type SpeakerSnapshot, type SpeakerUpdate, type SpeakerKey, type SpeakerOperationResponse } from "./external-speakers";
+import { speakerPath, validateSpeakerSnapshot, validateSpeakerOperation, validateSpeakerUpdate, validateSpeakerKey, validSpeakerIdentity, type SpeakerScope, type SpeakerSnapshot, type SpeakerUpdate, type SpeakerKey, type SpeakerOperationResponse, type SpeakerOperationReceipt } from "./external-speakers";
 import { questionImagePath, type QuestionImageRequest } from "./question-images";
 import { boundedCitationBlob, citationPath, CITATION_TIMEOUT_MS, type CitationRequest } from "./citations";
 import { validateExecutionHistory } from "./execution-history";
+import {
+  decodeNativeStateInspection,
+  type NativeStateInspection,
+} from "./native-state-inspection";
 import {
   normalizeSettingsSnapshot,
   validateReferences,
@@ -25,8 +29,13 @@ import {
   isUnavailableSessionChange,
   validateSessionList,
 } from "./session-availability";
-import { validatePolicySnapshot } from "./permissions";
-import type { NativeHostStateDetails } from "./types";
+import {
+  validateCurrentPermissionResponse,
+  validatePolicySnapshot,
+  type CurrentPermissionList,
+  type CurrentPermissionResponse,
+} from "./permissions";
+import type { NativeHostState, NativeHostStateDetails } from "./types";
 import { traceEvent } from "./trace";
 export { CommandError } from "./errors";
 import { CommandError } from "./errors";
@@ -246,6 +255,39 @@ function relayReleaseWitness(value: unknown): HostRelayRelease | null {
 export class ApiClient {
   readonly base: string;
   private socket: WebSocket | null = null;
+  private projectHostWatch?: {
+    projectId: string;
+    id: string;
+    sequence: number;
+    update: (summary: NativeHostState | undefined) => void;
+  };
+
+  stopProjectHostWatch() {
+    const watch = this.projectHostWatch;
+    this.projectHostWatch = undefined;
+    if (watch && this.socket?.readyState === WebSocket.OPEN)
+      void this.command("project.host_unwatch", { subscription_id: watch.id }).catch(() => {});
+  }
+
+  watchProjectHost(projectId: string, update: (summary: NativeHostState | undefined) => void) {
+    const watch = { projectId, id: crypto.randomUUID(), sequence: -1, update };
+    this.projectHostWatch = watch;
+    void this.command<{ subscription_id: string; sequence: number; summary: NativeHostState }>(
+      "project.host_watch", { project_id: projectId, subscription_id: watch.id },
+    ).then(result => {
+      if (this.projectHostWatch !== watch) return;
+      if (result?.subscription_id !== watch.id || result.sequence !== 0 || result.summary?.project_id !== projectId)
+        throw Error("Invalid Project Host watch baseline");
+      watch.sequence = 0;
+      update(result.summary);
+    }).catch(() => {
+      if (this.projectHostWatch === watch) {
+        this.stopProjectHostWatch();
+        update(undefined);
+      }
+    });
+  }
+
   private socketDiagnostics = new TransportDiagnosticStreak("global_socket");
   private hostProject: string | null = null;
   private outboundSupported = false;
@@ -987,6 +1029,18 @@ export class ApiClient {
         });
         return;
       }
+      if (frame.v === 1 && frame.type === "project_host_event") {
+        const watch = this.projectHostWatch;
+        if (!watch || frame.project_id !== watch.projectId || frame.subscription_id !== watch.id) return;
+        if (frame.sequence !== watch.sequence + 1 || frame.summary?.project_id !== watch.projectId) {
+          this.stopProjectHostWatch();
+          watch.update(undefined);
+        } else {
+          watch.sequence = frame.sequence;
+          watch.update(frame.summary as NativeHostState);
+        }
+        return;
+      }
       if (
         frame.v === 1 &&
         frame.type === "event" &&
@@ -1064,6 +1118,7 @@ export class ApiClient {
           },
         });
       this.socket = null;
+      this.projectHostWatch = undefined;
       if (this.hostTransport === "relay" || this.relaySocket) this.hostEpoch++;
       this.closeRelay();
       void this.browserHosts.close();
@@ -1101,6 +1156,93 @@ export class ApiClient {
         ),
       interactionId,
     );
+  }
+  private readonly currentPermissionReads = new Map<
+    string,
+    { promise: Promise<CurrentPermissionList>; controller: AbortController; consumers: number }
+  >();
+
+  /** Share only in-flight reads for the exact owner/Session and invalidation scope. */
+  readCurrentPermissions(
+    owner: string,
+    sessionId: string,
+    scope: string,
+    signal: AbortSignal,
+  ): Promise<CurrentPermissionList> {
+    if (signal.aborted) return Promise.reject(signal.reason);
+    const key = JSON.stringify([owner, sessionId, scope]);
+    let flight = this.currentPermissionReads.get(key);
+    if (!flight) {
+      const controller = new AbortController();
+      const promise = this.request<CurrentPermissionResponse>(
+        "permission.get", { view: "current" }, sessionId, 8000, undefined, controller.signal,
+      ).then(({ current }) => current);
+      flight = { promise, controller, consumers: 0 };
+      this.currentPermissionReads.set(key, flight);
+      const completed = flight;
+      const clear = () => {
+        if (this.currentPermissionReads.get(key) === completed)
+          this.currentPermissionReads.delete(key);
+      };
+      void promise.then(clear, clear);
+    }
+    const pending = flight;
+    pending.consumers++;
+    return new Promise((resolve, reject) => {
+      let done = false;
+      const finish = () => {
+        if (done) return false;
+        done = true;
+        signal.removeEventListener("abort", abort);
+        pending.consumers--;
+        return true;
+      };
+      const abort = () => {
+        if (!finish()) return;
+        if (pending.consumers === 0 && this.currentPermissionReads.get(key) === pending) {
+          this.currentPermissionReads.delete(key);
+          pending.controller.abort();
+        }
+        reject(signal.reason);
+      };
+      signal.addEventListener("abort", abort, { once: true });
+      void pending.promise.then(
+        (value) => { if (finish()) resolve(value); },
+        (error) => { if (finish()) reject(error); },
+      );
+    });
+  }
+
+  /** Native State retains authorized value lexemes; plugin reads keep the JSON path. */
+  readNativeStateInspection(
+    sessionId: string,
+    signal: AbortSignal,
+    isCurrent: () => boolean,
+  ): Promise<NativeStateInspection> {
+    const method = "state.inspection";
+    const requestId = crypto.randomUUID();
+    return this.observe(method, sessionId, requestId, () => {
+      if (signal.aborted) return Promise.reject(signal.reason);
+      if (!sessionId)
+        return Promise.reject(new CommandError("invalid_request", "Session is required"));
+      if (this.httpPending.size + this.pending.size >= MAX_PENDING)
+        return Promise.reject(new CommandError("limit_exceeded", "Too many pending requests", true));
+      return this.http<NativeStateInspection>(
+        this.url(`api/v1/sessions/${encodeURIComponent(sessionId)}${SESSION_QUERIES[method]}`),
+        "GET",
+        undefined,
+        commandTimeout(method),
+        "application/json",
+        requestId,
+        undefined,
+        signal,
+        false,
+        undefined,
+        false,
+        false,
+        (text, requestSignal) => decodeNativeStateInspection(text, requestSignal, isCurrent),
+      );
+    });
   }
   private requestNative<T = unknown>(
     method: string,
@@ -1373,7 +1515,9 @@ export class ApiClient {
       else if (method === "project.delete") valid = value.deleted === true;
       else if (["permission.get", "permission.set"].includes(method)) {
         try {
-          validatePolicySnapshot(value);
+          if (method === "permission.get" && params.view === "current")
+            validateCurrentPermissionResponse(value);
+          else validatePolicySnapshot(value);
         } catch (failure) {
           throw new CommandError(
             "invalid_result",
@@ -1480,6 +1624,7 @@ export class ApiClient {
     executorLease?: string,
     sensitive = false,
     readOnlyRequest = false,
+    nativeStateDecoder?: (text: string, signal: AbortSignal) => Promise<T>,
   ): Promise<T> {
     const controller = new AbortController();
     const abort = () => controller.abort(signal?.reason);
@@ -1531,7 +1676,14 @@ export class ApiClient {
         return await boundedCitationBlob(response, controller.signal) as T;
       // Bound reads while streaming; an unreadable success can hide an admitted mutation.
       const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
+      const decoder = new TextDecoder("utf-8", { fatal: !!nativeStateDecoder && response.ok });
+      const decode = (input?: Uint8Array) => {
+        try {
+          return input ? decoder.decode(input, { stream: true }) : decoder.decode();
+        } catch {
+          throw new CommandError("invalid_result", "Server returned invalid State inspection UTF-8", true);
+        }
+      };
       let text = "",
         bytes = 0;
       if (reader) {
@@ -1549,13 +1701,15 @@ export class ApiClient {
                 mutation,
               );
             }
-            text += decoder.decode(chunk.value, { stream: true });
+            text += decode(chunk.value);
           }
-          text += decoder.decode();
+          text += decode();
         } finally {
           reader.releaseLock();
         }
       }
+      if (response.ok && nativeStateDecoder)
+        return await nativeStateDecoder(text, controller.signal);
       let data: any;
       try {
         data = JSON.parse(text);
@@ -1582,7 +1736,9 @@ export class ApiClient {
         )
           throw new CommandError(
             data.error.code,
-            data.error.message,
+            data.error.code === "legacy_external_dialogue_catalog"
+              ? t("session.legacyExternalDialogueCatalog")
+              : data.error.message,
             data.error.retryable === true,
             data.error.code === "outcome_unknown",
             data.error.details,
@@ -1668,7 +1824,7 @@ export class ApiClient {
   }
   async getExternalSpeakers(scope: SpeakerScope, signal: AbortSignal): Promise<SpeakerSnapshot> {
     const value = await this.speakerRequest<unknown>(scope, "GET", undefined, signal);
-    validateSpeakerSnapshot(value);
+    validateSpeakerSnapshot(value, scope);
     return value;
   }
   async putExternalSpeakers(scope: SpeakerScope, update: SpeakerUpdate, signal: AbortSignal): Promise<SpeakerOperationResponse> {
@@ -1676,7 +1832,10 @@ export class ApiClient {
     try {
       const value = await this.speakerRequest<unknown>(scope, "PUT", update, signal);
       try {
-        validateSpeakerOperation(value, update.operation_id);
+        validateSpeakerOperation(value, scope, update.operation_id, {
+          historical: false,
+          expectedEnabled: update.enabled,
+        });
       } catch (error) {
         if (error instanceof CommandError) error.outcomeUnknown = true;
         throw error;
@@ -1694,14 +1853,14 @@ export class ApiClient {
       throw error;
     }
   }
-  async getExternalSpeakerOperation(scope: SpeakerScope, operationId: string, signal: AbortSignal): Promise<SpeakerOperationResponse> {
+  async getExternalSpeakerOperation(scope: SpeakerScope, operationId: string, signal: AbortSignal): Promise<SpeakerOperationReceipt> {
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(operationId))
       throw new CommandError("invalid_request", "external-speakers.operation_id: expected canonical UUID");
     if (this.httpPending.size + this.pending.size >= MAX_PENDING)
       throw new CommandError("overloaded", "Too many pending requests");
     const value = await this.http<unknown>(this.url(speakerPath(scope) + `/operations/${operationId}`), "GET", undefined,
       15000, "application/json", crypto.randomUUID(), undefined, signal, false, undefined, true);
-    validateSpeakerOperation(value, operationId);
+    validateSpeakerOperation(value, scope, operationId, { historical: true });
     return value;
   }
   async revealExternalSpeakerKey(scope: SpeakerScope, identity: string, signal: AbortSignal): Promise<SpeakerKey> {
@@ -1814,7 +1973,7 @@ export class ApiClient {
       return Promise.reject(
         new CommandError(
           "disconnected",
-          "The session connection is not ready; reload the session before sending",
+          t("session.transport.notSent"),
           true,
         ),
       );
@@ -1923,6 +2082,7 @@ export class ApiClient {
     this.retry = undefined;
     const socket = this.socket;
     this.socket = null;
+    this.projectHostWatch = undefined;
     socket?.close();
     this.rejectPending();
   }

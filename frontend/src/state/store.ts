@@ -182,8 +182,32 @@ export class AppStore {
   }
   private defaultsRead = 0;
   private catalogRead = 0;
+  private projectAgentCatalogRead = 0;
   private draftAgentExplicit = false;
   private draftModeExplicit = false;
+
+  private draftAgentRow(name: string, renderedRow?: AgentInfo) {
+    const state = this.state;
+    return state.agents.find((item) => {
+      if (item.name !== name) return false;
+      if (renderedRow) return item === renderedRow;
+      return (
+        name !== state.draftAgent ||
+        state.draftAgentComponent === undefined ||
+        item.component === state.draftAgentComponent
+      );
+    });
+  }
+
+  private selectDraftAgent(row: AgentInfo, mode: string) {
+    this.draftAgentExplicit = true;
+    this.draftModeExplicit = true;
+    this.update({
+      draftAgent: row.name,
+      draftMode: mode,
+      draftAgentComponent: row.component,
+    });
+  }
 
   private applyDraftAgentDefaults() {
     if (this.state.sessionId || this.state.isCreatingSession) return;
@@ -199,21 +223,15 @@ export class AppStore {
       });
       return;
     }
-    const name = this.draftAgentExplicit
-      ? this.state.draftAgent
-      : defaults?.agent;
-    const agent = name
-      ? this.state.agents.find((item) => item.name === name)
-      : this.state.agents[0];
-    const modes =
-      agent?.modes.filter((mode) => mode.role !== "sub_agent") ?? [];
+    const name = this.draftAgentExplicit ? this.state.draftAgent : defaults.agent;
+    const agent = name ? this.draftAgentRow(name) : this.state.agents[0];
+    const inheritedMode = this.draftAgentExplicit ? null : defaults.mode;
+    const modes = agent?.modes.filter((mode) => mode.role !== "sub_agent") ?? [];
     this.update({
       draftAgent: name ?? agent?.name ?? "",
       draftMode: this.draftModeExplicit
         ? this.state.draftMode
-        : ((!this.draftAgentExplicit ? defaults?.mode : null) ??
-          modes[0]?.name ??
-          ""),
+        : inheritedMode ?? modes[0]?.name ?? "",
     });
   }
 
@@ -704,6 +722,11 @@ export class AppStore {
   /** The committed Session socket. A replacement is installed only after its
    * barrier snapshot arrives, and the previous socket is closed after that. */
   private sessionSocket: SessionSocket | null = null;
+  private openingSession: {
+    id: string;
+    socket: SessionSocket;
+    restore: () => void;
+  } | null = null;
   private deferredSessionRecovery: SessionSocket | null = null;
   /** Closes the committed Session socket. Closing releases its subscription and
    * every executor lease it bound, so a caller that still needs the executor
@@ -719,6 +742,9 @@ export class AppStore {
     this.sessionSocket = null;
     this.deferredSessionRecovery = null;
     socket?.stop();
+    this.openingSession?.socket.stop();
+    this.openingSession = null;
+    if (this.state.sessionTransportRecovery) this.update({ sessionTransportRecovery: null });
   }
   private lifecycle = 0;
   private attaching = 0;
@@ -728,7 +754,21 @@ export class AppStore {
   private hostRefresh = 0;
   private hostStateRevision = 0;
   private hostPoll?: ReturnType<typeof setInterval>;
-  private pollingHost = false;
+  private projectHostWatch?: {
+    projectId: string;
+    owner: string;
+    cycle: number;
+    retry: number;
+    pending?: NativeHostState | null;
+  };
+  private hostObservation?: {
+    projectId: string;
+    attempt: number;
+    cycle: number;
+    navigation: number;
+    owner?: string;
+    dirty: boolean;
+  };
   private hostAttachment: { attempt: number; projectId: string } | null = null;
   private started = false;
   private bootstrapping = 0;
@@ -753,12 +793,47 @@ export class AppStore {
   update(value: Partial<AppState>) {
     const previous = this.state;
     this.state = { ...previous, ...value };
+    const projectChanged =
+      selectedProjectId(previous) !== selectedProjectId(this.state);
+    const workspaceKindChanged =
+      previous.draftWorkspace.kind !== this.state.draftWorkspace.kind;
+    const ownerChanged =
+      previous.authSession?.principal?.owner !==
+      this.state.authSession?.principal?.owner;
+    const oldHost = previous.hostConnection;
+    const host = this.state.hostConnection;
+    const hostRouteChanged =
+      oldHost?.projectId !== host?.projectId ||
+      oldHost?.connectionGeneration !== host?.connectionGeneration ||
+      oldHost?.carrierMode !== host?.carrierMode ||
+      oldHost?.conversationId !== host?.conversationId ||
+      oldHost?.hostFlavor !== host?.hostFlavor;
+    if (
+      projectChanged || workspaceKindChanged || hostRouteChanged || ownerChanged
+    )
+      this.projectAgentCatalogRead++;
+    // A catalog cannot make a different Project or Host route ready.
+    if (
+      previous.agents === this.state.agents &&
+      previous.hostConnection?.catalogReady &&
+      (hostRouteChanged || projectChanged || ownerChanged)
+    ) {
+      this.state.agents = [];
+      this.state.hostConnection = host && { ...host, catalogReady: false };
+    }
+    if (previous.sessionId !== this.state.sessionId)
+      this.state.draftAgentComponent = undefined;
     if (
       previous.sessionId !== this.state.sessionId ||
       previous.authSession?.principal?.owner !==
         this.state.authSession?.principal?.owner
     )
       this.state.sessionPluginTab = null;
+    if (projectChanged || ownerChanged || previous.connection !== this.state.connection ||
+        previous.capabilities !== this.state.capabilities)
+      this.syncProjectHostWatch();
+    if (this.projectHostWatch?.pending !== undefined && (oldHost !== host || Object.hasOwn(value, "sessionAttachingId")))
+      queueMicrotask(() => this.flushProjectHostWatch());
     this.plugins.sync(this.state);
     if (Object.hasOwn(value, "transcript"))
       publishTranscript(this.conversation, this.state.transcript);
@@ -814,7 +889,7 @@ export class AppStore {
           );
           if (this.state.hostConnection?.projectId === projectId &&
               (this.state.hostConnection?.observeRoute || !readiness))
-            void this.observeHostChange(true);
+            void this.observeHostChange(true, true);
         }
       }
       throw error;
@@ -1715,17 +1790,23 @@ export class AppStore {
     }
   }
   private async loadHostCatalog(projectId: string) {
-    if (!this.hostReadyFor(projectId)) return;
+    if (selectedProjectId(this.state) !== projectId || !this.hostReadyFor(projectId))
+      return;
     const navigation = this.attaching;
-    const selection = selectedProjectId(this.state);
     const attempt = this.hostAttempt;
     const cycle = this.lifecycle;
     const revision = this.hostStateRevision;
     const owner = this.state.authSession?.principal?.owner;
-    const current = () =>
+    const host = this.state.hostConnection!;
+    const api = this.api;
+    const ticket = ++this.projectAgentCatalogRead;
+    const currentHost = () =>
       attempt === this.hostAttempt && cycle === this.lifecycle && revision === this.hostStateRevision &&
-      owner === this.state.authSession?.principal?.owner && !!this.state.authSession?.authenticated &&
-      navigation === this.attaching && selection === selectedProjectId(this.state) && this.hostReadyFor(projectId);
+      api === this.api && owner === this.state.authSession?.principal?.owner && !!this.state.authSession?.authenticated &&
+      host.connectionGeneration === this.state.hostConnection?.connectionGeneration &&
+      host.carrierMode === this.state.hostConnection?.carrierMode && this.hostReadyFor(projectId);
+    const current = () => ticket === this.projectAgentCatalogRead && currentHost() &&
+      navigation === this.attaching && projectId === selectedProjectId(this.state);
     try {
       const catalog = await this.call<{ items: AgentInfo[] }>(
         "agent.catalog", { project_id: projectId }, undefined,
@@ -1829,7 +1910,10 @@ export class AppStore {
       if (await this.restoreHostSession(projectId, current) && current())
         this.update({ hostConnection: { ...this.state.hostConnection!, restoringSession: false } });
     } finally {
-      if (this.hostAttachment === attachment) this.hostAttachment = null;
+      if (this.hostAttachment === attachment) {
+        this.hostAttachment = null;
+        this.flushProjectHostWatch();
+      }
     }
   }
   private localHostControl(projectId: string) {
@@ -1840,15 +1924,105 @@ export class AppStore {
           : this.api.ownsHostGeneration(projectId, host.connectionGeneration))
       : !host?.carrierMode;
   }
-  private async observeHostChange(force = false) {
+  private syncProjectHostWatch() {
+    const projectId = selectedProjectId(this.state);
+    const owner = this.state.authSession?.principal?.owner;
+    const previous = this.projectHostWatch;
+    if (!projectId || !owner || this.state.connection !== "ws" ||
+        !this.state.authSession?.authenticated || !this.supports("project.host_watch")) {
+      this.projectHostWatch = undefined;
+      this.api.stopProjectHostWatch();
+      return;
+    }
+    if (previous?.projectId === projectId && previous.owner === owner && previous.cycle === this.lifecycle) return;
+    this.beginProjectHostWatch({ projectId, owner, cycle: this.lifecycle, retry: 0 });
+  }
+
+  private beginProjectHostWatch(watch: NonNullable<AppStore["projectHostWatch"]>) {
+    this.projectHostWatch = watch;
+    this.api.watchProjectHost(watch.projectId, (summary) => {
+      const current = () => this.projectHostWatch === watch && watch.cycle === this.lifecycle &&
+        watch.owner === this.state.authSession?.principal?.owner &&
+        watch.projectId === selectedProjectId(this.state) && this.state.connection === "ws";
+      if (!current()) return;
+      watch.pending = summary ?? null;
+      if (summary) watch.retry = 0;
+      this.flushProjectHostWatch();
+      if (!summary && watch.retry === 0) setTimeout(() => {
+        if (current()) this.beginProjectHostWatch({ ...watch, retry: 1, pending: undefined });
+      }, 500);
+    });
+  }
+
+  private flushProjectHostWatch() {
+    const watch = this.projectHostWatch;
     const host = this.state.hostConnection;
-    if (this.pollingHost || this.hostAttachment || this.state.sessionAttachingId ||
-        document.visibilityState === "hidden" || this.state.connection !== "ws" ||
-        !host?.projectId || (!host.observeRoute && !force) || host.state === "connecting" ||
+    const current = () => !!watch && this.projectHostWatch === watch && watch.cycle === this.lifecycle &&
+      watch.owner === this.state.authSession?.principal?.owner &&
+      watch.projectId === selectedProjectId(this.state) && this.state.connection === "ws";
+    if (!watch || watch.pending === undefined || !current() || !host ||
+        host.projectId !== watch.projectId || host.state === "connecting" || this.hostAttachment ||
+        this.state.sessionAttachingId) return;
+    const summary = watch.pending;
+    watch.pending = undefined;
+    if (!summary) {
+      this.failHostObservation(watch.projectId, Error("Project Host observation unavailable"));
+      return;
+    }
+    // A deferred event from before a successful attach must not roll back its exact generation.
+    const known = host.connectionGeneration;
+    const observed = summary.connection_generation;
+    if (known && ((!observed && summary.carrier_mode === "detached") ||
+        (observed && /^\d+$/.test(known) && /^\d+$/.test(observed) && BigInt(observed) < BigInt(known)))) return;
+    const project = this.state.projects.find((item) => item.id === watch.projectId);
+    let snapshot: ReturnType<typeof projectHostSnapshot>;
+    try {
+      snapshot = projectHostSnapshot(summary, watch.projectId, project);
+    } catch (error) {
+      this.failHostObservation(watch.projectId, error);
+      return;
+    }
+    ++this.hostRefresh;
+    this.applyHostObservation(watch.projectId, snapshot);
+    const revision = this.hostStateRevision;
+    void this.finishHostObservation(watch.projectId, () => current() && revision === this.hostStateRevision, true);
+  }
+
+  private async observeHostChange(force = false, invalidated = false) {
+    if (this.supports("project.host_watch")) return;
+    const host = this.state.hostConnection;
+    const canObserve = () => !this.hostAttachment && !this.state.sessionAttachingId &&
+      document.visibilityState !== "hidden" && this.state.connection === "ws";
+    if (!canObserve() || !host?.projectId || (!host.observeRoute && !force) || host.state === "connecting" ||
         selectedProjectId(this.state) !== host.projectId) return;
-    this.pollingHost = true;
-    try { await this.refreshHost(false, false); }
-    finally { this.pollingHost = false; }
+    const run = this.hostObservation;
+    const sameScope = (observation: NonNullable<typeof run>) =>
+      observation.projectId === selectedProjectId(this.state) &&
+      observation.attempt === this.hostAttempt &&
+      observation.cycle === this.lifecycle &&
+      observation.navigation === this.attaching &&
+      observation.owner === this.state.authSession?.principal?.owner;
+    if (run && sameScope(run)) {
+      if (invalidated) run.dirty = true;
+      return;
+    }
+    const observation = {
+      projectId: host.projectId, attempt: this.hostAttempt,
+      cycle: this.lifecycle, navigation: this.attaching,
+      owner: this.state.authSession?.principal?.owner, dirty: false,
+    };
+    this.hostObservation = observation;
+    try {
+      await this.refreshHost(false, false);
+      if (observation.dirty && this.hostObservation === observation &&
+          sameScope(observation) && canObserve()) {
+        // At most one follow-up for invalidations received during this read.
+        // A later event/compatibility tick owns any subsequent observation.
+        await this.refreshHost(false, false);
+      }
+    } finally {
+      if (this.hostObservation === observation) this.hostObservation = undefined;
+    }
   }
   private async refreshHost(reconcile = false, debug = true, restore = true) {
     const host = this.state.hostConnection;
@@ -2255,7 +2429,10 @@ export class AppStore {
         });
       return descriptor;
     } finally {
-      if (this.hostAttachment === attachment) this.hostAttachment = null;
+      if (this.hostAttachment === attachment) {
+        this.hostAttachment = null;
+        this.flushProjectHostWatch();
+      }
     }
   }
   private async openHostSession(
@@ -2859,6 +3036,11 @@ export class AppStore {
   private clearSessionMemory() {
     this.releaseInterrupt();
     this.sessionCache.clear();
+    if (this.homeDraft) {
+      for (const image of this.homeDraft.composerImages)
+        URL.revokeObjectURL(image.previewUrl);
+      this.homeDraft = null;
+    }
     for (const draft of this.drafts.values())
       for (const image of draft.composerImages)
         URL.revokeObjectURL(image.previewUrl);
@@ -2869,6 +3051,8 @@ export class AppStore {
     string,
     { snapshot: NativeSnapshot; transcript: Transcript }
   >();
+  /** Unsent Home (new-conversation) composer draft retained across session switches. Memory only. */
+  private homeDraft: { composer: string; composerImages: ComposerImage[] } | null = null;
   /** Per-session composer drafts, images included. Memory only. */
   private drafts = new Map<
     string,
@@ -2900,22 +3084,38 @@ export class AppStore {
         URL.revokeObjectURL(image.previewUrl);
     this.drafts.delete(id);
   }
-  /** Keep the outgoing session's draft and show the incoming one's. */
+  /** Keep the outgoing session's (or Home's) draft and show the incoming one's. */
   private swapComposer(from: string | null, to: string | null) {
     ++this.draftEpoch;
     this.intakeCount = 0;
-    if (from && (this.state.composer || this.state.composerImages.length))
+    const hasDraft = !!(this.state.composer || this.state.composerImages.length);
+    if (from === null) {
+      if (
+        this.homeDraft &&
+        this.homeDraft.composerImages !== this.state.composerImages
+      ) {
+        for (const image of this.homeDraft.composerImages)
+          URL.revokeObjectURL(image.previewUrl);
+      }
+      this.homeDraft = hasDraft
+        ? {
+            composer: this.state.composer,
+            composerImages: this.state.composerImages,
+          }
+        : null;
+    } else if (hasDraft) {
       this.drafts.set(from, {
         composer: this.state.composer,
         composerImages: this.state.composerImages,
       });
-    else {
-      if (from) this.drafts.delete(from);
+    } else {
+      this.drafts.delete(from);
       for (const image of this.state.composerImages)
         URL.revokeObjectURL(image.previewUrl);
     }
-    const draft = to ? this.drafts.get(to) : undefined;
-    if (to) this.drafts.delete(to);
+    const draft = to === null ? this.homeDraft : this.drafts.get(to);
+    if (to === null) this.homeDraft = null;
+    else this.drafts.delete(to);
     this.update({
       composer: draft?.composer ?? "",
       composerImages: draft?.composerImages ?? [],
@@ -2959,6 +3159,7 @@ export class AppStore {
     )
       this.loadedSubscriptions.add(subscription);
     this.snapshot(subscription.snapshot, previous?.snapshot);
+    this.recordAppliedSessionBoundary(subscription, subscription.sequence);
     this.refreshPermissions(subscription.pending?.permissions ?? null);
     this.roundLimits.refresh(subscription.pending?.round_limits ?? null);
     if (this.clientTools.sessionId === subscription.snapshot.session.id)
@@ -2986,6 +3187,31 @@ export class AppStore {
     requireOpen = false,
     activateRuntime = true,
   ) {
+    if (!this.state.authSession?.authenticated || this.openingSession?.id === id) return;
+    const outgoingOpening = this.openingSession;
+    if (outgoingOpening) {
+      this.attaching++;
+      this.openingSession = null;
+      outgoingOpening.socket.stop("selection_replaced");
+      outgoingOpening.restore();
+    }
+    // An already-selected Session shares its observer's refresh instead of
+    // competing with a second subscription for the same ID.
+    const committed = this.sessionSocket;
+    if (this.state.sessionId === id && committed?.selectedId === id) {
+      if (outgoingOpening) this.update({ sessionAttachingId: null });
+      this.deferredSessionRecovery = null;
+      const ticket = this.attaching;
+      const recovering = !!committed.status;
+      const subscription = await committed.refresh();
+      // Joining a transport recovery restores observation only. Explicit
+      // healthy-session navigation retains its existing activation behavior.
+      if (recovering || historyOnly || !activateRuntime ||
+          ticket !== this.attaching || committed !== this.sessionSocket ||
+          this.state.sessionId !== id) return;
+      await this.activateSelectedSession(id, ticket, subscription, requireOpen);
+      return;
+    }
     const ticket = ++this.attaching;
     const pluginRoute = () => {
       const route = parseLocation(location.pathname, location.hash);
@@ -3003,10 +3229,6 @@ export class AppStore {
     });
     const changing = id !== this.state.sessionId;
     const popupAtAttach = this.state.popup;
-    const projectId = this.state.sessions.find(
-      (session) => session.id === id,
-    )?.projectID;
-    if (!this.state.authSession?.authenticated) return;
     const scope = JSON.stringify([
       this.api.base,
       this.state.authSession.principal?.owner,
@@ -3058,6 +3280,8 @@ export class AppStore {
       this.update({
         sessionId: id,
         ...pluginRoute(),
+        sessionAttachingId: id,
+        sessionTransportRecovery: null,
         transcript,
         statistics: cached.snapshot.statistics ?? null,
         historyTruncated: cached.snapshot.messages_truncated === true,
@@ -3080,24 +3304,43 @@ export class AppStore {
         : cached?.snapshot;
     const socket = new SessionSocket(
       (path) => this.api.url(path),
-      () =>
-        this.displaySubscriptionParams(id) as {
-          display_watermark: number;
-          history_lineage?: string;
-        },
+      () => this.displaySubscriptionParams(id),
+      (view) => this.appliedSessionBoundaries.get(view),
     );
+    const restore = () => {
+      if (!shown) return;
+      if (shown.swapped) this.swapComposer(id, shown.sessionId);
+      this.composerRoute++;
+      this.subscription = shown.subscription;
+      this.update({
+        ...shown.view,
+        sessionId: shown.sessionId,
+        sessionTransportRecovery: this.sessionSocket?.status ?? null,
+        page: shown.page,
+        transcript: shown.transcript,
+      });
+      // Frames of the outgoing subscription were not applied during preview.
+      if (shown.subscription) this.deferredSessionRecovery = this.sessionSocket;
+    };
+    this.openingSession = { id, socket, restore };
     let subscription: NativeSubscription;
     try {
       subscription = await socket.open(
         id,
-        this.displaySubscriptionParams(id) as {
-          display_watermark: number;
-          history_lineage?: string;
-        },
+        this.displaySubscriptionParams(id),
         {
-          event: (event) => this.receive(event),
+          event: (event) => {
+            if (this.sessionSocket === socket) this.receive(event);
+          },
           resubscribed: (next) => this.resubscribed(socket, next),
           authRequired: () => this.requireAuth(),
+          recovery: (status) => {
+            if (this.sessionSocket !== socket) return;
+            if (status) this.clientTools.transportDisconnected(id);
+            if (this.state.sessionId !== id) return;
+            if (status) this.suspendReceive(false);
+            this.update({ sessionTransportRecovery: status });
+          },
         },
       );
     } catch (error) {
@@ -3108,28 +3351,19 @@ export class AppStore {
         outcome: ticket !== this.attaching ? "stale" : "failed",
         code: error instanceof CommandError ? error.code : "client_error",
       });
-      if (ticket !== this.attaching) return;
-      if (shown) {
-        if (shown.swapped) this.swapComposer(id, shown.sessionId);
-        this.composerRoute++;
-        this.subscription = shown.subscription;
-        this.update({
-          ...shown.view,
-          sessionId: shown.sessionId,
-          page: shown.page,
-          transcript: shown.transcript,
-        });
-        // Events of the restored attachment were not applied while away.
-        if (shown.subscription) this.sessionSocket?.reconnect();
-      }
+      if (ticket !== this.attaching || this.openingSession?.socket !== socket) return;
+      restore();
       const recovery = this.deferredSessionRecovery;
       this.deferredSessionRecovery = null;
       if (recovery && recovery === this.sessionSocket) recovery.reconnect();
       throw error;
     } finally {
-      if (ticket === this.attaching) this.update({ sessionAttachingId: null });
+      if (this.openingSession?.socket === socket) {
+        this.openingSession = null;
+        this.update({ sessionAttachingId: null });
+      }
     }
-    if (ticket !== this.attaching) {
+    if (ticket !== this.attaching || !socket.sessionId) {
       traceEvent("session.attach", {
         interactionId,
         sessionId: id,
@@ -3178,7 +3412,7 @@ export class AppStore {
     const retired = this.sessionSocket;
     this.sessionSocket = socket;
     this.deferredSessionRecovery = null;
-    retired?.stop();
+    retired?.stop("selection_replaced");
     if (changing && !shown) {
       this.composerRoute++;
       if (!preserveComposer) this.swapComposer(outgoing, id);
@@ -3186,6 +3420,7 @@ export class AppStore {
     this.update({
       sessionId: id,
       ...pluginRoute(),
+      sessionTransportRecovery: null,
       connection: "ws",
       ...(changing
         ? { modeSelectionPending: false, modelSelectionPending: false }
@@ -3193,6 +3428,7 @@ export class AppStore {
       ...(changing && !preserveComposer ? { isCreatingSession: false } : {}),
     });
     this.snapshot(subscription.snapshot, base ?? previous?.snapshot);
+    this.recordAppliedSessionBoundary(subscription, subscription.sequence);
     if (changing && !shown) this.recordFirstFrame(id, started, "server");
     if (this.state.popup.type === "subagentDetail" && this.state.popup.detail)
       void this.hydrateChildDisplay(
@@ -3224,9 +3460,22 @@ export class AppStore {
     );
     this.roundLimits.refresh(subscription.pending?.round_limits ?? null);
     if (!activateRuntime) return;
+    await this.activateSelectedSession(id, ticket, subscription, requireOpen);
+  }
+  private async activateSelectedSession(
+    id: string,
+    ticket: number,
+    subscription: NativeSubscription,
+    requireOpen: boolean,
+  ) {
+    const projectId = subscription.snapshot.session.project_id ?? this.state.sessions.find(
+      (session) => session.id === id,
+    )?.projectID;
     const freshInitialization =
       subscription.snapshot.session.agent_initialization_deferred === true;
-    if (pluginRoute().page === "conversation") location.hash = sessionPath(id);
+    const route = parseLocation(location.pathname, location.hash);
+    if (!(route.sessionId === id && (route.page === "plugins" || route.page === "plugin")))
+      location.hash = sessionPath(id);
     if (subscription.snapshot.session.host_flavor) {
       try {
         await this.connectBrowserConversation(id);
@@ -3290,7 +3539,10 @@ export class AppStore {
           if (ticket === this.attaching)
             this.toast(error instanceof Error ? error.message : String(error));
         } finally {
-          if (this.hostAttachment === attachment) this.hostAttachment = null;
+          if (this.hostAttachment === attachment) {
+            this.hostAttachment = null;
+            this.flushProjectHostWatch();
+          }
         }
       }
     }
@@ -3446,7 +3698,10 @@ export class AppStore {
       }),
     );
   }
-  private displaySubscriptionParams(id: string): Record<string, unknown> {
+  private displaySubscriptionParams(id: string): {
+    display_watermark: number;
+    history_lineage?: string;
+  } {
     const replay = this.state.transcript.displayReplay;
     const lineage =
       (this.state.sessionId === id
@@ -3590,6 +3845,11 @@ export class AppStore {
       },
     });
   }
+  private appliedSessionBoundaries = new WeakMap<NativeSubscription, { applied: number; watermark: number }>();
+  private recordAppliedSessionBoundary(subscription: NativeSubscription, applied: number) {
+    const { display_watermark: watermark } = this.displaySubscriptionParams(subscription.snapshot.session.id);
+    this.appliedSessionBoundaries.set(subscription, { applied, watermark });
+  }
   private displayFragments = new DisplayFragments();
   private receiveQueue: {
     event: NativeEvent;
@@ -3686,6 +3946,12 @@ export class AppStore {
     }
   }
   private receiveNow(event: NativeEvent) {
+    const subscription = this.subscription;
+    const applied = this.applyReceivedEvent(event);
+    if (applied && subscription && subscription === this.subscription)
+      this.recordAppliedSessionBoundary(subscription, event.sequence);
+  }
+  private applyReceivedEvent(event: NativeEvent): boolean | undefined {
     if (!this.subscription || this.receiveSuspended === this.subscription)
       return;
     const order = subscriptionOrder(this.subscription, event);
@@ -3720,7 +3986,7 @@ export class AppStore {
       const data = event.data as { readiness?: NativeHostReadiness };
       if (!establishing || data.readiness) {
         this.suspendHost(projectId ?? undefined, undefined, data.readiness);
-        void this.observeHostChange();
+        void this.observeHostChange(false, true);
       }
     }
     if (order === "gap" || event.event === "resync_required") {
@@ -3773,14 +4039,14 @@ export class AppStore {
         transcript: this.state.transcript,
         sessionId: event.session_id,
       };
-      return;
+      return true;
     }
     switch (event.event) {
       case "display.batch":
       case "display.settled":
         if (event.data.child_session_id) {
           this.receiveChildDisplay(event.data);
-          return;
+          return true;
         }
         break;
       case "round_limit.requested":
@@ -3865,7 +4131,7 @@ export class AppStore {
           };
           this.update({ statistics: event.data });
         }
-        return;
+        return true;
       case "compaction":
         this.compactLifecycle(event.session_id, event.data);
         break;
@@ -3884,7 +4150,7 @@ export class AppStore {
       }
       case "audit.available":
         this.update({ auditRevision: (this.state.auditRevision ?? 0) + 1 });
-        return;
+        return true;
       case "session.meta":
       case "blocks.page":
       case "blocks.upsert": {
@@ -3893,15 +4159,12 @@ export class AppStore {
           event.event,
           event.data,
         );
-        if (next.incomplete) this.sessionSocket?.reconnect();
-        else
-          this.snapshot(
-            next.view,
-            undefined,
-            next.view,
-            event.event === "session.meta",
-          );
-        return;
+        if (next.incomplete) {
+          this.suspendReceive();
+          return;
+        }
+        this.snapshot(next.view, undefined, next.view, event.event === "session.meta");
+        return true;
       }
       case "history.reset":
         this.update({
@@ -3912,7 +4175,7 @@ export class AppStore {
           },
         });
         this.plugins.resetHistory();
-        return; // The authoritative blocks.page follows on this subscription.
+        return true; // The authoritative blocks.page follows on this subscription.
       case "tool":
         applyEvent(this.state.transcript, event);
         void this.hydrateExecution(event);
@@ -3930,9 +4193,11 @@ export class AppStore {
       case "display.unavailable":
       case "child.display.available":
       case "child.display.unavailable":
+        // Model and display traffic says nothing about the Project Host route.
+        break;
       case "host_connection":
         // A generation-less carrier notice is only an invalidation hint.
-        void this.observeHostChange();
+        void this.observeHostChange(false, true);
         break;
       case "host_detached":
       case "resync_required":
@@ -3954,6 +4219,7 @@ export class AppStore {
     this.update({
       transcript: { ...this.state.transcript },
     });
+    return true;
   }
   /** Finish the generating blocks where they are, without waiting for the
    * runtime: text already shown is kept verbatim and nothing is re-rendered
@@ -4454,15 +4720,16 @@ export class AppStore {
     });
   }
 
-  private async setMode(mode: string, requestedAgent?: string) {
+  private async setMode(mode: string, requestedAgent?: string, renderedRow?: AgentInfo) {
     const state = this.state;
     const selected = state.sessions.find((item) => item.id === state.sessionId);
     const name = selected?.agent ?? state.draftAgent;
-    const agent = state.agents.find(
-      (item) => item.name === (requestedAgent ?? name),
-    );
+    const agent = state.sessionId
+      ? state.agents.find((item) => item.name === (requestedAgent ?? name))
+      : this.draftAgentRow(requestedAgent ?? name, renderedRow);
     if (
       !this.editableComposer() ||
+      state.sessionAttachingId ||
       selected?.archived ||
       state.isCreatingSession ||
       state.modeSelectionPending ||
@@ -4479,9 +4746,7 @@ export class AppStore {
     )
       throw Error(t("composer.mode.empty"));
     if (!state.sessionId) {
-      this.draftAgentExplicit = true;
-      this.draftModeExplicit = true;
-      this.update({ draftAgent: agent.name, draftMode: mode });
+      this.selectDraftAgent(agent, mode);
       return;
     }
     if (agent.name !== name) throw Error(t("composer.mode.pinned"));
@@ -4990,6 +5255,7 @@ export class AppStore {
     if (
       !id ||
       !this.editableComposer() ||
+      state.sessionTransportRecovery ||
       selected?.archived ||
       !state.capabilities?.methods.includes(method) ||
       this.inboxRequests.has(id) ||
@@ -5158,7 +5424,10 @@ export class AppStore {
       this.state.inboxPending
     )
       throw Error(t("composer.mode.unavailable"));
-    if (!this.editableComposer()) throw Error(t("composer.mode.unavailable"));
+    if (!this.editableComposer() || this.state.sessionAttachingId)
+      throw Error(t("composer.mode.unavailable"));
+    if (this.state.sessionTransportRecovery)
+      throw new CommandError("disconnected", t("session.transport.notSent"), true);
     const slash = parseSlash(this.state.composer);
     if (slash) {
       if (slash.kind === "unknown")
@@ -5248,15 +5517,14 @@ export class AppStore {
       : null;
     const agentName = this.state.draftAgent,
       modeName = this.state.draftMode;
-    const selectedAgent = this.state.agents.find(
-      (item) => item.name === agentName,
-    );
-    if (
-      !this.state.sessionId &&
-      !selectedAgent?.modes.some(
+    const selectedAgent = this.state.sessionId
+      ? undefined
+      : this.draftAgentRow(agentName);
+    const hasMode = (agent?: AgentInfo) =>
+      agent?.modes.some(
         (mode) => mode.name === modeName && mode.role !== "sub_agent",
-      )
-    )
+      );
+    if (!this.state.sessionId && !hasMode(selectedAgent))
       throw Error(t("composer.mode.empty"));
     if (
       !turnFitsBudget(
@@ -5343,6 +5611,14 @@ export class AppStore {
             (this.draftFlavor() ? null : this.state.draftWorkspace.projectId)
         )
           return;
+        const currentAgent = this.draftAgentRow(agentName);
+        if (!hostReadiness(this.state).ready)
+          throw Error(t("host.readiness.unavailable"));
+        if (
+          !hasMode(currentAgent) ||
+          currentAgent?.component !== selectedAgent?.component
+        )
+          throw Error(t("composer.mode.empty"));
         const component = selectedAgent?.component;
         if (typeof component !== "string" || !component)
           throw Error("项目组件目录尚未就绪，请重新连接工作区桥接");
@@ -5678,7 +5954,7 @@ export class AppStore {
   private newChat(activateBrowser = true) {
     this.draftAgentExplicit = false;
     this.draftModeExplicit = false;
-    this.update({ draftModel: null });
+    this.update({ draftModel: null, draftAgentComponent: undefined });
     this.releaseInterrupt();
     this.composerRoute++;
     this.cacheSession();
@@ -5817,16 +6093,32 @@ export class AppStore {
                 projectSessionDefaults: null,
               });
             } else if (
-              action.params?.project_id === this.state.draftWorkspace.projectId
+              action.method === "project.settings.set" &&
+              typeof action.params?.project_id === "string"
             ) {
-              this.update({
-                projectSessionDefaults: saved.effective
-                  ? {
-                      projectId: action.params.project_id,
-                      effective: saved.effective,
-                    }
-                  : null,
-              });
+              const targetProjectId = action.params.project_id;
+              const prevFuel =
+                this.state.projectSessionDefaults?.projectId === targetProjectId
+                  ? this.state.projectSessionDefaults?.effective.agent_wasm_fuel
+                  : undefined;
+              const fuelChanged =
+                saved.effective?.agent_wasm_fuel !== prevFuel;
+              if (targetProjectId === this.state.draftWorkspace.projectId) {
+                this.update({
+                  projectSessionDefaults: saved.effective
+                    ? {
+                        projectId: targetProjectId,
+                        effective: saved.effective,
+                      }
+                    : null,
+                });
+              }
+              if (
+                this.hostReadyFor(targetProjectId) &&
+                (fuelChanged || !!this.state.hostConnection?.catalogError)
+              ) {
+                void this.loadHostCatalog(targetProjectId);
+              }
             }
             this.applyDraftAgentDefaults();
             await this.refreshDraftDefaults();
@@ -6278,7 +6570,7 @@ export class AppStore {
                 // Re-subscribe rather than remove the witness or splice an old branch.
                 // attach owns the snapshot/delta handoff and retains proven loaded rows.
                 const id = selected.session.id;
-                const ticket = this.attaching + 1;
+                const ticket = this.attaching;
                 await this.attach(id, true, true);
                 if (
                   this.attaching !== ticket ||
@@ -6327,6 +6619,13 @@ export class AppStore {
           } finally {
             observer.stop();
           }
+        }
+        case "RecoverSessionTransport": {
+          if (state.sessionTransportRecovery !== "failed" || state.sessionAttachingId ||
+              !state.authSession?.authenticated || state.authRequired ||
+              state.page !== "conversation" || state.popup.type === "subagentDetail" ||
+              this.sessionSocket?.selectedId !== state.sessionId) return;
+          return await this.sessionSocket?.refresh();
         }
         case "Attach": {
           if (state.sessionAttachingId === value) return;
@@ -7009,31 +7308,31 @@ export class AppStore {
           return;
         }
         case "SetAgentMode":
-          return await this.setMode(action.mode, action.agent);
+          return await this.setMode(action.mode, action.agent, action.catalogRow);
         case "SetMode":
           return await this.setMode(value);
         case "SetAgent": {
           if (
+            state.sessionAttachingId ||
             state.isCreatingSession ||
             state.modeSelectionPending ||
-            state.compactInflight
+            state.compactInflight ||
+            !hostReadiness(state).ready
           )
             throw Error(t("composer.mode.unavailable"));
           if (state.sessionId)
             throw Error("现有会话的 agent 固定；请创建新会话");
-          const agent = state.agents.find((item) => item.name === value);
+          const agent = this.draftAgentRow(value, action.catalogRow);
           const modes =
             agent?.modes.filter((mode) => mode.role !== "sub_agent") ?? [];
           if (!agent || !modes.length)
             throw Error("Agent 没有可用的主会话模式");
-          this.draftAgentExplicit = true;
-          this.draftModeExplicit = true;
-          this.update({
-            draftAgent: agent.name,
-            draftMode: modes.some((mode) => mode.name === state.draftMode)
+          this.selectDraftAgent(
+            agent,
+            modes.some((mode) => mode.name === state.draftMode)
               ? state.draftMode
               : modes[0].name,
-          });
+          );
           return;
         }
         case "OpenSessionPermissionsDialog": {

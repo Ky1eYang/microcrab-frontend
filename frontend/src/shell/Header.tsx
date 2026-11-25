@@ -1,3 +1,4 @@
+import { referenceLabels } from "../features/referenceLabels";
 import { childInputAllowed, settledReturnChild } from "../client/child-turns";
 import { useClientPlugins } from "../state";
 import {
@@ -19,7 +20,11 @@ import {
   isBusy,
   isSubagent,
 } from "../features/shared";
-import { usePluginDrawerViewport } from "../client/viewport";
+import {
+  useNarrowViewport,
+  usePluginDrawerViewport,
+} from "../client/viewport";
+import { setRailDrawerOpen, useRailDrawerOpen } from "./rail-drawer";
 import type { NativeExecution } from "../client/types";
 import { t } from "../i18n";
 import {
@@ -145,6 +150,12 @@ export function Header() {
     state.popup.parentId === state.sessionId
       ? state.popup
       : null;
+  const sessionLabel = referenceLabels("session", [
+    ...state.sessions.flatMap((row) => [row.id, row.parentID]),
+    ...(state.childList?.children ?? []).map((row) => row.id),
+    ...state.transcript.blocks.filter(isSubagent).map(childId),
+    inspection?.childId,
+  ]);
   const activePluginName =
     state.page === "plugin" && state.pluginId
       ? clientPlugins.registry
@@ -156,7 +167,7 @@ export function Header() {
       ? t("plugins.title")
       : state.page === "plugin"
         ? (activePluginName ?? t("plugins.title"))
-        : current?.title || current?.id || "New chat";
+        : current?.title || (current && sessionLabel(current.id)) || "New chat";
   const hiddenChildren = new Set((state.childList?.parent_session_id === state.sessionId ? state.childList.children : []).filter(settledReturnChild).map((child) => child.id));
   const children = (
     state.childList?.parent_session_id === state.sessionId
@@ -164,7 +175,7 @@ export function Header() {
       : []
   ).filter((child) => !hiddenChildren.has(child.id)).map((s) => ({
     id: s.id,
-    title: childText(s.name) || s.id,
+    title: childText(s.name) || sessionLabel(s.id),
     status: childText(s.status) || "unknown",
   }));
   for (const b of state.transcript.blocks) {
@@ -177,7 +188,7 @@ export function Header() {
         childText(b.tool?.childTarget) ||
         childText(b.tool?.input?.subagent) ||
         childText(b.tool?.input?.prompt) ||
-        `SubAgent (${id})`,
+        `SubAgent (${sessionLabel(id)})`,
       // A streamed delegate receipt does not establish committed child completion.
       status:
         b.tool?.childBinding === "execution"
@@ -196,12 +207,29 @@ export function Header() {
           ? "busy"
           : "idle";
   const emit = (type: string, value?: unknown) => dispatch({ type, value });
+  const narrowNav = useNarrowViewport();
+  const railDrawerOpen = useRailDrawerOpen();
   return (
     <header
       className={`header-compound-root${inspection ? " child-inspection-header" : ""}`}
     >
       <div className="header-main-row">
         <div className="header-left-zone">
+          {narrowNav && (
+            <button
+              type="button"
+              className="header-menu-btn"
+              data-testid="header-open-rail"
+              title={t("rail.expand")}
+              aria-label={t("rail.expand")}
+              aria-expanded={railDrawerOpen}
+              onClick={(event) =>
+                setRailDrawerOpen(!railDrawerOpen, event.currentTarget)
+              }
+            >
+              <Icon name="menu" size={18} aria-hidden="true" />
+            </button>
+          )}
           {(() => {
             // Multi-depth crumb grammar (G1). Direct parent stays actionable;
             // deeper ancestors are disabled until multi-level nav API exists.
@@ -224,13 +252,13 @@ export function Header() {
               if (!p) {
                 ancestors.unshift({
                   id: walk.parentID,
-                  label: walk.parentID,
+                  label: sessionLabel(walk.parentID),
                 });
                 break;
               }
               ancestors.unshift({
                 id: p.id,
-                label: p.title.trim() || p.id,
+                label: p.title.trim() || sessionLabel(p.id),
               });
               walk = p;
             }
@@ -247,7 +275,7 @@ export function Header() {
                   disabled: !isDirectParentOfSession,
                   title: !isDirectParentOfSession
                     ? t("header.ancestorPending")
-                    : a.id,
+                    : sessionLabel(a.id),
                   onClick: isDirectParentOfSession
                     ? () => emit("Attach", a.id)
                     : undefined,
@@ -260,7 +288,7 @@ export function Header() {
               });
               crumbs.push({
                 key: inspection.childId,
-                label: childText(inspection.detail?.name) || inspection.childId,
+                label: childText(inspection.detail?.name) || sessionLabel(inspection.childId),
                 current: true,
               });
             } else if (ancestors.length) {
@@ -271,7 +299,7 @@ export function Header() {
                   key: a.id,
                   label: a.label,
                   disabled: !isDirect,
-                  title: !isDirect ? t("header.ancestorPending") : a.id,
+                  title: !isDirect ? t("header.ancestorPending") : sessionLabel(a.id),
                   onClick: isDirect ? () => emit("Attach", a.id) : undefined,
                 });
               }
@@ -461,7 +489,7 @@ export function Header() {
                       <div
                         className="subagent-menu-item"
                         key={s.id}
-                        title={`${s.title} · ${s.id}`}
+                        title={`${s.title} · ${sessionLabel(s.id)}`}
                         onClick={() => {
                           emit("CloseDropdowns");
                           emit("OpenSubAgentDetail", s.id);
@@ -481,7 +509,7 @@ export function Header() {
                         <div className="subagent-menu-item-info">
                           <span className="subagent-item-title">{s.title}</span>
                           <span className="subagent-item-id">
-                            {s.id} ·{" "}
+                            {sessionLabel(s.id)} ·{" "}
                             {t(
                               `subagent.status.${childDisplayStatus(s.status)}`,
                             )}

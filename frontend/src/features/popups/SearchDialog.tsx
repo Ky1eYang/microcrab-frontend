@@ -1,3 +1,4 @@
+import { referenceLabels } from "../referenceLabels";
 import { useEffect, useRef, useState } from "react";
 import { trapFocus } from "../../client/viewport";
 import { useApp } from "../../state";
@@ -11,10 +12,11 @@ import { Markdown } from "../views";
 export function SearchDialog() {
   const { state, dispatch } = useApp(),
     p = state.popup;
+  const sessionLabel = referenceLabels("session", state.sessions.map((row) => row.id));
   const sessions = state.sessions.filter(
     (s) =>
       !s.parentID &&
-      `${s.title} ${s.id}`.toLowerCase().includes(p.query.toLowerCase()),
+      `${s.title} ${s.id} ${sessionLabel(s.id)}`.toLowerCase().includes(p.query.toLowerCase()),
   );
   const selected = state.sessions.find(
     (s) => s.id === (p.selectedId ?? sessions[0]?.id),
@@ -178,10 +180,10 @@ export function SearchDialog() {
                       <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
                     </svg>
                     <div className="search-result-text">
-                      <div className="search-result-title">{s.title}</div>
+                      <div className="search-result-title">{s.title || sessionLabel(s.id)}</div>
                       <div className="search-result-sub">
                         <span className="search-result-id">
-                          #{s.id.slice(0, 8)}
+                          #{sessionLabel(s.id)}
                         </span>
                         {s.agent && (
                           <span className="search-result-agent">
@@ -229,7 +231,7 @@ export function SearchDialog() {
                   {meta && (
                     <div className="search-preview-meta-grid">
                       {[
-                        [t("search.session.id"), selected.id, "mono"],
+                        [t("search.session.id"), sessionLabel(selected.id), "mono"],
                         [
                           t("search.session.workspace"),
                           state.currentWorkspace,

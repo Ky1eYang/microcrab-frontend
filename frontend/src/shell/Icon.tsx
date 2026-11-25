@@ -15,6 +15,33 @@ export function Icon({
         <rect width="7" height="5" x="3" y="16" rx="1" />
       </>
     ),
+    "alert-circle": (
+      <>
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 8v4.5" />
+        <path d="M12 16h.01" />
+      </>
+    ),
+    box: (
+      <>
+        <path d="M21 8 12 3 3 8v8l9 5 9-5V8Z" />
+        <path d="m3 8 9 5 9-5" />
+        <path d="M12 13v8" />
+      </>
+    ),
+    "arrow-left": (
+      <>
+        <path d="M19 12H5" />
+        <path d="m12 19-7-7 7-7" />
+      </>
+    ),
+    menu: (
+      <>
+        <path d="M4 6h16" />
+        <path d="M4 12h16" />
+        <path d="M4 18h16" />
+      </>
+    ),
     sidebar: (
       <>
         <rect width="18" height="18" x="3" y="3" rx="2" />
@@ -194,6 +221,14 @@ export function Icon({
         <path d="M13 5v2" />
         <path d="M13 17v2" />
         <path d="M13 11v2" />
+      </>
+    ),
+    "file-code": (
+      <>
+        <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+        <polyline points="14 2 14 8 20 8" />
+        <path d="m10 13-2 2 2 2" />
+        <path d="m14 17 2-2-2-2" />
       </>
     ),
   };

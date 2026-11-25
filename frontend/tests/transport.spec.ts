@@ -294,7 +294,7 @@ test("fixed HTTP resources preserve revisions, query cursors, operation identity
     return session.commands;
   });
   expect(
-    backend.requests.slice(start).map(({ method, path, query, body }) => ({
+    backend.requests.slice(start).filter(({ path }) => !path.endsWith("/host-state")).map(({ method, path, query, body }) => ({
       method,
       path: path.replace("/api/v1/sessions/s1", ""),
       query,

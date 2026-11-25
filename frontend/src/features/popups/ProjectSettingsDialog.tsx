@@ -1,3 +1,4 @@
+import { referenceLabels } from "../referenceLabels";
 import { ExternalSpeakersSettings } from "./ExternalSpeakersSettings";
 import { OwnerSettings, type ProjectSettingsSection } from "./OwnerSettings";
 import { ReferencesSettings } from "./ReferencesSettings";
@@ -194,7 +195,7 @@ function HostPane({
         </Row>
         {project?.host_id && (
           <Row label={t("project.settings.host.hostId")} mono>
-            {project.host_id}
+            {referenceLabels("host", state.projects.map((row) => row.host_id))(project.host_id)}
           </Row>
         )}
         {project?.workspace_id && (
@@ -272,11 +273,12 @@ function AgentsPane({ projectId }: { projectId: string }) {
     state.hostConnection?.projectId === projectId &&
     state.hostConnection.state === "ready";
   const agents: AgentInfo[] = matched ? state.agents : [];
+  const componentLabel = referenceLabels("digest", agents.map((row) => row.component));
   const filteredAgents = agents.filter((agent) => {
     const q = agentQuery.trim().toLowerCase();
     return (
       !q ||
-      `${agent.name} ${typeof agent.component === "string" ? agent.component : ""}`
+      `${agent.name} ${typeof agent.component === "string" ? agent.component + " " + componentLabel(agent.component) : ""}`
         .toLowerCase()
         .includes(q)
     );
@@ -314,11 +316,15 @@ function AgentsPane({ projectId }: { projectId: string }) {
         {filteredAgents.map((agent) => {
           const modes =
             agent.modes?.filter((mode) => mode.role !== "sub_agent") ?? [];
-          const current = state.draftAgent === agent.name;
+          const current =
+            state.draftAgent === agent.name &&
+            (hasSession ||
+              state.draftAgentComponent === undefined ||
+              state.draftAgentComponent === agent.component);
           const component =
-            typeof agent.component === "string" ? agent.component : "—";
+            typeof agent.component === "string" ? componentLabel(agent.component) : "—";
           return (
-            <div className="project-agent-row" key={agent.name}>
+            <div className="project-agent-row" key={JSON.stringify([agent.name, agent.component])}>
               <div className="project-agent-main">
                 <span className="project-agent-name">{agent.name}</span>
                 <span className="project-agent-component monospace-text">
@@ -359,7 +365,7 @@ function AgentsPane({ projectId }: { projectId: string }) {
                   hasSession ? t("composer.agent.disabledSession") : undefined
                 }
                 onClick={() =>
-                  dispatch({ type: "SetAgent", value: agent.name })
+                  dispatch({ type: "SetAgent", value: agent.name, catalogRow: agent })
                 }
               >
                 {t("project.settings.agents.useInDraft")}

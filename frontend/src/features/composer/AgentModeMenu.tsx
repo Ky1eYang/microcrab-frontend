@@ -7,6 +7,7 @@ import { GlyphIcon } from "../shared";
 export function AgentModeMenu({
   agents,
   agent,
+  agentComponent,
   mode,
   pinned,
   pending,
@@ -14,12 +15,13 @@ export function AgentModeMenu({
 }: {
   agents: AgentInfo[];
   agent: string;
+  agentComponent?: string;
   mode: string;
   pinned: boolean;
   pending: boolean;
-  onSelect: (agent: string, mode: string) => void;
+  onSelect: (agent: AgentInfo, mode: string) => void;
 }) {
-  const [hovered, setHovered] = useState(agent);
+  const [hovered, setHovered] = useState<AgentInfo>();
   const [agentFilter, setAgentFilter] = useState("");
   const primaryPaneRef = useRef<HTMLDivElement>(null);
   const secondaryListRef = useRef<HTMLDivElement>(null);
@@ -31,11 +33,16 @@ export function AgentModeMenu({
   const candidates = allCandidates.filter((item) =>
     item.name.toLowerCase().includes(query),
   );
+  const current = (item: AgentInfo) =>
+    item.name === agent &&
+    (pinned || agentComponent === undefined || item.component === agentComponent);
   const selected = pinned
-    ? agents.find((item) => item.name === agent)
-    : (candidates.find((item) => item.name === hovered) ??
-      candidates.find((item) => item.name === agent) ??
+    ? agents.find(current)
+    : (candidates.find((item) => item === hovered) ??
+      candidates.find(current) ??
       candidates[0]);
+  const modeIsCurrent = (name: string) =>
+    !!selected && current(selected) && name === mode;
   const visibleModes =
     selected?.modes.filter((entry) => entry.role !== "sub_agent") ?? [];
 
@@ -132,17 +139,17 @@ export function AgentModeMenu({
             )}
             {candidates.map((item) => (
               <button
-                key={item.name}
+                key={JSON.stringify([item.name, item.component])}
                 type="button"
                 role="menuitem"
-                className={`model-picker-item${selected?.name === item.name ? " active" : ""}`}
+                className={`model-picker-item${selected === item ? " active" : ""}`}
                 data-testid="composer-agent-item"
                 aria-haspopup="menu"
-                aria-expanded={selected?.name === item.name}
+                aria-expanded={selected === item}
                 disabled={pending}
-                onMouseEnter={() => setHovered(item.name)}
-                onFocus={() => setHovered(item.name)}
-                onClick={() => setHovered(item.name)}
+                onMouseEnter={() => setHovered(item)}
+                onFocus={() => setHovered(item)}
+                onClick={() => setHovered(item)}
               >
                 <span className="composer-agent-item-label">{item.name}</span>
                 <GlyphIcon name="chevron" />
@@ -167,12 +174,12 @@ export function AgentModeMenu({
                 key={entry.name}
                 type="button"
                 role="menuitemradio"
-                aria-checked={selected?.name === agent && entry.name === mode}
+                aria-checked={modeIsCurrent(entry.name)}
                 data-testid="composer-mode-item"
                 title={entry.description || undefined}
-                className={`model-picker-item${selected?.name === agent && entry.name === mode ? " active" : ""}`}
+                className={`model-picker-item${modeIsCurrent(entry.name) ? " active" : ""}`}
                 disabled={pending}
-                onClick={() => selected && onSelect(selected.name, entry.name)}
+                onClick={() => selected && onSelect(selected, entry.name)}
               >
                 <span className="composer-mode-item-text">
                   <span>{entry.name}</span>
@@ -183,7 +190,7 @@ export function AgentModeMenu({
                     </small>
                   )}
                 </span>
-                {selected?.name === agent && entry.name === mode && (
+                {modeIsCurrent(entry.name) && (
                   <GlyphIcon name="check" size={14} />
                 )}
               </button>

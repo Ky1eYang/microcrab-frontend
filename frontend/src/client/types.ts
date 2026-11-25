@@ -124,7 +124,10 @@ export interface NativeExecutionContentPage {
   revision: number;
   available: boolean;
 }
+export type ToolPresentation = "coding-file" | "message-receipt" | "view-image" | "plugin-artifact";
+
 export interface NativeExecution {
+  presentation?: ToolPresentation;
   subject?: PermissionRequest["subject"];
   delegate_child?: { session_id: string; target: string } | null;
   output_availability?: "none" | "retained" | "released";
@@ -187,6 +190,8 @@ export interface NativeMessage {
   /** Exact trusted submission admission certificate; absent in historical bytes. */
   submission_operation_id?: string;
   canonical_source_id?: string;
+  /** Server-observed completion for this exact admitted Assistant response. */
+  response_completed_at_ms?: number;
   /** Display-only usage for this exact selected assistant response; absent means unknown. */
   usage?: NativeUsage | null;
   content_truncated?: boolean;
@@ -210,6 +215,7 @@ export interface NativeMessage {
     name: string;
     arguments: unknown;
     builtin?: "delegate" | null;
+    presentation?: ToolPresentation;
     /** Display certificate for this exact selected call in the owning Session. */
     execution_id?: number;
     execution_status?: DisplayExecutionStatus;
@@ -221,6 +227,7 @@ export interface NativeMessage {
   execution_call_source_id?: string;
   execution_call_index?: number;
   tool_builtin?: "delegate" | null;
+  presentation?: ToolPresentation;
   call_id?: string;
   tool_name?: string;
 }
@@ -278,6 +285,7 @@ export interface PermissionProposalView extends PermissionProposal {
   submitting: boolean;
 }
 export interface PermissionRequest {
+  presentation?: ToolPresentation;
   phase?: "waiting_user" | "review_grace";
   controller_id?: number;
   owning_session_id?: string;
@@ -655,6 +663,8 @@ export interface NativeDisplayObservation {
   operation_id?: string;
   text?: string;
   reason?: string;
+  /** Only display_binding certifies this clock; deltas and validation do not. */
+  response_completed_at_ms?: number;
   [key: string]: unknown;
 }
 export interface NativeDisplayRecord {
@@ -986,6 +996,7 @@ export interface Block {
   id: string;
   sessionId: string;
   messageId: string;
+  canonicalSourceId?: string;
   partId: string;
   clientInvocationId?: string | null;
   callId?: string;
@@ -1017,6 +1028,9 @@ export interface Block {
   fold: string;
   startedMs?: number;
   endedMs?: number;
+  responseAdmission?: "admitted" | "preview";
+  /** Display-only; never derived from the generic block or operation clocks. */
+  responseCompletedAtMs?: number;
   [key: string]: any;
 }
 /** Durable scope is required; position may be absent while its history witness is in flight. */
@@ -1048,14 +1062,12 @@ export interface Transcript {
   turnLifecycle?: {
     sessionId: string;
     operations: Record<string, "active" | "terminal">;
-    /** Browser receipt time for previously witnessed work, not historical reads. */
-    terminalObservedAt?: Record<string, number>;
-    /** Server wall clock from the exact terminal receipt, when supplied. */
-    terminalAt?: Record<string, number>;
     activeOperationIds: string[];
     completionRevision: number;
   };
   displayGraph?: import("./display-graph").DisplayGraphState;
+  /** Times from the current canonical window, keyed by exact source and message. */
+  canonicalResponseTimes?: ReadonlyMap<string, number | undefined>;
   /** Selected canonical call certificates, shared with bound graph rows. */
   displayExecutionCertificates?: ReadonlyMap<string, DisplayExecutionCertificate>;
   displayReplay?: DisplayReplayState;
@@ -1171,6 +1183,7 @@ export interface AppState {
   pluginWorkspace?: { type: "view"; pluginId: string } | null;
   sessionId: string | null;
   sessionAttachingId?: string | null;
+  sessionTransportRecovery?: "recovering" | "failed" | "forbidden" | null;
   sessions: SessionView[];
   filter: string;
   transcript: Transcript;
@@ -1252,6 +1265,8 @@ export interface AppState {
   agents: AgentInfo[];
   projects: NativeProject[];
   draftAgent: string;
+  /** Exact component of a manually selected draft Agent. */
+  draftAgentComponent?: string;
   draftMode: string;
   policy: PolicySnapshot | null;
   history: unknown;

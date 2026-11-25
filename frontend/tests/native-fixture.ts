@@ -230,6 +230,7 @@ export async function nativeBackend(
     selectProject?: boolean;
     serverBuild?: { version: string; sha256: string | null };
     extraMethods?: string[];
+    projectHostSummary?: () => unknown;
     /** Opt in to a Sandbox observer attachment and explicit Host takeover. */
     sandboxParticipant?: boolean;
     /** Remove advertised methods (capability-absent states). */
@@ -389,6 +390,7 @@ export async function nativeBackend(
   let created = 0;
   const deletedSessions = new Set<string>();
   /** Owner-level list watch (`sessions.watch`) of the latest socket. */
+  let projectHostWatch: { socket: WebSocketRoute; project: string; id: string; sequence: number } | undefined;
   let listWatch: {
     socket: { send(message: string): void };
     id: string;
@@ -981,6 +983,16 @@ export async function nativeBackend(
         });
         return;
       }
+      if (command.method === "project.host_watch" && options.projectHostSummary) {
+        projectHostWatch = { socket, project: command.params.project_id, id: command.params.subscription_id, sequence: 0 };
+        result({ subscription_id: projectHostWatch.id, sequence: 0, summary: options.projectHostSummary() });
+        return;
+      }
+      if (command.method === "project.host_unwatch" && options.projectHostSummary) {
+        if (projectHostWatch?.id === command.params.subscription_id) projectHostWatch = undefined;
+        result({ unwatched: true });
+        return;
+      }
       if (command.method === "host.relay_attach") {
         attachNativeHost(
           command.params.project_id,
@@ -1093,10 +1105,13 @@ export async function nativeBackend(
         published: null as NativeSnapshot | null,
       };
       connections.set(socket, meta);
-      // No server is connected behind this route, so there is no other side to
-      // forward the close to; the handler only records it.
-      socket.onClose(() => {
+      // A mocked endpoint must complete the client's close handshake itself.
+      socket.onClose((code, reason) => {
+        if (meta.closed) return;
         meta.closed = true;
+        const pending = pendingSubscriptions.findIndex((held) => held.socket === socket);
+        if (pending !== -1) pendingSubscriptions.splice(pending, 1);
+        void socket.close({ code, reason });
       });
       const view = structuredClone(others.get(sessionId) ?? snapshot);
       view.session.id = sessionId;
@@ -1613,6 +1628,12 @@ export async function nativeBackend(
     publish,
     listEvent,
     listWatched: () => listWatch !== null,
+    projectHostEvent(summary: unknown) {
+      const watch = projectHostWatch;
+      if (!watch) throw Error("No Project Host watch");
+      watch.socket.send(JSON.stringify({ v: 1, type: "project_host_event", project_id: watch.project,
+        subscription_id: watch.id, sequence: ++watch.sequence, summary }));
+    },
     handleBlocks(handler: typeof blocksHandler) {
       blocksHandler = handler;
     },

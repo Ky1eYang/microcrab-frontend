@@ -13,15 +13,13 @@ test("NewChat clears a pending attach and permits reattaching the same session",
   await target.click();
   await expect.poll(() => pending.length).toBe(1);
   await expect(target).toHaveAttribute("aria-busy", "true");
+  const abandoned = pending[0].socket;
   await page.getByRole("button", { name: "新对话", exact: true }).click();
   await expect(target).toHaveAttribute("aria-busy", "false");
   await expect(page).not.toHaveURL(/#session\//);
-  // NewChat bumps the attach ticket and closes the committed socket. Closing
-  // that socket is what releases the selection, and delivering its snapshot
-  // afterwards must not reopen it.
-  const abandoned = pending[0].socket;
-  succeed(0);
+  // NewChat closes the obsolete pending socket, not just the committed one.
   await expect.poll(() => backend.connection(abandoned)?.closed).toBe(true);
+  expect(pending).toHaveLength(0);
   await expect(page).not.toHaveURL(/#session\//);
   await expect(page.getByText("Opened s2", { exact: true })).toHaveCount(0);
   await target.click();
@@ -231,16 +229,17 @@ test("slow failed session navigation keeps history and permits a retry without d
 test("stale session failure does not clear a newer navigation or show its error", async ({
   page,
 }) => {
-  const { pending, fail, succeed, row } = await heldSessionNavigation(page);
+  const { backend, pending, succeed, row } = await heldSessionNavigation(page);
   const older = row("待打开会话");
   const newer = row("另一个会话");
   await older.click();
   await expect.poll(() => pending.length).toBe(1);
+  const abandoned = pending[0].socket;
   await newer.click();
-  await expect.poll(() => pending.length).toBe(2);
+  await expect.poll(() => pending.map((held) => held.sessionId)).toEqual(["s3"]);
   await expect(newer).toHaveAttribute("aria-busy", "true");
-  fail(0, "Obsolete navigation failure");
-  // A duplicate click remains suppressed after the old rejection has settled.
+  expect(backend.connection(abandoned)?.closed).toBe(true);
+  // A duplicate click remains suppressed after the old waiter is cancelled.
   await newer.click();
   await expect(newer).toHaveAttribute("data-loading", "true");
   await expect(newer.getByTitle("正在打开会话…")).toBeVisible();
@@ -367,9 +366,8 @@ test("new-session resync survives an outstanding old-session refresh", async ({
   // The fixture stamps a fresh identity on every connection and `backend.event`
   // addresses the first socket, so neither names the subscription s2 accepted.
   await sendResync(backend, pending, "s2");
-  // The s2 reconnect is held behind the still-outstanding s1 refresh.
-  await expect.poll(() => pending.length).toBe(2);
-  expect(pending.map((held) => held.sessionId)).toEqual(["s1", "s2"]);
+  // Replacing s1 closes its outstanding refresh before s2 recovers.
+  await expect.poll(() => pending.map((held) => held.sessionId)).toEqual(["s2"]);
   // Committing s2 stops the previous socket, which also closes this held
   // reconnect. A closed route cannot accept another frame, so the observable
   // result is that the s2 view stays and no further s1 socket opens.
@@ -382,7 +380,7 @@ test("new-session resync survives an outstanding old-session refresh", async ({
   expect(
     backend.sessionSockets.filter((socket) => sessionOf(socket) === "s1"),
   ).toHaveLength(s1Before);
-  expect(pending.map((held) => held.sessionId)).toEqual(["s1", "s2"]);
+  expect(pending.map((held) => held.sessionId)).toEqual(["s2"]);
   const refresh = pending.findIndex((held) => held.sessionId === "s2");
   succeed(refresh);
   await expect(page).toHaveURL(/#session\/s2$/);
@@ -662,4 +660,42 @@ test("two completed turns settle idle and leave the composer ready for a third",
   expect(
     backend.nativeUrls.every((url) => new URL(url).pathname === "/api/v1/ws"),
   ).toBe(true);
+});
+
+
+test("reconnect preserves the draft and observes the original lost input receipt", async ({ page }) => {
+  const backend = await nativeBackend(page, {
+    sessionCommand: (command) => command.method === "turn.queue"
+      ? new Promise<{ data: unknown }>(() => {})
+      : undefined,
+  });
+  const observed: string[] = [];
+  await page.route("**/api/v1/sessions/s1/operations/*", (route) => {
+    observed.push(new URL(route.request().url()).pathname.split("/").at(-1)!);
+    return route.fulfill({ status: 404, json: { error: { code: "not_found", message: "Not observed yet" } } });
+  });
+  await page.goto("/#session/s1");
+  await connectHostUI(page);
+  const composer = page.getByLabel("消息", { exact: true });
+  await composer.fill("draft whose receipt is lost");
+  await page.getByTitle("发送 (Enter)").click();
+  const mutations = () => backend.commands.filter((command) => command.method === "turn.queue");
+  await expect.poll(() => mutations().length).toBe(1);
+  const operation = mutations()[0].params.operation_id;
+  const live = backend.sessionSockets.at(-1)!;
+  backend.holdNextSubscription();
+  await live.close({ code: 4001 });
+  await expect(page.getByRole("status").filter({ hasText: "正在恢复会话连接" })).toBeVisible();
+  await expect.poll(() => observed).toContain(operation);
+  await expect(composer).toHaveValue("draft whose receipt is lost");
+  await expect(composer).toBeEnabled();
+  await expect(page.getByTitle("发送 (Enter)")).toHaveCount(0);
+  await composer.press("Enter");
+  expect(mutations()).toHaveLength(1);
+  await expect.poll(() => backend.pendingSubscriptions.length).toBe(1);
+  backend.releaseSubscription();
+  await expect(page.getByRole("status").filter({ hasText: "正在恢复会话连接" })).toHaveCount(0);
+  await expect(composer).toHaveValue("draft whose receipt is lost");
+  expect(observed.every((id) => id === operation)).toBe(true);
+  expect(mutations()).toHaveLength(1);
 });

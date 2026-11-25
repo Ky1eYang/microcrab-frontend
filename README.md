@@ -21,7 +21,7 @@ npm run dev
 
 The development server listens at `http://127.0.0.1:8080` and proxies `/api`
 (including WebSockets) to `http://127.0.0.1:4096`. Run a compatible
-[microcrab-client server](https://github.com/Ky1eYang/microcrab-client)
+[microcrab-apps server](https://github.com/Ky1eYang/microcrab-apps)
 separately. Set `MICROCRAB_API_TARGET` in a local `frontend/.env.local` to use a
 different backend.
 

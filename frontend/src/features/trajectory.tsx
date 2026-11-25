@@ -1,3 +1,5 @@
+import { toolReferenceProjection } from "./toolReferences";
+import { referenceLabels } from "./referenceLabels";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { activeSession, useApp } from "../state";
 import { ContentViewer } from "./content-inspection/ContentViewer";
@@ -9,7 +11,11 @@ import {
   presentationIdentityChanged,
 } from "./conversation/presentationIdentity";
 import { terminalSummary } from "./trajectoryStopReason";
-import { toolDisplayStatus } from "./tool-status";
+import {
+  TOOL_STATUS_ICON,
+  toolDisplayStatus,
+  type ToolDisplayStatus,
+} from "./tool-status";
 import { measuredDuration } from "./trajectoryTiming";
 import {
   useInternalAssistantAudit,
@@ -170,9 +176,10 @@ function labelOf(block: FeatureBlock, kind: string) {
 
 function summaryOf(block: FeatureBlock) {
   if (block.tool) {
-    const input = block.tool.input;
+    const projection = toolReferenceProjection(block.tool.input, block.tool.presentation, "arguments");
+    const input = projection ? JSON.parse(projection.display) : block.tool.input;
     const value =
-      block.tool.title ||
+      (!projection && block.tool.title) ||
       (typeof input?.command === "string" && input.command) ||
       input?.filePath ||
       input?.path ||
@@ -257,18 +264,32 @@ function statusOf(block: FeatureBlock) {
   return "done";
 }
 
+/** Same glyph vocabulary as the conversation tool rows. */
+function trajectoryGlyph(item: TrajectoryItem): ToolDisplayStatus | null {
+  const status = item.status;
+  if (["error", "failed"].includes(status)) return "failed";
+  if (status === "cancelled") return "cancelled";
+  if (["running", "thinking", "pending"].includes(status)) return "running";
+  if (["unknown", "awaiting-result"].includes(status)) return "unknown";
+  if (item.block.tool) {
+    const display = toolDisplayStatus(item.block.tool.status);
+    return display === "succeeded" ? "succeeded" : display;
+  }
+  return null;
+}
+
 function statusLabel(status: string) {
   if (status === "cancelled") return t("stopReason.cancelled");
-  if (status === "awaiting-result") return "尚无结果";
-  if (status === "unknown") return "状态未确认";
+  if (status === "awaiting-result") return t("trajectory.status.awaitingResult");
+  if (status === "unknown") return t("trajectory.status.unconfirmed");
   if (isFailed(status)) return t("tools.status.failed");
-  if (status === "thinking") return "进行中";
+  if (status === "thinking") return t("trajectory.status.inProgress");
   if (status === "done") return t("tools.status.succeeded");
   return t(`tools.status.${toolDisplayStatus(status)}`);
 }
 
 function stamp(ms?: number | null) {
-  if (ms == null || !Number.isFinite(ms)) return "未记录";
+  if (ms == null || !Number.isFinite(ms)) return t("trajectory.notRecorded");
   return new Date(ms).toLocaleString("sv-SE").replace("T", " ");
 }
 
@@ -366,9 +387,13 @@ function contentOf(block: FeatureBlock) {
   if (block.tool) {
     parts.push(`${block.tool.name}`);
     if (block.tool.input != null)
-      parts.push(JSON.stringify(block.tool.input, null, 2));
+      parts.push(
+        toolReferenceProjection(block.tool.input, block.tool.presentation, "arguments")?.display ??
+        (typeof block.tool.input === "string" ? block.tool.input : JSON.stringify(block.tool.input, null, 2)),
+      );
   }
-  if (block.payload.text.trim()) parts.push(block.payload.text.trim());
+  const output = toolReferenceProjection(block.payload.text, block.payload.toolPresentation, "result")?.display ?? block.payload.text;
+  if (output.trim()) parts.push(output.trim());
   return parts.join("\n\n");
 }
 
@@ -1088,10 +1113,11 @@ export function TrajectoryView({
     return () => document.removeEventListener("keydown", onKey);
   }, [narrow, selected]);
   const copy = (text: string) => dispatch({ type: "CopyText", value: text });
+  const sessionLabel = referenceLabels("session", [...state.sessions.map((row) => row.id), state.sessionId]);
   const report = () =>
     [
       "# 会话执行轨迹",
-      `- 会话: ${title || activeSession(state)?.title || state.sessionId || "unknown"}`,
+      `- 会话: ${title || activeSession(state)?.title || (state.sessionId && sessionLabel(state.sessionId)) || "unknown"}`,
       `- 事件: ${items.length}`,
       `- 执行时长: ${timeOf(totalDuration)}`,
       "",
@@ -1360,6 +1386,24 @@ export function TrajectoryView({
                       }
                       onClick={() => select(item.block.id)}
                     >
+                      <span
+                        className="trajectory-entry-glyph tool-status-glyph"
+                        data-testid="trajectory-status-glyph"
+                        data-status={trajectoryGlyph(item) ?? "none"}
+                      >
+                        {trajectoryGlyph(item) && (
+                          <>
+                            <Icon
+                              name={TOOL_STATUS_ICON[trajectoryGlyph(item)!]}
+                              size={14}
+                              aria-hidden="true"
+                            />
+                            <span className="sr-only">
+                              {statusLabel(item.status)}
+                            </span>
+                          </>
+                        )}
+                      </span>
                       <span className="trajectory-entry-kind">
                         <TrajectoryTitle item={item} />
                       </span>
@@ -1456,12 +1500,21 @@ export function TrajectoryView({
                       <section className="trajectory-pane">
                         <h3>参数</h3>
                         <div className="trajectory-scroll-area">
-                          <Payload
-                            variant="trajectory"
-                            value={selected.block.tool?.input}
-                            testid="tool-payload-input"
-                            empty="未记录参数"
-                          />
+                          {selected.block.tool?.presentation === "view-image" ? (
+                            <RequestAudit
+                              block={selected.block as any}
+                              presentationScope={auditPresentationScope}
+                              authoredArguments
+                            />
+                          ) : (
+                            <Payload
+                              variant="trajectory"
+                              value={selected.block.tool?.input}
+                         projection={toolReferenceProjection(selected.block.tool?.input, selected.block.tool?.presentation, "arguments")}
+                              testid="tool-payload-input"
+                              empty="未记录参数"
+                            />
+                          )}
                         </div>
                       </section>
                     )}
@@ -1472,6 +1525,7 @@ export function TrajectoryView({
                           <Payload
                             variant="trajectory"
                             value={selected.block.payload.text}
+                         projection={toolReferenceProjection(selected.block.payload.text, selected.block.payload.toolPresentation, "result")}
                             testid="tool-payload-output"
                             status={selected.status}
                             empty="(无内容)"
@@ -1519,12 +1573,21 @@ export function TrajectoryView({
                 )}
                 {tab === "input" && (
                   <div className="trajectory-scroll-area">
-                    <Payload
-                      variant="trajectory"
-                      value={selected.block.tool?.input}
-                      fillBody
-                      empty="未记录参数"
-                    />
+                    {selected.block.tool?.presentation === "view-image" ? (
+                      <RequestAudit
+                        block={selected.block as any}
+                        presentationScope={auditPresentationScope}
+                        authoredArguments
+                      />
+                    ) : (
+                      <Payload
+                        variant="trajectory"
+                        value={selected.block.tool?.input}
+                         projection={toolReferenceProjection(selected.block.tool?.input, selected.block.tool?.presentation, "arguments")}
+                        fillBody
+                        empty="未记录参数"
+                      />
+                    )}
                   </div>
                 )}
                 {tab === "output" && (
@@ -1532,6 +1595,7 @@ export function TrajectoryView({
                     <Payload
                       variant="trajectory"
                       value={selected.block.payload.text}
+                         projection={toolReferenceProjection(selected.block.payload.text, selected.block.payload.toolPresentation, "result")}
                       status={isFailed(selected.status) ? "error" : undefined}
                       fillBody
                       empty="未记录结果"

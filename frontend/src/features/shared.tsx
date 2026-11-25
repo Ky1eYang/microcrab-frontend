@@ -2,7 +2,7 @@ import { isDirectUserSource } from "../client/input-source";
 import type { NativeInputSource } from "../client/types";
 import type { NativeWireError } from "../client/failure";
 import { useEffect, useRef, type SVGProps } from "react";
-import type { Block, HistoryPosition, PreviewIdentity } from "../client/types";
+import type { Block, HistoryPosition, PreviewIdentity, ToolPresentation } from "../client/types";
 import { commonIconShape, IconSvg } from "../ui/icon";
 
 export interface FeatureBlock {
@@ -26,8 +26,11 @@ export interface FeatureBlock {
   preview?: PreviewIdentity;
   startedMs?: number | null;
   endedMs?: number | null;
+  responseAdmission?: Block["responseAdmission"];
+  responseCompletedAtMs?: number;
   payload: {
     source?: NativeInputSource;
+    toolPresentation?: ToolPresentation;
     failure?: NativeWireError;
     text: string;
     bytes?: number[] | string;
@@ -39,6 +42,7 @@ export interface FeatureBlock {
   };
   tool?: {
     name: string;
+    presentation?: ToolPresentation;
     status: string;
     title?: string | null;
     input: any;

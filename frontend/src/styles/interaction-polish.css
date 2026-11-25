@@ -444,6 +444,33 @@
   color: var(--danger);
 }
 
+.tool-group-glyphs {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-left: var(--sp-1);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.tool-group-glyph {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.tool-group-glyph .tool-status-glyph {
+  width: 12px;
+  height: 12px;
+  margin-right: 0;
+}
+
+.tool-group-glyph[data-status="failed"] {
+  color: var(--danger);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .tool-status-glyph svg,
   .perm-spinner,
@@ -724,11 +751,17 @@
   .composer-agent-picker-wrap,
   .composer-model-picker-wrap {
     flex: 0 1 auto;
-    overflow: hidden;
+    min-width: 0;
   }
   .composer-pill {
     max-width: 100%;
+    min-width: 0;
+  }
+  .composer-pill .model-pill-name {
+    min-width: 0;
     overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .composer-busy-actions {
     flex: 0 0 auto;
@@ -934,9 +967,11 @@
  * The full value is also available through the payload's copy and expand dialog buttons. */
 @media (max-width: 640px) {
   .flow-card-details .payload .payload-body {
-    white-space: pre;
-    overflow-wrap: normal;
-    overflow-x: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: normal;
+    overflow-x: hidden;
+    max-width: 100%;
     padding-bottom: var(--sp-1);
   }
 }
@@ -1006,3 +1041,168 @@ button.search-result-item:focus-visible {
 .perm-save-unsupported { flex: 1 1 100%; margin: 0; }
 /* Part B D4: reset scope note directly under Reset / Advanced. */
 .perm-reset-scope { margin: 0; }
+
+/* Readable secondary text (12 → 13px via token reference). */
+.tool-summary-text,
+.tool-status-label,
+.tool-accordion-group-header .group-header-left,
+.message-time-label,
+.rail-project-title,
+.session-item-time {
+  font-size: var(--fs-sm);
+}
+
+/* Touch hit areas ≥44px; visuals stay compact. */
+@media (pointer: coarse), (max-width: 767.98px) {
+  .action-icon-btn,
+  .composer-plus-btn,
+  .composer-permission-btn,
+  .composer-pill,
+  .secondary-tab-btn,
+  .rail-project-btn,
+  .session-action-icon-btn,
+  .queue-item-action-btn,
+  .rail-sec-action-btn,
+  .header-capsule-btn,
+  .composer-send-arrow-btn,
+  .composer-stop-square-btn,
+  .composer-insert-btn,
+  .dock-pill-btn,
+  .rail-tool-btn,
+  .project-host-warn,
+  .settings-close-btn,
+  .home-workspace-badge-btn,
+  .statistics-help {
+    position: relative;
+  }
+
+  .header-capsule-btn,
+  .composer-plus-btn,
+  .composer-send-arrow-btn,
+  .composer-stop-square-btn,
+  .composer-insert-btn,
+  .dock-pill-btn,
+  .rail-tool-btn,
+  .project-host-warn,
+  .rail-project-btn,
+  .settings-close-btn {
+    z-index: 1;
+  }
+
+  .action-icon-btn::after,
+  .composer-plus-btn::after,
+  .composer-permission-btn::after,
+  .composer-pill::after,
+  .secondary-tab-btn::after,
+  .rail-project-btn::after,
+  .session-action-icon-btn::after,
+  .queue-item-action-btn::after,
+  .rail-sec-action-btn::after,
+  .header-capsule-btn::after,
+  .composer-send-arrow-btn::after,
+  .composer-stop-square-btn::after,
+  .composer-insert-btn::after,
+  .dock-pill-btn::after,
+  .rail-tool-btn::after,
+  .project-host-warn::after,
+  .settings-close-btn::after,
+  .home-workspace-badge-btn::after,
+  .statistics-help::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: max(100%, 46px);
+    height: max(100%, 46px);
+    transform: translate(-50%, -50%);
+  }
+
+  .composer-pill,
+  .composer-agent-picker-wrap,
+  .composer-model-picker-wrap,
+  .header-capsule-btn.header-capsule-btn {
+    overflow: visible;
+  }
+
+  .composer-bar-left {
+    gap: 18px;
+  }
+
+  .composer-bar-right {
+    row-gap: 16px;
+  }
+
+  .composer-bar-right .composer-busy-actions {
+    gap: 8px;
+  }
+
+  .rail-project-actions {
+    gap: 22px;
+  }
+
+  .rail-project-row .project-host-warn {
+    margin-inline-end: 20px;
+  }
+
+  .header-subnav-row {
+    min-height: 44px;
+  }
+
+  .secondary-tab-btn::after {
+    height: 44px;
+  }
+
+  .settings-dialog .settings-nav .settings-nav-item.settings-nav-item {
+    min-height: 44px;
+  }
+
+  .subnav-item-btn,
+  .session-rail-new-btn,
+  .settings-nav-item,
+  .tool-accordion-header,
+  .tool-accordion-group-header,
+  .composer-action-row,
+  .flow-card-details > summary,
+  .ghost-btn,
+  .primary-btn,
+  .perm-mode,
+  .execution-action.ghost-btn.ghost-btn {
+    min-height: 44px;
+  }
+
+  .queue-item-action-btn,
+  .queue-item-delete-btn {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  .queue-item-body > summary.queue-item-text {
+    padding-block: 12px;
+  }
+
+  .toast-close.toast-close {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .home-dropdown-menu .picker-row.picker-row {
+    min-height: 44px;
+  }
+
+  .home-dropdown-menu .dropdown-section-title {
+    pointer-events: none;
+  }
+}
+
+/* 16px text inputs on narrow screens prevent iOS focus zoom. */
+@media (max-width: 767.98px) {
+  textarea,
+  input[type="text"],
+  input[type="search"],
+  input[type="url"],
+  input[type="email"],
+  input[type="password"],
+  input:not([type]) {
+    font-size: 16px !important;
+  }
+}

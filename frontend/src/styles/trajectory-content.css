@@ -41,6 +41,7 @@
   margin-left: 0;
 }
 .payload[data-variant="trajectory"] .payload-copy,
+.payload[data-variant="trajectory"] .payload-exact,
 .payload-dialog-expand,
 .trajectory-content-action {
   display: inline-flex;
@@ -62,8 +63,14 @@
 .payload[data-variant="trajectory"]:where(:hover, :focus-within)
   .payload-actions
   > button,
+.payload-exact[aria-pressed="true"],
 .trajectory-content:where(:hover, :focus-within) .trajectory-content-action {
   opacity: 1;
+}
+.payload-exact[aria-pressed="true"] {
+  color: var(--text);
+  background: var(--bg-muted);
+  box-shadow: inset 0 0 0 1px var(--control-border);
 }
 .payload-actions > button:hover,
 .payload[data-variant="trajectory"] .payload-actions > button:hover,

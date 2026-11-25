@@ -243,12 +243,10 @@ test("failed retries select the final result while helpers retain exact assistan
     call_id: "rename-call",
   });
   await page.getByRole("tab", { name: "请求信息", exact: true }).click();
-  await page.getByText("模型返回", { exact: true }).click();
   const metadata = page.getByTestId("request-audit-metadata");
-  await expect(metadata).toContainText("SESSION_TITLE");
-  const disclosure = metadata
-    .locator("details")
-    .filter({ hasText: "模型返回" });
+  const disclosure = metadata.getByTestId("audit-response-normalized");
+  await disclosure.locator("summary").click();
+  await expect(disclosure).toContainText("SESSION_TITLE");
   await expect(disclosure).toHaveAttribute("open", "");
   await disclosure.evaluate((node) => {
     (window as any).__auditDisclosure = node;

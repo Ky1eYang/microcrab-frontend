@@ -56,7 +56,7 @@ for (const width of [1440, 390]) {
       "Agents (WASM)",
       "Models",
       "Prompts",
-      "Speakers",
+      "External Messaging",
       "Permissions",
       "References",
     ]);
@@ -230,6 +230,7 @@ test("separates Speaker credentials, guarded drafts and unresolved receipts from
   const key = "s".repeat(43);
   const initial = {
     revision: 3,
+    enabled: true,
     speakers: [
       { identity: "known", fingerprint, source: "project", disabled: false },
     ],

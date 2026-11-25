@@ -9,10 +9,12 @@ import { t } from "../../../i18n";
 import { projectHostTerminal } from "../../../state/host-readiness";
 import { GlyphIcon, Icon } from "../../shared";
 import {
+  compactProjectRoot,
   filterProjects,
   hostGroups,
   projectAvailability,
   recentProjects,
+  sortHostProjects,
 } from "./projects";
 
 export function WorkspacePicker() {
@@ -69,14 +71,32 @@ export function WorkspacePicker() {
       ? (queries[id] ?? "")
       : "";
   const flyoutQuery = activeGroup ? queryFor(activeGroup.id) : "";
+  const sortedGroupProjects = activeGroup
+    ? sortHostProjects(activeGroup.projects, state.sessions)
+    : [];
   const filteredProjects = activeGroup
-    ? filterProjects(activeGroup.projects, flyoutQuery)
+    ? filterProjects(sortedGroupProjects, flyoutQuery)
     : [];
 
   useEffect(() => {
-    setActiveHostId(null);
+    if (!state.showWorkspaceDropdown) {
+      setActiveHostId(null);
+      setQueries({});
+      pendingFocus.current = null;
+      return;
+    }
+    const selectedInRecent =
+      !!ws.projectId && recent.some((p) => p.id === ws.projectId);
+    const selectedGroup = ws.projectId
+      ? groups.find((group) => group.projects.some((p) => p.id === ws.projectId))
+      : undefined;
+    setActiveHostId(
+      (!selectedInRecent ? selectedGroup?.id : undefined) ??
+        (!ws.projectId && groups.length === 1 ? groups[0].id : null),
+    );
     setQueries({});
     pendingFocus.current = null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.showWorkspaceDropdown, scope]);
 
   useEffect(() => {
@@ -113,6 +133,7 @@ export function WorkspacePicker() {
   const renderProject = (project: NativeProject) => {
     const selected = ws.projectId === project.id;
     const availability = projectAvailability(project, state.hostConnection, projectHostTerminal(state, project.id));
+    const compactRoot = compactProjectRoot(project.root);
     return (
       <button
         key={project.id}
@@ -133,7 +154,14 @@ export function WorkspacePicker() {
           className="ws-project-folder-icon"
           aria-hidden="true"
         />
-        <span className="ws-item-name">{project.name}</span>
+        <span className="ws-item-body">
+          <span className="ws-item-name">{project.name}</span>
+          {compactRoot && (
+            <span className="ws-item-path" aria-hidden="true">
+              {compactRoot}
+            </span>
+          )}
+        </span>
         {availability !== "online" && (
           <span className="picker-project-status" data-status={availability}>
             <Icon
@@ -165,6 +193,18 @@ export function WorkspacePicker() {
         aria-expanded={state.showWorkspaceDropdown}
         onClick={() => void dispatch({ type: "ToggleWorkspaceDropdown" })}
       >
+        <Icon
+          name={
+            ws.kind === "browser_sandbox"
+              ? "globe"
+              : ws.kind === "local"
+                ? "folder"
+                : "chat"
+          }
+          size={14}
+          className="ws-badge-icon"
+          aria-hidden="true"
+        />
         <span className="workspace-badge-text">{workspaceLabel(ws)}</span>
         <GlyphIcon
           name="chevron"
@@ -350,6 +390,12 @@ export function WorkspacePicker() {
                 close();
               }}
             >
+              <Icon
+                name="plus"
+                size={14}
+                className="ws-action-icon"
+                aria-hidden="true"
+              />
               <span className="ws-item-name">
                 {t("home.picker.newProject")}
               </span>
@@ -376,6 +422,12 @@ export function WorkspacePicker() {
                   close();
                 }}
               >
+                <Icon
+                  name={flavor === "browser_sandbox" ? "globe" : "chat"}
+                  size={14}
+                  className="ws-mode-icon"
+                  aria-hidden="true"
+                />
                 <span className="ws-item-name">
                   {t(
                     flavor === "chat_only"
@@ -402,20 +454,28 @@ export function WorkspacePicker() {
               aria-label={activeGroup.label || t("home.picker.unassignedHost")}
             >
               <div className="workspace-flyout-search">
-                <input
-                  ref={search}
-                  type="search"
-                  className="settings-input"
-                  aria-label={t("home.picker.searchProjects")}
-                  placeholder={t("home.picker.searchProjects")}
-                  value={flyoutQuery}
-                  onChange={(event) =>
-                    setQueries((previous) => ({
-                      ...previous,
-                      [activeGroup.id]: event.target.value,
-                    }))
-                  }
-                />
+                <div className="ws-search-field">
+                  <Icon
+                    name="search"
+                    size={13}
+                    className="ws-search-icon"
+                    aria-hidden="true"
+                  />
+                  <input
+                    ref={search}
+                    type="search"
+                    className="settings-input"
+                    aria-label={t("home.picker.searchProjects")}
+                    placeholder={t("home.picker.searchProjects")}
+                    value={flyoutQuery}
+                    onChange={(event) =>
+                      setQueries((previous) => ({
+                        ...previous,
+                        [activeGroup.id]: event.target.value,
+                      }))
+                    }
+                  />
+                </div>
               </div>
               <div className="workspace-project-list">
                 {filteredProjects.map(renderProject)}

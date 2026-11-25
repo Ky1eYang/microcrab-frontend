@@ -1,6 +1,7 @@
 import { isDirectUserSource, validateNativeInputSource } from "./input-source";
 import { createBlock } from "./create-block";
 import { messageImageUrl } from "./images";
+import { responseCompletionTime } from "./response-completion";
 import {
   displayExecutionId,
   displayExecutionStatus,
@@ -50,6 +51,7 @@ export function messageBlocks(
     });
     if (message.role === "tool") {
       b.kind = "tool";
+      b.payload.toolPresentation = message.presentation;
       b.callId = message.call_id;
       mergeDisplayExecution(
         b,
@@ -85,6 +87,7 @@ export function messageBlocks(
       );
     b.tool = {
       name: call.name,
+      presentation: call.presentation,
       builtin: call.builtin === "delegate" ? "delegate" : undefined,
       callId: call.id,
       input: call.arguments,
@@ -99,6 +102,12 @@ export function messageBlocks(
       block.operationId = message.submission_operation_id;
     block.position = message.position ?? null;
     block.clientInvocationId = message.client_invocation_id ?? null;
+    if (message.role === "assistant") {
+      block.responseAdmission = "admitted";
+      block.responseCompletedAtMs = responseCompletionTime(
+        message.response_completed_at_ms,
+      );
+    }
     // Only this selected response owns its usage; receipt order and Session totals do not.
     if (message.role === "assistant" && message.usage !== undefined)
       block.payload.providerMetadata = { tokens: message.usage };

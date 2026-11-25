@@ -1,3 +1,4 @@
+import { responseCompletionTime } from "./response-completion";
 import { mergeExecutionCertificates } from "./tool-execution-display";
 import type { NativeMessage, NativeSnapshot } from "./types";
 
@@ -50,9 +51,23 @@ function authoritative(
   sessionId: string,
   previous?: NativeMessage,
 ): NativeMessage {
-  const current = previous
+  let current = previous
     ? mergeExecutionCertificates(message, previous, sessionId)
     : message;
+  // Called only under selected-history continuity. The same canonical source
+  // and native ID can outlive a delayed page; equal IDs alone cannot carry time.
+  if (
+    message.role === "assistant" &&
+    previous?.role === "assistant" &&
+    message.id === previous.id &&
+    typeof message.canonical_source_id === "string" &&
+    message.canonical_source_id &&
+    message.canonical_source_id === previous.canonical_source_id
+  ) {
+    const certified = responseCompletionTime(previous.response_completed_at_ms);
+    if (certified !== undefined && current.response_completed_at_ms !== certified)
+      current = { ...current, response_completed_at_ms: certified };
+  }
   // IDs are content-addressed. A deliberately abbreviated projection cannot erase
   // a previously received full body; current status/position metadata still wins.
   if (

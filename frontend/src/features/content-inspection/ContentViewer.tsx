@@ -10,6 +10,8 @@ import {
 import { t } from "../../i18n";
 import { Icon } from "../shared";
 import { registerDocumentLeave } from "../../client/document-leave";
+import { JsonValueView, JsonViewModes, type JsonViewMode, type JsonReaderSource } from "./JsonValueView";
+import { jsonValueStart } from "./json-reader-source";
 import { CodeText } from "./CodeText";
 import { ContentCloseGuardContext } from "./close-guard";
 import {
@@ -42,6 +44,10 @@ export type ContentEditorProps = {
 type Props = ContentEditorProps & {
   source: string;
   serialized?: boolean;
+  exactEvidence?: boolean;
+  onToggleExact?: () => void;
+  jsonExact?: JsonReaderSource | null;
+  matchProjectedNodes?: boolean;
   defaultFormat?: ContentFormat;
   title?: string;
   controls?: boolean;
@@ -57,6 +63,10 @@ export function ContentViewer(props: Props) {
 function DocumentViewer({
   source,
   serialized,
+  exactEvidence = false,
+  onToggleExact,
+  jsonExact,
+  matchProjectedNodes,
   defaultFormat = "auto",
   title,
   onEdit,
@@ -76,7 +86,11 @@ function DocumentViewer({
   const effectiveMode = formats.includes(mode) ? mode : formats[0];
   const [wrap, setWrap] = useState(true);
   const [lineNumbers, setLineNumbers] = useState(true);
-  const [view, setView] = useState({ source, paused: false });
+  const [jsonMode, setJsonMode] = useState<JsonViewMode>("text");
+  const jsonExactKind = jsonExact?.kind;
+  const jsonExactValue = jsonExact?.kind === "text" ? jsonExact.text : jsonExact?.value;
+  const exact = useMemo(() => jsonExact, [jsonExactKind, jsonExactValue, jsonExact === null]);
+  const [view, setView] = useState({ source, exact, matchProjectedNodes, paused: false });
   const [draft, setDraft] = useState<Draft | null>(null);
   const [pending, setPending] = useState(false);
   const [observing, setObserving] = useState(false);
@@ -99,12 +113,25 @@ function DocumentViewer({
   const validateEdit = useRef(onValidateEdit);
   validateEdit.current = onValidateEdit;
   latestDraft.current = draft;
-  if (!view.paused && view.source !== source)
-    setView({ source, paused: false });
+  const changed = view.source !== source || view.exact !== exact || view.matchProjectedNodes !== matchProjectedNodes;
+  if (!view.paused && changed)
+    setView({ source, exact, matchProjectedNodes, paused: false });
   const presentation = useMemo(
     () => presentContent(view.source, effectiveMode),
     [view.source, effectiveMode],
   );
+  // Explicit JSON can defer validation to the cooperative tree. Auto only
+  // offers a fallback for collection-looking text when display budgets blocked
+  // recognition. Raw-only and guest format boundaries still win.
+  const jsonAvailable = (formats.includes("json") || !allowedFormats) && (
+    presentation.kind === "json" || presentation.jsonCandidate ||
+    (presentation.notice === "large" && (effectiveMode === "json" ||
+      (effectiveMode === "auto" && jsonValueStart(view.source))))
+  );
+  const readingMode = controls && jsonAvailable ? jsonMode : "text";
+  const textReader = () => <pre className="payload-body content-viewer-pre" tabIndex={0} aria-label={title ?? t("contentViewer.document")}>
+    <CodeText text={presentation.text} kind={presentation.kind === "markdown" ? "raw" : presentation.kind} lineNumbers={lineNumbers} />
+  </pre>;
   const dirty = draft !== null && draft.text !== draft.initial;
   const guardState = useRef({ dirty, pending });
   guardState.current = { dirty, pending };
@@ -442,7 +469,7 @@ function DocumentViewer({
     </button>
   );
   const liveKey = view.paused
-    ? view.source !== source
+    ? changed
       ? "newContent"
       : "paused"
     : "live";
@@ -545,9 +572,32 @@ function DocumentViewer({
               />
             </span>
           )}
+          {!draft && jsonAvailable && <JsonViewModes mode={readingMode} onChange={setJsonMode} />}
           <div className="content-viewer-primary">
+            {onToggleExact && (
+              <button
+                type="button"
+                className="content-viewer-action"
+                data-testid="content-viewer-exact"
+                aria-pressed={exactEvidence}
+                aria-label={t(
+                  exactEvidence ? "references.compact" : "references.exact",
+                )}
+                title={t(
+                  exactEvidence ? "references.compact" : "references.exact",
+                )}
+                onClick={onToggleExact}
+              >
+                <Icon
+                  name="file-code"
+                  size={14}
+                  aria-hidden="true"
+                  focusable="false"
+                />
+              </button>
+            )}
             {button(
-              !draft && presentation.kind === "markdown"
+              exactEvidence ? "copyExact" : !draft && presentation.kind === "markdown"
                 ? "copyMarkdown"
                 : "copyFormatted",
               "copy",
@@ -597,13 +647,16 @@ function DocumentViewer({
               {button(
                 view.paused ? "resume" : "pause",
                 view.paused ? "play" : "pause",
-                () => setView({ source, paused: !view.paused }),
+                () => setView(view.paused
+                  ? { source, exact, matchProjectedNodes, paused: false }
+                  : { ...view, paused: true }),
                 view.paused,
                 false,
                 true,
               )}
               {button(
-                "copyOriginal",
+                exactEvidence ? "copyExact" : serialized || view.exact !== undefined
+                  ? "copySource" : "copyOriginal",
                 "copy",
                 () => void copy(true),
                 undefined,
@@ -724,19 +777,17 @@ function DocumentViewer({
             >
               <MarkdownPreview text={view.source} />
             </Suspense>
-          ) : (
-            <pre
-              className="payload-body content-viewer-pre"
-              tabIndex={0}
-              aria-label={title ?? t("contentViewer.document")}
-            >
-              <CodeText
-                text={presentation.text}
-                kind={presentation.kind}
-                lineNumbers={lineNumbers}
-              />
-            </pre>
-          )}
+          ) : controls && jsonAvailable ? (
+            <JsonValueView
+              source={{ kind: "text", text: view.source }}
+              exactSource={view.exact}
+              matchProjectedNodes={view.matchProjectedNodes}
+              mode={readingMode}
+              hideModes
+              hideRootCopy
+              renderText={textReader}
+            />
+          ) : textReader()}
         </div>
       )}
     </div>

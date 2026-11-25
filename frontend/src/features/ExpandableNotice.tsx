@@ -1,10 +1,74 @@
-import { useId, useLayoutEffect, useRef, useState } from "react";
-import { t } from "../../i18n";
-import { Icon } from "../shared";
+import {
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type HTMLAttributes,
+  type ReactNode,
+} from "react";
+import { t } from "../i18n";
+import { Icon } from "../shell/Icon";
+import "../styles/notice.css";
 
-/** A visual ellipsis keeps the full message in the reading order. The separate
- * disclosure keeps actions and the independently scrolling dock in place. */
-export function ComposerNoticeText({ text }: { text: string }) {
+export type NoticeTone = "warn" | "danger" | "neutral" | "info" | "success";
+
+/**
+ * Shared single-line status notice: tone dot/marker + ellipsized text +
+ * optional trailing node + actions. Overflowing text exposes a "…" popover
+ * using the native Popover API so scrolling hosts and actions never move.
+ */
+export function ExpandableNotice({
+  text,
+  tone = "warn",
+  action,
+  trailing,
+  marker = "dot",
+  className,
+  role = "status",
+  as: Tag = "div",
+  ...rest
+}: {
+  text: string;
+  tone?: NoticeTone;
+  action?: ReactNode;
+  trailing?: ReactNode;
+  marker?: "dot" | "none" | ReactNode;
+  className?: string;
+  role?: "status" | "alert" | null;
+  as?: "div" | "article";
+} & Omit<HTMLAttributes<HTMLElement>, "role" | "className"> &
+  Record<`data-${string}`, string | undefined>) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <Tag
+      className={`expandable-notice${className ? ` ${className}` : ""}`}
+      role={role ?? undefined}
+      data-tone={tone}
+      data-expanded={String(expanded)}
+      {...rest}
+    >
+      {marker === "dot" ? (
+        <span className="expandable-notice-dot" aria-hidden="true" />
+      ) : marker === "none" ? null : (
+        <span className="expandable-notice-marker" aria-hidden="true">
+          {marker}
+        </span>
+      )}
+      <NoticeText text={text} trailing={trailing} onExpanded={setExpanded} />
+      {action && <div className="expandable-notice-actions">{action}</div>}
+    </Tag>
+  );
+}
+
+function NoticeText({
+  text,
+  trailing,
+  onExpanded,
+}: {
+  text: string;
+  trailing?: ReactNode;
+  onExpanded: (expanded: boolean) => void;
+}) {
   const id = useId();
   const textBox = useRef<HTMLSpanElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -13,20 +77,29 @@ export function ComposerNoticeText({ text }: { text: string }) {
   const [truncated, setTruncated] = useState(false);
   const [open, setOpen] = useState(false);
   const [pinned, setPinned] = useState(false);
-  const nativePopover = typeof HTMLElement.prototype.showPopover === "function";
+  const nativePopover =
+    typeof HTMLElement !== "undefined" &&
+    typeof HTMLElement.prototype.showPopover === "function";
   const expanded = truncated && open;
+
+  useLayoutEffect(() => {
+    onExpanded(pinned && expanded);
+  }, [onExpanded, pinned, expanded]);
 
   useLayoutEffect(() => {
     const label = textBox.current;
     const column = label?.parentElement;
     const textRun = label?.firstElementChild;
-    if (!column || !textRun) return;
+    if (!label || !column || !textRun) return;
     const measure = () => {
-      // Measure against the entire column, without the disclosure button, so
-      // adding or removing the button can't change the overflow decision.
-      setTruncated(textRun.getBoundingClientRect().width > column.clientWidth);
+      const reserved = trigger.current?.offsetWidth ?? 0;
+      setTruncated(
+        textRun.getBoundingClientRect().width >
+          label.clientWidth + reserved + 1,
+      );
     };
     measure();
+    if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(measure);
     observer.observe(column);
     observer.observe(textRun);
@@ -50,32 +123,11 @@ export function ComposerNoticeText({ text }: { text: string }) {
 
   function dismiss() {
     window.clearTimeout(dismissTimer.current);
-    if (nativePopover) popover.current?.hidePopover();
+    if (nativePopover && popover.current?.matches(":popover-open"))
+      popover.current.hidePopover();
     setOpen(false);
     setPinned(false);
   }
-
-  // A positioned, light-dismissible fallback keeps the same tap/keyboard path
-  // on browsers without native Popover, without putting the full text in flow.
-  useLayoutEffect(() => {
-    if (!expanded || nativePopover) return;
-    const outside = (event: PointerEvent) => {
-      if (!textBox.current?.parentElement?.contains(event.target as Node))
-        dismiss();
-    };
-    const escape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || event.defaultPrevented) return;
-      event.preventDefault();
-      if (document.activeElement === popover.current) trigger.current?.focus();
-      dismiss();
-    };
-    document.addEventListener("pointerdown", outside);
-    document.addEventListener("keydown", escape);
-    return () => {
-      document.removeEventListener("pointerdown", outside);
-      document.removeEventListener("keydown", escape);
-    };
-  }, [expanded, nativePopover]);
 
   useLayoutEffect(() => {
     if (!truncated && open) dismiss();
@@ -99,7 +151,7 @@ export function ComposerNoticeText({ text }: { text: string }) {
     );
     popup.style.setProperty("--notice-popover-space", `${space - 12}px`);
     popup.dataset.placement = above ? "above" : "below";
-    if (nativePopover) popup.showPopover();
+    if (nativePopover && !popup.matches(":popover-open")) popup.showPopover();
     setOpen(true);
   }
 
@@ -110,7 +162,7 @@ export function ComposerNoticeText({ text }: { text: string }) {
 
   return (
     <span
-      className="composer-notice-message"
+      className="notice-message composer-notice-message"
       onPointerEnter={(event) => {
         if (event.pointerType === "mouse") reveal(event.currentTarget);
       }}
@@ -121,20 +173,19 @@ export function ComposerNoticeText({ text }: { text: string }) {
         if (!event.currentTarget.contains(event.relatedTarget)) dismiss();
       }}
     >
-      {/* The hover hint is visual-only; an explicit disclosure moves the one
-          accessible copy into the expanded area after the button. */}
       <span
         ref={textBox}
-        className="composer-notice-text"
+        className="notice-text composer-notice-text offline-text"
         aria-hidden={pinned || undefined}
       >
         <span>{text}</span>
       </span>
+      {trailing && <span className="notice-trailing">{trailing}</span>}
       {truncated && (
         <button
           ref={trigger}
           type="button"
-          className="composer-notice-reveal"
+          className="notice-reveal composer-notice-reveal"
           aria-label={t("composer.showFullNotice")}
           aria-controls={id}
           aria-expanded={pinned && expanded}
@@ -154,7 +205,7 @@ export function ComposerNoticeText({ text }: { text: string }) {
         id={id}
         popover={nativePopover ? "auto" : undefined}
         hidden={!nativePopover && !expanded}
-        className="composer-notice-popover"
+        className="notice-popover composer-notice-popover"
         aria-hidden={!pinned || undefined}
         tabIndex={pinned && expanded ? 0 : undefined}
         onPointerEnter={() => window.clearTimeout(dismissTimer.current)}
@@ -166,7 +217,7 @@ export function ComposerNoticeText({ text }: { text: string }) {
           dismiss();
         }}
       >
-        {text}
+        {open ? text : null}
       </span>
     </span>
   );

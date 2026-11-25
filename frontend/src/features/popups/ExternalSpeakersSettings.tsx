@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useApp, useAppStore } from "../../state";
 import { t } from "../../i18n";
 import type { ApiClient } from "../../client/api";
@@ -76,6 +76,8 @@ export function SpeakerSettingsDocument({
 }) {
   const [snapshot, setSnapshot] = useState<SpeakerSnapshot | null>(null);
   const [draft, setDraft] = useState<SpeakerLayer>({});
+  const [draftEnabled, setDraftEnabled] = useState(false);
+  const enablementHelpId = useId();
   const [identity, setIdentity] = useState("");
   const [keyMode, setKeyMode] = useState<"generated" | "custom">("generated");
   const [customKey, setCustomKey] = useState("");
@@ -84,6 +86,7 @@ export function SpeakerSettingsDocument({
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
   const [uncertain, setUncertain] = useState(false);
+  const [needsRefresh, setNeedsRefresh] = useState(false);
   const [observed, setObserved] = useState<SpeakerSnapshot | null>(null);
   const [discard, setDiscard] = useState(false);
   const root = useRef<HTMLElement>(null);
@@ -95,7 +98,8 @@ export function SpeakerSettingsDocument({
   const operation = useRef<SpeakerUpdate | null>(null);
   const dirty =
     !!snapshot &&
-    (JSON.stringify(draft) !== JSON.stringify(snapshot.overrides) ||
+    ((scope.kind === "project" && draftEnabled !== snapshot.enabled) ||
+      JSON.stringify(draft) !== JSON.stringify(snapshot.overrides) ||
       !!identity ||
       !!customKey);
   const latest = useRef({ dirty, busy, uncertain });
@@ -108,21 +112,28 @@ export function SpeakerSettingsDocument({
     operation.current = null;
     setSnapshot(next);
     setDraft(structuredClone(next.overrides));
+    setDraftEnabled(next.enabled);
     setIdentity("");
     setCustomKey("");
     setRevealed({});
     setObserved(null);
+    setNeedsRefresh(false);
   };
   const fail = (failure: unknown) => {
     const text =
       failure instanceof CommandError
-        ? `${failure.code}: ${failure.message}`
+        ? failure.code === "project_external_messaging_busy"
+          ? t("speakers.projectBusy")
+          : failure.code === "revision_conflict"
+            ? t("speakers.revisionConflict")
+            : `${failure.code}: ${failure.message}`
         : failure instanceof Error
           ? failure.message
           : String(failure);
     setError(text);
     notify(text);
     if (operation.current && speakerOutcomeUnknown(failure)) setUncertain(true);
+    else if (!uncertain) operation.current = null;
   };
   const run = async (
     effect: (signal: AbortSignal, ticket: number) => Promise<void>,
@@ -167,7 +178,12 @@ export function SpeakerSettingsDocument({
         (proceed, intent) => {
           // Switching Project tabs must not throw away an unsettled receipt.
           // Actual document exit still uses explicit abandonment confirmation.
-          if (pending.current || latest.current.busy || (intent === "tab" && latest.current.uncertain)) return false;
+          if (
+            pending.current ||
+            latest.current.busy ||
+            (intent === "tab" && latest.current.uncertain)
+          )
+            return false;
           if (latest.current.dirty || latest.current.uncertain) {
             continuation.current = proceed;
             setDiscard(true);
@@ -250,6 +266,7 @@ export function SpeakerSettingsDocument({
       operation_id: crypto.randomUUID(),
       expected_revision: snapshot.revision,
       speakers: structuredClone(draft),
+      ...(scope.kind === "project" ? { enabled: draftEnabled } : {}),
     };
     operation.current = update;
     void run(async (signal, ticket) => {
@@ -257,12 +274,19 @@ export function SpeakerSettingsDocument({
       if (current(ticket)) {
         operation.current = null;
         install(next);
-        setStatus(t("speakers.saved"));
+        setStatus(
+          t(
+            scope.kind === "project" && update.enabled !== snapshot.enabled
+              ? "speakers.projectSaved"
+              : "speakers.saved",
+          ),
+        );
       }
     });
   };
   const refresh = () =>
     void run(async (signal, ticket) => {
+      setRevealed({});
       const next = await api.getExternalSpeakers(scope, signal);
       if (!current(ticket)) return;
       if (dirty || uncertain) setObserved(next);
@@ -277,16 +301,29 @@ export function SpeakerSettingsDocument({
         update.operation_id,
         signal,
       );
-      if (current(ticket) && operation.current === update) {
-        operation.current = null;
-        setUncertain(false);
-        install(saved);
-        setStatus(t("speakers.receiptApplied"));
-      }
+      if (!current(ticket) || operation.current !== update) return;
+      // A retained receipt is evidence about one operation, never current status.
+      if (
+        typeof saved.enabled !== "boolean" ||
+        (update.enabled !== undefined && update.enabled !== saved.enabled)
+      )
+        throw new CommandError(
+          "invalid_result",
+          t("speakers.receiptNotAcknowledged"),
+        );
+      operation.current = null;
+      setUncertain(false);
+      setNeedsRefresh(true);
+      setSnapshot(null);
+      setDraft({});
+      setRevealed({});
+      setObserved(null);
+      setStatus(t("speakers.receiptApplied"));
     });
   };
   const reveal = (name: string, copy: boolean) =>
     void run(async (signal, ticket) => {
+      setRevealed({});
       const next = await api.revealExternalSpeakerKey(scope, name, signal);
       if (!current(ticket)) return;
       const row = snapshot?.speakers.find((item) => item.identity === name);
@@ -303,7 +340,19 @@ export function SpeakerSettingsDocument({
       ...Object.keys(draft),
     ]),
   ].sort();
-  const locked = busy || uncertain || !snapshot;
+  const locked = busy || uncertain || needsRefresh || !snapshot;
+  const canReveal =
+    snapshot?.enabled &&
+    !observed &&
+    (scope.kind === "session" || draftEnabled) &&
+    !dirty &&
+    !locked;
+  const effectiveStatus = (value: SpeakerSnapshot) =>
+    t(
+      value.enabled
+        ? "speakers.enabledStatus"
+        : `speakers.disabledStatus.${value.disabled_reason}`,
+    );
   return (
     <section
       ref={root}
@@ -321,6 +370,39 @@ export function SpeakerSettingsDocument({
             : "speakers.sessionHint",
         )}
       </p>
+      {scope.kind === "project" && (
+        <div className="settings-row-info">
+          <label className="settings-row-label">
+            <input
+              type="checkbox"
+              role="switch"
+              checked={draftEnabled}
+              disabled={locked}
+              aria-describedby={enablementHelpId}
+              onChange={(event) => {
+                setDraftEnabled(event.target.checked);
+                setRevealed({});
+                setError("");
+                setStatus("");
+              }}
+            />{" "}
+            {t("speakers.allow")}
+          </label>
+          <p className="settings-row-sub" id={enablementHelpId}>
+            {t("speakers.allowHint")}
+          </p>
+        </div>
+      )}
+      {(needsRefresh || snapshot) && (
+        <p
+          className="settings-row-sub"
+          role="status"
+          data-testid="external-messaging-status"
+        >
+          {needsRefresh && t("speakers.statusNeedsRefresh")}
+          {!needsRefresh && snapshot && effectiveStatus(observed ?? snapshot)}
+        </p>
+      )}
       <p className="settings-row-sub">{t("speakers.secretsHint")}</p>
       {error && (
         <p role="alert" className="settings-field-error">
@@ -336,7 +418,8 @@ export function SpeakerSettingsDocument({
         <>
           <p role="status" className="inline-notice">
             {t("speakers.uncertain")}
-            {scope.kind === "project" && ` ${t("speakers.projectTabUncertain")}`}
+            {scope.kind === "project" &&
+              ` ${t("speakers.projectTabUncertain")}`}
           </p>
           {operation.current && (
             <button
@@ -480,7 +563,7 @@ export function SpeakerSettingsDocument({
                 <button
                   type="button"
                   className="ghost-btn"
-                  disabled={locked || dirty || !row || row.disabled}
+                  disabled={!canReveal || !row || row.disabled}
                   onClick={() => reveal(name, false)}
                 >
                   {t("speakers.reveal")}
@@ -488,7 +571,7 @@ export function SpeakerSettingsDocument({
                 <button
                   type="button"
                   className="ghost-btn"
-                  disabled={locked || dirty || !row || row.disabled}
+                  disabled={!canReveal || !row || row.disabled}
                   onClick={() => reveal(name, true)}
                 >
                   {t("speakers.copy")}

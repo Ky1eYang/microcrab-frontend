@@ -1,3 +1,4 @@
+import { referenceLabels } from "../referenceLabels";
 import { ExternalSpeakersSettings } from "./ExternalSpeakersSettings";
 import { OwnerSettings, ProvidersSettings } from "./OwnerSettings";
 import {
@@ -158,6 +159,10 @@ function Row({
 export function SettingsDialog() {
   const { state, dispatch } = useApp(),
     p = state.popup;
+  const serverSha = buildSha256(state.capabilities?.build?.sha256);
+  const webSha = frontendSha256();
+  const buildLabel = referenceLabels("digest", [serverSha, webSha]);
+  const sessionLabel = referenceLabels("session", [...state.sessions.map((row) => row.id), state.sessionId]);
   const [apiUrlInput, setApiUrlInput] = useState(state.apiBase);
   const [statusMessage, setStatusMessage] = useState("");
   const [browserNetworkError, setBrowserNetworkError] = useState("");
@@ -756,7 +761,7 @@ export function SettingsDialog() {
                     />
                     <Row
                       label={t("settingsDlg.activeSession")}
-                      sub={state.sessionId ?? t("settingsDlg.noActive")}
+                      sub={state.sessionId ? sessionLabel(state.sessionId) : t("settingsDlg.noActive")}
                       mono
                     />
                   </div>
@@ -795,16 +800,17 @@ export function SettingsDialog() {
                         </div>
                         <div className="about-version">
                           {t("settingsDlg.backendSha256", {
-                            hash: buildSha256(state.capabilities?.build?.sha256) ??
-                              t("settingsDlg.versionMissing"),
+                            hash: serverSha ? buildLabel(serverSha) : t("settingsDlg.versionMissing"),
                           })}
                         </div>
+                        {serverSha && <button type="button" className="ghost-btn" onClick={() => dispatch({type: "CopyText", value: serverSha})}>{t("references.copyServerChecksum")}</button>}
                       </div>
                       <div className="about-build-group">
                         <div className="about-build-label">{t("settingsDlg.frontendSha256")}</div>
                         <div className="about-version">
-                          {frontendSha256() ?? t("settingsDlg.frontendSha256Missing")}
+                          {webSha ? buildLabel(webSha) : t("settingsDlg.frontendSha256Missing")}
                         </div>
+                        {webSha && <button type="button" className="ghost-btn" onClick={() => dispatch({type: "CopyText", value: webSha})}>{t("references.copyWebChecksum")}</button>}
                       </div>
                     </div>
                   </div>

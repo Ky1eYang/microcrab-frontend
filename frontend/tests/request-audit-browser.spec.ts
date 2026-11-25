@@ -156,6 +156,272 @@ test("trajectory selects successful retry and historical schema for each exact r
     .toEqual({ epoch: 7, call_id: "provider-second" });
 });
 
+for (const width of [390, 1440]) {
+  test(`request info at ${width}px renders and copies retained wire text without reconstruction`, async ({
+    page,
+  }) => {
+    const backend = await nativeBackend(page);
+    const position = { epoch: 2, turn: 1, round: 1 };
+    const request =
+      '\r\n{ "n":900719925474099312345,"n":-0,"escaped":"\\u754c", "fraction":1.20e+03 } \r\n';
+    const pretty =
+      '{\n  "n": 900719925474099312345,\n  "n": -0,\n  "escaped": "\\u754c",\n  "fraction": 1.20e+03\n}';
+    const frames = [
+      ": comment 界\r\n\r\n",
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\\"n\\":"}}]}}]}\r\n\r\n',
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"1.20e+03}"}}]},"finish_reason":"tool_calls"}]}\r\n\r\n',
+      "data: [DONE]\r\n\r\n",
+    ];
+    const terminal = frames.join("");
+    const prefix = frames.slice(0, 2).join("");
+    const normalized = { tool_calls: [{ arguments: { n: 1200 } }] };
+    const timeline = {
+      ...position,
+      sequence: 1,
+      call_id: "wire-call",
+      request_hash: "wire-hash",
+      completion: "succeeded",
+    };
+    backend.snapshot().messages = [
+      {
+        id: "wire-user",
+        role: "user",
+        text: "Inspect wire evidence",
+        parts: [],
+        tool_calls: [],
+        position: { ...position, round: 0 },
+      },
+    ];
+    await page.setViewportSize({ width, height: 1000 });
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, "clipboard", {
+        value: {
+          writeText: async (text: string) =>
+            Reflect.set(window, "__copiedAuditText", text),
+        },
+      });
+    });
+    type WireWitness = {
+      sent_request?: string | null;
+      response_raw?: string | null;
+      response_complete?: boolean | null;
+      response?: unknown;
+      response_omitted?: boolean;
+      outcome?: unknown;
+    };
+    let witness: WireWitness = {
+      sent_request: request,
+      response_raw: terminal,
+      response_complete: true,
+      response: normalized,
+    };
+    await page.route("**/api/v1/sessions/s1/audit/requests", (route) =>
+      route.fulfill({
+        json: {
+          status: "available",
+          committed_sequence: 3,
+          incomplete_tail: false,
+          timeline: [timeline],
+          attempts: [
+            {
+              ...timeline,
+              status: "available",
+              request_document: '{"normalizedRequestOnly":true}',
+              response_status: 200,
+              response_content_type: "text/event-stream; charset=utf-8",
+              ...witness,
+            },
+          ],
+        },
+      }),
+    );
+    await page.goto("/#session/s1");
+    await page.getByRole("tab", { name: "轨迹", exact: true }).click();
+    await page
+      .locator('[data-testid="trajectory-entry"][data-kind="model-request"]')
+      .click();
+    await page.getByRole("tab", { name: "请求信息", exact: true }).click();
+    const info = page.getByTestId("request-audit-metadata");
+    const sent = info.getByTestId("audit-sent");
+    const original = info.getByTestId("audit-response-original");
+    const formatted = info.getByTestId("audit-response-normalized");
+    const copied = () =>
+      page.evaluate(() => Reflect.get(window, "__copiedAuditText"));
+
+    await sent.locator("summary").click();
+    const sentBody = sent.getByTestId("audit-sent-body");
+    await expect(sentBody).toHaveAttribute("data-format", "json");
+    expect(await sentBody.locator("pre").textContent()).toBe(pretty);
+    await sentBody.getByRole("button", { name: "显示精确证据" }).click();
+    await expect(sentBody).toHaveAttribute("data-format", "text");
+    expect(await sentBody.locator("pre").textContent()).toBe(request);
+    await sentBody.getByRole("button", { name: "复制精确证据" }).click();
+    await expect.poll(copied).toBe(request);
+    await sentBody.getByRole("button", { name: "显示简洁视图" }).click();
+    await expect(sentBody).toHaveAttribute("data-format", "json");
+
+    await original.locator("summary").click();
+    await expect(original).toContainText("原始 SSE 文本 · HTTP 200");
+    await expect(original.getByRole("status")).toHaveCount(0);
+    const rawBody = original.getByTestId("audit-response-body");
+    expect(await rawBody.locator("pre").textContent()).toBe(terminal);
+    await rawBody.locator(".payload-copy").click();
+    await expect.poll(copied).toBe(terminal);
+    await formatted.locator("summary").click();
+    await expect(formatted).toContainText('"n": 1200');
+    await expect(formatted).not.toContainText("[DONE]");
+    expect(
+      await info.evaluate(
+        (element) => element.scrollWidth - element.clientWidth,
+      ),
+    ).toBeLessThanOrEqual(1);
+
+    witness = {
+      response_raw: prefix,
+      response_complete: false,
+      outcome: "cancelled",
+    };
+    backend.event("audit.available", { epoch: 2 });
+    await expect(original.getByRole("status")).toContainText("响应已截断");
+    expect(await rawBody.locator("pre").textContent()).toBe(prefix);
+    await rawBody.locator(".payload-copy").click();
+    await expect.poll(copied).toBe(prefix);
+    await expect(formatted).toContainText("请求尝试结果（仅元数据）");
+    await expect(sent).toContainText("实际发送的原始请求正文不可用");
+    await expect(sent).toContainText("规范化请求文档（非原始正文）");
+    await expect(sentBody).toHaveCount(0);
+
+    witness = {
+      response_raw: null,
+      response_complete: false,
+      response_omitted: true,
+    };
+    backend.event("audit.available", { epoch: 2 });
+    await expect(original).toContainText(
+      "响应捕获不完整，没有可显示的原始文本",
+    );
+    await expect(rawBody).toHaveCount(0);
+    await expect(formatted).toContainText("当前视图已省略规范化模型返回");
+
+    witness = { response: prefix }; // Legacy fallback returned raw text in the normalized field.
+    backend.event("audit.available", { epoch: 2 });
+    await expect(formatted).toContainText("没有可用的规范化模型返回");
+    await expect(formatted).not.toContainText("tool_calls");
+    await expect(original).toContainText("原始响应文本不可用");
+    await expect(original).not.toContainText("响应捕获不完整");
+    await expect(rawBody).toHaveCount(0);
+
+    const overBudget = `{"long":"${"x".repeat(130 * 1024)}"}`;
+    witness = { sent_request: overBudget, response_raw: prefix, response_complete: null };
+    backend.event("audit.available", { epoch: 2 });
+    await expect(original).toContainText("无法确认捕获内容是否包含完整响应");
+    expect(await rawBody.locator("pre").textContent()).toBe(prefix);
+    await expect(sent).toContainText("无格式化 JSON 预览");
+    expect(await sentBody.locator("pre").textContent()).toBe(overBudget);
+    await sentBody.locator(".payload-copy").click();
+    await expect.poll(copied).toBe(overBudget);
+  });
+}
+
+test("protected image trajectory separates authored arguments, frozen schema and omitted wire body", async ({
+  page,
+}) => {
+  const backend = await nativeBackend(page);
+  const position = { epoch: 7, turn: 3, round: 2 };
+  const callId = "protected-image-call";
+  backend.snapshot().messages = [
+    {
+      id: "image-user",
+      role: "user",
+      text: "Inspect the file",
+      parts: [],
+      tool_calls: [],
+      position: { ...position, round: 0 },
+    },
+    {
+      id: "image-assistant",
+      role: "assistant",
+      text: null,
+      parts: [],
+      tool_calls: [
+        {
+          id: callId,
+          name: "view_image",
+          presentation: "view-image",
+          arguments: { image_url: "file:[redacted]" },
+        },
+      ],
+      position,
+    },
+    {
+      id: "image-result",
+      role: "tool",
+      text: "image admitted",
+      parts: [],
+      tool_calls: [],
+      call_id: callId,
+      tool_name: "view_image",
+      position,
+    },
+  ];
+  const selectors: any[] = [];
+  await page.route("**/api/v1/sessions/s1/audit/requests", (route) => {
+    const selector = route.request().postDataJSON();
+    selectors.push(selector);
+    const authored = selector.tool_call_id === callId && selector.round === 2;
+    return route.fulfill({
+      json: {
+        status: "omitted",
+        committed_sequence: 20,
+        incomplete_tail: false,
+        ...(authored
+          ? { authored_tool_arguments: { image_url: "file:///work/image.png" } }
+          : {}),
+        attempts: [
+          {
+            request_hash: "protected-record",
+            call_id: "provider-protected",
+            ...position,
+            status: "omitted",
+            completion: "succeeded",
+            protected_tool_call_ids: [callId],
+            frozen_tools: [
+              {
+                name: "view_image",
+                parameters: {
+                  type: "object",
+                  required: ["image_url"],
+                  properties: { image_url: { type: "string" } },
+                },
+              },
+            ],
+          },
+        ],
+      },
+    });
+  });
+  await page.goto("/#session/s1");
+  await page.getByRole("tab", { name: "轨迹", exact: true }).click();
+  await page
+    .locator('[data-testid="trajectory-entry"][data-kind="tool"]')
+    .click();
+  await page.getByRole("tab", { name: "参数", exact: true }).click();
+  await expect(page.getByText(/file:\/\/\/work\/image\.png/)).toBeVisible();
+  expect(selectors).toContainEqual({ ...position, tool_call_id: callId });
+  await page.getByRole("tab", { name: "Schema", exact: true }).click();
+  await expect(page.getByTestId("request-audit-schema")).toContainText(
+    "不是提供商请求正文",
+  );
+  await expect(page.getByTestId("historical-tool-schema")).toContainText(
+    "image_url",
+  );
+  await page.getByRole("tab", { name: "请求信息", exact: true }).click();
+  const info = page.getByTestId("request-audit-metadata");
+  await expect(info).toContainText("provider-protected");
+  await info.getByText("实际发送请求", { exact: true }).click();
+  await expect(info).toContainText("敏感请求正文未留存");
+});
+
 test("unavailable request diff never falls back to displaying the full baseline", async ({
   page,
 }) => {

@@ -5,23 +5,26 @@
    <html data-theme-pref> carries the stored preference (system | light | dark). */
 :root,
 [data-theme="dark"] {
-  /* neutral surfaces */
-  --bg: #1f1f1f;
-  --bg-subtle: #191919;
-  --surface: #262626;
-  --bg-muted: #2b2b2b;
-  --border: #363636;
-  --border-strong: #4a4a4a;
+  /* neutral surfaces: crisp slate-neutral depth ladder */
+  --bg: #151618;
+  --bg-subtle: #101113;
+  --surface: #1d1f22;
+  --bg-muted: #26292e;
+  --border: #2b2e35;
+  --border-strong: #3e424c;
   /* Boundary of controls whose outline identifies them (WCAG 1.4.11 ≥3:1). */
-  --control-border: #828282;
+  --control-border: #6f7582;
   /* text and ink */
-  --text: #ececec;
-  --text-2: #a3a3a3;
-  --text-3: #929292;
-  --ink: #ececec;
-  --ink-contrast: #1f1f1f;
+  --text: #ededef;
+  --text-2: #a0a4ad;
+  --text-3: #8c919b;
+  --ink: #ededef;
+  --ink-contrast: #151618;
   /* Restrained source syntax only; never interface/status chrome. */
   --syntax-key: #b4c7da;
+  --inspector-key: #b4c7da;
+  --inspector-string: #d6b797;
+  --inspector-literal: #a0cbbb;
   --syntax-string: #bdcbb7;
   --syntax-literal: #d4c0ae;
   --syntax-muted: #aaaaaa;
@@ -30,18 +33,18 @@
   /* functional status: never decorative */
   --success: #4ade80;
   --danger: #f87171;
-  --on-danger: #1f1f1f;
+  --on-danger: #151618;
   --warn: #fbbf24;
   --info: #93c5fd;
   --focus: #93c5fd;
   /* timeline segments (beautify 0.1.8) */
   --timeline-track: var(--bg-muted);
-  --timeline-seg: color-mix(in srgb, var(--text-2) 55%, transparent);
-  --timeline-seg-hover: color-mix(in srgb, var(--text-2) 75%, transparent);
+  --timeline-seg: color-mix(in oklab, var(--text-2) 55%, transparent);
+  --timeline-seg-hover: color-mix(in oklab, var(--text-2) 75%, transparent);
   --timeline-seg-current: var(--text);
   --timeline-seg-error: var(--danger);
   --timeline-seg-error-muted: color-mix(
-    in srgb,
+    in oklab,
     var(--danger) 55%,
     transparent
   );
@@ -54,31 +57,37 @@
   --chart-6: #9ab9c4;
   /* elevation */
   --shadow-color: #000000;
-  --shadow-pop: 0 8px 24px rgba(0, 0, 0, 0.45);
-  --shadow-modal: 0 24px 64px rgba(0, 0, 0, 0.55);
-  --overlay: rgba(0, 0, 0, 0.55);
-  --scrollbar-thumb: rgba(255, 255, 255, 0.18);
-  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.35);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.2);
+  --shadow-composer: 0 8px 28px rgba(0, 0, 0, 0.28);
+  --shadow-pop: 0 10px 28px rgba(0, 0, 0, 0.48);
+  --shadow-modal: 0 24px 64px rgba(0, 0, 0, 0.58);
+  --overlay: rgba(0, 0, 0, 0.58);
+  /* ≥3:1 non-text contrast against --bg (#151618) and --surface (#1d1f22). */
+  --scrollbar-thumb: #767c88;
+  --scrollbar-thumb-hover: #969ca8;
   color-scheme: dark;
 }
 
 [data-theme="light"] {
-  --bg: #ffffff;
-  --bg-subtle: #f7f7f7;
+  --bg: #fafafa;
+  --bg-subtle: #f2f3f5;
   --surface: #ffffff;
-  --bg-muted: #f2f2f2;
-  --border: #e5e5e5;
-  --border-strong: #d0d0d0;
+  --bg-muted: #eaecf0;
+  --border: #e3e5ea;
+  --border-strong: #cfd3dc;
   /* Boundary of controls whose outline identifies them (WCAG 1.4.11 ≥3:1). */
-  --control-border: #858585;
-  --text: #171717;
-  --text-2: #5f5f5f;
-  --text-3: #656565;
-  --ink: #171717;
+  --control-border: #7d838e;
+  --text: #141518;
+  --text-2: #5b606b;
+  --text-3: #646975;
+  --ink: #141518;
   --ink-contrast: #ffffff;
   /* Document structure stays neutral; values carry restrained type cues.
      Shared by pretty text and editing, never by controls or operation status. */
   --syntax-key: #32383e;
+  --inspector-key: #28567e;
+  --inspector-string: #854c27;
+  --inspector-literal: #296354;
   --syntax-string: #35624d;
   --syntax-literal: #4b5f82;
   --syntax-muted: #686868;
@@ -91,12 +100,12 @@
   --info: #1d4ed8;
   --focus: #2563eb;
   --timeline-track: var(--bg-muted);
-  --timeline-seg: color-mix(in srgb, var(--text-2) 55%, transparent);
-  --timeline-seg-hover: color-mix(in srgb, var(--text-2) 75%, transparent);
+  --timeline-seg: color-mix(in oklab, var(--text-2) 55%, transparent);
+  --timeline-seg-hover: color-mix(in oklab, var(--text-2) 75%, transparent);
   --timeline-seg-current: var(--text);
   --timeline-seg-error: var(--danger);
   --timeline-seg-error-muted: color-mix(
-    in srgb,
+    in oklab,
     var(--danger) 55%,
     transparent
   );
@@ -107,15 +116,19 @@
   --chart-5: #9a5c5c;
   --chart-6: #4f8494;
   --shadow-color: #000000;
-  --shadow-pop: 0 8px 24px rgba(0, 0, 0, 0.1);
-  --shadow-modal: 0 24px 64px rgba(0, 0, 0, 0.16);
-  --overlay: rgba(0, 0, 0, 0.32);
-  --scrollbar-thumb: rgba(0, 0, 0, 0.18);
-  --scrollbar-thumb-hover: rgba(0, 0, 0, 0.35);
+  --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.05);
+  --shadow-composer: 0 6px 24px rgba(15, 23, 42, 0.06);
+  --shadow-pop: 0 10px 28px rgba(15, 23, 42, 0.1);
+  --shadow-modal: 0 24px 60px rgba(15, 23, 42, 0.16);
+  --overlay: rgba(15, 23, 42, 0.32);
+  /* ≥3:1 non-text contrast against --bg (#fafafa) and --surface (#ffffff). */
+  --scrollbar-thumb: #767b85;
+  --scrollbar-thumb-hover: #555962;
   color-scheme: light;
 }
 
 :root {
+  interpolate-size: allow-keywords;
   /* type: system fonts only, no bundled webfonts */
   --font-sans:
     system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC",
@@ -227,6 +240,30 @@ button:disabled {
 :focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
+}
+
+/* Native top-layer modal dialogs block scroll chaining over dialog and backdrop. */
+dialog:modal {
+  overscroll-behavior: contain;
+}
+
+dialog::backdrop {
+  overflow: hidden;
+  overscroll-behavior: contain;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  dialog[open],
+  [popover]:popover-open {
+    opacity: 1;
+    transition-property: opacity, display, overlay;
+    transition-duration: var(--dur-fast);
+    transition-timing-function: ease-out;
+    transition-behavior: allow-discrete;
+    @starting-style {
+      opacity: 0;
+    }
+  }
 }
 
 @media (forced-colors: active) {

@@ -20,7 +20,7 @@ import { RecoveredDrafts } from "./features/RecoveredDrafts";
 import { LoginPage } from "./login";
 import { Component, useEffect, useRef, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
-import { AppProvider, useAppFields } from "./state";
+import { AppProvider, useAppFields, useAppSelector } from "./state";
 import { Icon, useMenuEscape } from "./features/shared";
 import { SessionRail } from "./shell/SessionRail";
 import { Header } from "./shell/Header";
@@ -130,6 +130,9 @@ function Layout() {
     document.addEventListener("pointerdown", onPress, true);
     return () => document.removeEventListener("pointerdown", onPress, true);
   }, [menu]);
+  const sessionStatus = useAppSelector((s) =>
+    s.sessionId ? (s.transcript.sessionStatus ?? null) : null,
+  );
   useEffect(() => {
     document.title = "microcrab";
   }, []);
@@ -149,6 +152,7 @@ function Layout() {
       ) : (
         <div
           className="shell"
+          data-session-status={sessionStatus ?? undefined}
           data-rail-collapsed={state.railCollapsed}
           data-left-collapsed={state.railCollapsed}
           data-right-collapsed={!canShowRightRail || state.rightRailCollapsed}
@@ -216,6 +220,7 @@ function ToastBanner({
   const dismissRef = useRef(onDismiss);
   dismissRef.current = onDismiss;
   const [paused, setPaused] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const remainingRef = useRef(4000);
   const startTimeRef = useRef(Date.now());
   const timerRef = useRef<number | null>(null);
@@ -224,6 +229,7 @@ function ToastBanner({
     remainingRef.current = 4000;
     startTimeRef.current = Date.now();
     setPaused(false);
+    setExpanded(false);
 
     if (toast.sticky) return;
 
@@ -277,7 +283,18 @@ function ToastBanner({
           }}
         />
       )}
-      <div className="toast-body">{toast.text}</div>
+      <div
+        className="toast-body"
+        data-testid="toast-body"
+        data-expanded={String(expanded)}
+        title={expanded ? undefined : toast.text}
+        onClick={() => {
+          if (!expanded) handleMouseEnter();
+          setExpanded((value) => !value);
+        }}
+      >
+        {toast.text}
+      </div>
       <button
         type="button"
         className="toast-close"

@@ -17,7 +17,7 @@ export interface SpeakerRow {
   source: "project" | "session";
   disabled: boolean;
 }
-export interface SpeakerSnapshot {
+interface SpeakerBindingsSnapshot {
   revision: number;
   speakers: SpeakerRow[];
   overrides: Record<
@@ -25,19 +25,33 @@ export interface SpeakerSnapshot {
     { action: "set"; key: { kind: "keep" } } | { action: "disable" }
   >;
 }
+type SpeakerEnablement =
+  | { enabled: true; disabled_reason?: never }
+  | { enabled: false; disabled_reason: "project_disabled" | "no_project" };
+export type SpeakerSnapshot = SpeakerBindingsSnapshot & SpeakerEnablement;
 export interface SpeakerKey {
   identity: string;
   fingerprint: string;
   key: string;
 }
-export interface SpeakerOperationResponse extends SpeakerSnapshot {
+export type SpeakerOperationResponse = SpeakerSnapshot & {
   operation_id: string;
-}
-export interface SpeakerUpdate {
+};
+export type SpeakerOperationReceipt =
+  | SpeakerOperationResponse
+  | (SpeakerBindingsSnapshot & {
+      operation_id: string;
+      enabled?: never;
+      disabled_reason?: never;
+    });
+interface SpeakerLayerUpdate {
   operation_id: string;
   expected_revision: number;
   speakers: SpeakerLayer;
 }
+export type ProjectSpeakerUpdate = SpeakerLayerUpdate & { enabled: boolean };
+export type SessionSpeakerUpdate = SpeakerLayerUpdate & { enabled?: never };
+export type SpeakerUpdate = ProjectSpeakerUpdate | SessionSpeakerUpdate;
 export const validSpeakerIdentity = (value: string) =>
   /^[A-Za-z_][A-Za-z0-9_-]{0,63}$/.test(value);
 export const validSpeakerCustomKey = (value: string) =>
@@ -55,9 +69,9 @@ export function speakerPath(scope: SpeakerScope) {
   return `api/v1/${scope.kind === "project" ? "projects" : "sessions"}/${encodeURIComponent(scope.id)}/external-speakers`;
 }
 /** Effective rows are presentation only. Only overrides can seed a replacement PUT. */
-export function validateSpeakerSnapshot(
+function validateSpeakerBindings(
   value: unknown,
-): asserts value is SpeakerSnapshot {
+): asserts value is SpeakerBindingsSnapshot & Record<string, unknown> {
   if (
     !object(value) ||
     !Number.isSafeInteger(value.revision) ||
@@ -110,21 +124,77 @@ export function validateSpeakerSnapshot(
       );
   }
 }
+export function validateSpeakerSnapshot(
+  value: unknown,
+  scope: SpeakerScope,
+): asserts value is SpeakerSnapshot {
+  validateSpeakerBindings(value);
+  if (!(
+    (value.enabled === true && !Object.hasOwn(value, "disabled_reason")) ||
+    (value.enabled === false &&
+      (value.disabled_reason === "project_disabled" ||
+        (scope.kind === "session" && value.disabled_reason === "no_project")))
+  ))
+    throw new CommandError(
+      "invalid_result",
+      "external-speakers.enabled: invalid effective project status",
+    );
+}
 export function validateSpeakerOperation(
   value: unknown,
+  scope: SpeakerScope,
   operationId: string,
-): asserts value is SpeakerOperationResponse {
-  validateSpeakerSnapshot(value);
-  if ((value as SpeakerOperationResponse).operation_id !== operationId)
+  options: { historical: false; expectedEnabled?: boolean },
+): asserts value is SpeakerOperationResponse;
+export function validateSpeakerOperation(
+  value: unknown,
+  scope: SpeakerScope,
+  operationId: string,
+  options: { historical: true },
+): asserts value is SpeakerOperationReceipt;
+export function validateSpeakerOperation(
+  value: unknown,
+  scope: SpeakerScope,
+  operationId: string,
+  options:
+    { historical: true } | { historical: false; expectedEnabled?: boolean },
+): asserts value is SpeakerOperationReceipt {
+  validateSpeakerBindings(value);
+  if (value.operation_id !== operationId)
     throw new CommandError(
       "invalid_result",
       "external-speakers.operation_id: receipt identity mismatch",
+    );
+  if (
+    options.historical &&
+    !Object.hasOwn(value, "enabled") &&
+    !Object.hasOwn(value, "disabled_reason")
+  )
+    return;
+  validateSpeakerSnapshot(value, scope);
+  if (
+    !options.historical &&
+    options.expectedEnabled !== undefined &&
+    value.enabled !== options.expectedEnabled
+  )
+    throw new CommandError(
+      "invalid_result",
+      "external-speakers.enabled: receipt does not acknowledge the requested setting",
     );
 }
 export function validateSpeakerUpdate(
   scope: SpeakerScope,
   update: SpeakerUpdate,
 ) {
+  if (
+    scope.kind === "project"
+      ? typeof update.enabled !== "boolean"
+      : Object.hasOwn(update, "enabled")
+  )
+    throw new CommandError(
+      "invalid_request",
+      "external-speakers.enabled: required for projects and forbidden for sessions",
+    );
   if (
     !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(
       update.operation_id,

@@ -1,3 +1,4 @@
+import { JsonFormatBudgetError, prettyJson } from "./format-json";
 import { parseUnifiedDiff } from "./unified-diff";
 
 export const CONTENT_FORMATS = [
@@ -14,6 +15,7 @@ export type Presentation = {
   text: string;
   kind: SyntaxKind | "markdown";
   error?: string;
+  jsonCandidate?: true;
   notice?: "large" | "xmlPreserved";
 };
 
@@ -33,88 +35,12 @@ export function sourceText(value: unknown): string {
   }
 }
 
-/** Validate grammar while retaining every key, string escape and numeric lexeme.
- * JSON.parse/stringify is intentionally never used on supplied text. */
-export function formatJson(source: string): string {
-  let cursor = 0;
-  let tokens = 0;
-  const whitespace = () => {
-    while (/[\x20\t\r\n]/.test(source[cursor] ?? "") && cursor < source.length)
-      cursor++;
-  };
-  const fail = (reason: string): never => {
-    throw new Error(`${reason} (${cursor + 1})`);
-  };
-  const string = (): string => {
-    const start = cursor++;
-    while (cursor < source.length) {
-      const ch = source[cursor++];
-      if (ch === '"') return source.slice(start, cursor);
-      if (ch.charCodeAt(0) < 32)
-        fail("Unescaped control character in JSON string");
-      if (ch === "\\") {
-        const escaped = source[cursor++];
-        if (escaped === "u") {
-          if (!/^[0-9a-fA-F]{4}$/.test(source.slice(cursor, cursor + 4)))
-            fail("Expected four hexadecimal digits after \\u");
-          cursor += 4;
-        } else if (!escaped || !'"\\/bfnrt'.includes(escaped))
-          fail("Invalid JSON escape");
-      }
-    }
-    return fail("Unterminated JSON string");
-  };
-  const value = (depth: number): string => {
-    if (depth > MAX_DEPTH) fail("JSON nesting exceeds safe formatting depth");
-    if (++tokens > SYNTAX_TOKEN_LIMIT)
-      fail("JSON token count exceeds safe formatting budget");
-    whitespace();
-    const ch = source[cursor];
-    if (ch === '"') return string();
-    if (ch === "{" || ch === "[") {
-      cursor++;
-      const close = ch === "{" ? "}" : "]";
-      whitespace();
-      if (source[cursor] === close) {
-        cursor++;
-        return ch + close;
-      }
-      const entries: string[] = [];
-      while (cursor < source.length) {
-        whitespace();
-        let entry = "";
-        if (ch === "{") {
-          if (source[cursor] !== '"') fail("Expected a quoted JSON object key");
-          entry = string();
-          whitespace();
-          if (source[cursor++] !== ":")
-            fail("Expected : after JSON object key");
-          entry += ": ";
-        }
-        entries.push("  ".repeat(depth + 1) + entry + value(depth + 1));
-        whitespace();
-        if (source[cursor] === close) {
-          cursor++;
-          return (
-            ch + "\n" + entries.join(",\n") + "\n" + "  ".repeat(depth) + close
-          );
-        }
-        if (source[cursor++] !== ",") fail(`Expected , or ${close} in JSON`);
-      }
-      return fail(`Expected ${close} to close JSON`);
-    }
-    const match =
-      /^(?:-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null)/.exec(
-        source.slice(cursor),
-      );
-    if (!match) return fail("Expected a JSON value");
-    cursor += match[0].length;
-    return match[0];
-  };
-  const result = value(0);
-  whitespace();
-  if (cursor !== source.length) fail("Unexpected text after JSON value");
-  return result;
+/** Pretty-print while retaining every key, escape and numerical lexeme. */
+export function formatJson(
+  source: string,
+  stringValue?: (path: readonly (string | number)[], lexeme: string) => string,
+): string {
+  return [...prettyJson(source, 0, source.length, { depth: MAX_DEPTH, tokens: SYNTAX_TOKEN_LIMIT }, stringValue)].join("");
 }
 
 /** XML stays text throughout. Reject DTD/entities before any parser or preview;
@@ -261,11 +187,15 @@ export function presentContent(
     try {
       return { text: formatJson(source), kind: "json" };
     } catch (error) {
+      // A rendering budget does not decide whether the supplied document is JSON.
+      const candidate = error instanceof JsonFormatBudgetError ? { jsonCandidate: true as const } : {};
+      if (mode === "auto" && candidate.jsonCandidate) return { text: source, kind: "raw", ...candidate };
       if (mode === "json")
         return {
           text: source,
           kind: "raw",
           error: String(error instanceof Error ? error.message : error),
+          ...candidate,
         };
     }
   }

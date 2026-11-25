@@ -1,4 +1,15 @@
-// Mirror the Core State inspection shape and tool placeholder limits. The response
+import {
+  admitsOrdinaryState,
+  own,
+  parseStateInspection,
+  record,
+  stateKeyPattern,
+  type BytesMetadata,
+} from "../../client/state-inspection";
+import type { NativeStateInspection } from "../../client/native-state-inspection";
+import { stateReferenceProjection } from "./references";
+
+// Mirror the Core tool placeholder limits. The response
 // budget is enforced by ApiClient; these tighter limits bound native tree rendering.
 const MAX_NODES = 1500;
 const MAX_DEPTH = 32;
@@ -25,18 +36,19 @@ interface StateDescriptor {
   deletable?: boolean;
 }
 
-export interface StateInspection {
-  values: Record<string, unknown>;
-  metadata: Record<string, unknown>;
-  descriptors: Record<string, unknown>;
-  witness: { runtime_instance_id: string; variables_revision: string };
-}
-
 export interface StateNode {
   id: number;
   label: string;
   type?: ValueType;
   preview?: string;
+  // The tree labels and search text are clipped independently. Keep the actual
+  // member key and projected string for selected-container formatting only.
+  key: string;
+  projectedString?: string;
+  rootKey?: string;
+  path?: readonly string[];
+  childrenLimited?: true;
+  exact?: string;
   metadata: StateMetadata;
   descriptor: StateDescriptor;
   reference?: string;
@@ -56,20 +68,17 @@ export interface ExecutionCapacity {
 
 export interface StateTree {
   roots: StateNode[];
+  bytes: BytesMetadata[];
   nodes: Map<number, StateNode>;
   limited: boolean;
   revision: string;
+  runtime: string;
+  exactRoots?: ReadonlyMap<string, string>;
+  compactStrings: ReadonlyMap<
+    string,
+    ReadonlyMap<string, { exact: string; label: string }>
+  >;
   executionCapacity: ExecutionCapacity;
-}
-
-function record(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
-}
-
-function own(record: Record<string, unknown> | undefined, key: string) {
-  return record && Object.hasOwn(record, key) ? record[key] : undefined;
 }
 
 function oneOf<T extends string>(
@@ -82,7 +91,6 @@ function oneOf<T extends string>(
 const bool = (value: unknown) =>
   typeof value === "boolean" ? value : undefined;
 const roles = ["agent", "client", "runtime"] as const;
-const keyPattern = /^[A-Za-z_][A-Za-z0-9_.-]{0,127}(?![\s\S])/;
 
 function preview(text: string, limit: number) {
   return text.length <= limit ? text : `${text.slice(0, limit)}…`;
@@ -93,7 +101,7 @@ export function stateReference(
   visibility: Visibility,
   path: readonly string[] = [],
 ): string | undefined {
-  if (!keyPattern.test(key) || path.length > MAX_DEPTH) return undefined;
+  if (!stateKeyPattern.test(key) || path.length > MAX_DEPTH) return undefined;
   if (visibility === "secret")
     return path.length ? undefined : `{{secret:${key}}}`;
   if (visibility !== "visible") return undefined;
@@ -115,18 +123,23 @@ export function stateReference(
 }
 
 /** Drop protected and unclassified custom values before React ever receives data. */
-export function buildStateTree(inspection: StateInspection): StateTree {
-  const { values, metadata, descriptors, witness } = inspection;
-  if (
-    !record(values) ||
-    !record(metadata) ||
-    !record(descriptors) ||
-    typeof witness?.runtime_instance_id !== "string" ||
-    !witness.runtime_instance_id ||
-    typeof witness.variables_revision !== "string" ||
-    !/^(0|[1-9][0-9]{0,19})$/.test(witness.variables_revision)
-  )
-    throw Error("invalid_result");
+export function buildStateTree(inspection: unknown): StateTree {
+  return projectStateTree(parseStateInspection(inspection));
+}
+
+export function buildNativeStateTree(
+  inspection: NativeStateInspection,
+): StateTree {
+  return projectStateTree(inspection, inspection.exactRoots);
+}
+
+function projectStateTree(
+  {
+    ordinary: { values, metadata, descriptors, witness },
+    bytes,
+  }: ReturnType<typeof parseStateInspection>,
+  exactRoots?: ReadonlyMap<string, string>,
+): StateTree {
   const nodes = new Map<number, StateNode>();
   const roots: StateNode[] = [];
   let limited = false;
@@ -137,6 +150,7 @@ export function buildStateTree(inspection: StateInspection): StateTree {
   ): StateNode => {
     const node: StateNode = {
       id: nodes.size,
+      key: label,
       label: preview(label || '\"\"', 160),
       metadata: data,
       descriptor,
@@ -148,20 +162,27 @@ export function buildStateTree(inspection: StateInspection): StateTree {
   const addValue = (
     node: StateNode,
     value: unknown,
+    exact: unknown,
     key: string,
     path: readonly string[],
     canReference: boolean,
   ) => {
     if (canReference) node.reference = stateReference(key, "visible", path);
+    if (exactRoots?.has(key)) {
+      node.rootKey = key;
+      node.path = path;
+    }
     const kind = typeof value;
     if (value === null) node.type = "null";
     else if (kind === "string" || kind === "number" || kind === "boolean")
       node.type = kind;
     else if (kind === "object")
       node.type = Array.isArray(value) ? "array" : "object";
-    if (node.type === "string")
-      node.preview = JSON.stringify(preview(value as string, MAX_PREVIEW));
-    else if (node.type !== "object" && node.type !== "array") {
+    if (node.type === "string") {
+      node.projectedString = value as string;
+      node.preview = JSON.stringify(preview(node.projectedString, MAX_PREVIEW));
+      if (typeof exact === "string" && exact !== value) node.exact = exact;
+    } else if (node.type !== "object" && node.type !== "array") {
       if (node.type) node.preview = String(value);
       else node.reference = undefined;
     } else {
@@ -170,6 +191,7 @@ export function buildStateTree(inspection: StateInspection): StateTree {
         if (!Object.hasOwn(children, part)) continue;
         if (nodes.size >= MAX_NODES || path.length >= MAX_DEPTH) {
           limited = true;
+          node.childrenLimited = true;
           break;
         }
         const child = append(part, node.metadata, node.descriptor);
@@ -177,6 +199,7 @@ export function buildStateTree(inspection: StateInspection): StateTree {
         addValue(
           child,
           children[part],
+          own(exact as Record<string, unknown>, part),
           key,
           [...path, part],
           canReference && part.length <= MAX_POINTER_BYTES,
@@ -218,25 +241,37 @@ export function buildStateTree(inspection: StateInspection): StateTree {
           node.reference = stateReference(key, "secret");
         continue; // Never read, traverse, index, or retain a Secret payload.
       }
-      if (
-        data.visibility ||
-        (raw === undefined &&
-          !Object.hasOwn(metadata, key) &&
-          (descriptor.kind === "framework" || descriptor.kind === "reference"))
-      ) {
+      if (admitsOrdinaryState(metadata, descriptors, key)) {
         rootsToRead.push({ key, node });
       }
     }
   }
-  for (const { key, node } of rootsToRead)
+  const compactStrings = new Map<
+    string,
+    Map<string, { exact: string; label: string }>
+  >();
+  for (const { key, node } of rootsToRead) {
+    const exact = own(values, key);
+    const projected = stateReferenceProjection(
+      key,
+      node.descriptor.kind,
+      exact,
+      (path, exact, label) => {
+        const entries = compactStrings.get(key) ?? new Map();
+        entries.set(JSON.stringify(path), { exact, label });
+        compactStrings.set(key, entries);
+      },
+    );
     addValue(
       node,
-      own(values, key),
+      projected,
+      exact,
       key,
       [],
       node.descriptor.kind === "custom" &&
         node.metadata.visibility === "visible",
     );
+  }
   // Do not depend on whether the bounded tree reached this framework field,
   // and never treat a historical custom field of the same name as capacity.
   const capacityKey = "execution_capacity";
@@ -247,9 +282,13 @@ export function buildStateTree(inspection: StateInspection): StateTree {
       : undefined;
   return {
     roots,
+    bytes,
     nodes,
     limited,
     revision: witness.variables_revision,
+    runtime: witness.runtime_instance_id,
+    exactRoots,
+    compactStrings,
     executionCapacity: {
       buffers: capacity && capacityCount(own(capacity, "buffers")),
       pending: capacity && capacityCount(own(capacity, "pending")),
@@ -278,7 +317,8 @@ export function findStateNodes(roots: StateNode[], query: string): Set<number> {
   const visit = (node: StateNode): boolean => {
     let found =
       node.label.toLowerCase().includes(term) ||
-      !!node.preview?.toLowerCase().includes(term);
+      !!node.preview?.toLowerCase().includes(term) ||
+      node.exact?.toLowerCase() === term;
     for (const child of node.children) if (visit(child)) found = true;
     if (found) matches.add(node.id);
     return found;

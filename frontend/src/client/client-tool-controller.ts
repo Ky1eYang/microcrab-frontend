@@ -147,6 +147,17 @@ export class ClientToolController {
     this.bufferSession = null;
     this.changed();
   }
+  /** Closing the carrier retires its lease, not the selected receipt identities. */
+  transportDisconnected(sessionId: string) {
+    if (this.sessionId !== sessionId && this.bufferSession !== sessionId) return;
+    this.generation++;
+    this.bindingEpoch++;
+    this.rebinding = null;
+    this.leaseRefreshRequested = false;
+    this.revokeBinding();
+    if (this.buffered) this.releaseBuffer(this.buffered);
+  }
+
   async bind(sessionId: string, catalog: ClientCatalog) {
     const generation = ++this.generation;
     const buffer =

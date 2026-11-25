@@ -869,3 +869,107 @@ for (const width of [390, 1440]) {
     ).toBe(true);
   });
 }
+
+test("JSON tree preserves duplicate occurrences, paused exact source, clip boundaries, and copy failure", async ({ page }) => {
+  const digest = "a".repeat(64);
+  const fragment = '{ "wide":90071992547409930000, "wide":-0, "s":"line\\n<em>hello</em>" }';
+  const source = ` {"obj":${fragment},"obj":1.30E-483,"version":"${digest}"} \n`;
+  await mount(page, source);
+  const viewer = page.getByTestId("content-viewer");
+  const treeButton = viewer.getByRole("button", { name: "Tree", exact: true });
+  const tree = viewer.getByTestId("object-inspector");
+  await expect(tree).toHaveCount(0);
+  await (await secondary(viewer, "pause")).click();
+  await update(page, '{"version":"changed"}');
+  await treeButton.click();
+  await expect(tree.getByTestId("json-node")).toHaveCount(4);
+  await expect(tree).not.toContainText("90071992547409930000");
+  const collapsible = tree.getByRole("button", { name: "Expand obj", exact: true });
+  const first = tree.getByRole("button", { name: "Copy exact value: obj", exact: true }).first();
+  await expect(first).toHaveCSS("opacity", "0");
+  await collapsible.hover();
+  await expect(first).toHaveCSS("opacity", "1");
+  await expect(tree.getByRole("button", { name: "Copy exact value: obj", exact: true }).last()).toHaveCSS("opacity", "0");
+  await first.click();
+  await expect.poll(() => copied(page)).toBe(fragment);
+  await collapsible.focus();
+  await page.keyboard.press("Enter");
+  await expect(tree.getByTestId("json-node")).toHaveCount(7);
+  await expect(tree.locator("em")).toHaveCount(0);
+  const stringCopy = tree.getByRole("button", { name: "Copy exact value: s" });
+  await stringCopy.focus();
+  await expect(stringCopy).toHaveCSS("opacity", "1");
+  await page.keyboard.press("Enter");
+  await expect.poll(() => copied(page)).toBe("line\n<em>hello</em>");
+  await page.evaluate(() => { navigator.clipboard.writeText = async () => { throw new Error("rejected"); }; });
+  await page.keyboard.press("Enter");
+  await expect(viewer.getByText("Could not copy the exact value to the clipboard.")).toBeVisible();
+  await update(page, '{"replacement":true}', "new-document");
+  await expect(viewer.getByText("Could not copy the exact value to the clipboard.")).toHaveCount(0);
+  await expect(tree).toHaveCount(0);
+});
+
+test("Text and Tree share a reading surface and expanded strings stay in the same row", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const value = "first line\n" + "wrapped text ".repeat(24) + "end of value";
+  await mount(page, JSON.stringify({ text: value }));
+  const viewer = page.getByTestId("content-viewer");
+  const surface = viewer.locator(".json-reading-surface");
+  const pre = surface.locator("pre");
+  await expect(pre).toBeVisible();
+  const font = await pre.evaluate((el) => getComputedStyle(el).font);
+  await viewer.getByRole("button", { name: "Tree", exact: true }).click();
+  const expand = surface.getByRole("button", { name: "Expand text", exact: true });
+  await expect(expand.locator("svg")).toHaveCSS("rotate", "none");
+  await expect(surface).not.toContainText("end of value");
+  await expand.focus();
+  await page.keyboard.press("Enter");
+  const collapse = surface.getByRole("button", { name: "Collapse text", exact: true });
+  await expect(collapse).toBeFocused();
+  await expect(collapse.locator("svg")).toHaveCSS("rotate", "90deg");
+  const string = collapse.locator("..").locator(".json-string");
+  expect(await string.textContent()).toBe(`"${value}"`);
+  expect(await string.evaluate((el) => getComputedStyle(el).font)).toBe(font);
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await collapse.press("Enter");
+  await expect(surface).not.toContainText("end of value");
+});
+
+test("compact display does not become copy evidence and Raw-only never exposes Tree", async ({ page }) => {
+  const digest = "a".repeat(64);
+  await mount(page, `{"version":"${digest}"}`);
+  await page.evaluate(async () => {
+    const { toolReferenceProjection } = await import("/src/features/" + "toolReferences.ts");
+    const value = (window as any).__props.value;
+    (window as any).__render({projection: toolReferenceProjection(value, "coding-file", "result")});
+  });
+  const viewer = page.getByTestId("content-viewer");
+  await viewer.getByRole("button", { name: "Tree", exact: true }).click();
+  const tree = viewer.getByTestId("object-inspector");
+  await expect(tree).not.toContainText(digest);
+  await tree.getByRole("button", { name: "Copy exact value: version" }).click();
+  await expect.poll(() => copied(page)).toBe(digest);
+  await page.evaluate(() => (window as any).__render({allowedFormats: ["raw"]}));
+  await expect(viewer.getByRole("button", { name: "Tree", exact: true })).toHaveCount(0);
+});
+
+test("near-response-limit document remains navigable with bounded rows, chunked strings and complete copy", async ({ page }) => {
+  const source = '{"items":[' + '0,'.repeat(2500) + 'false],"long":"' + '😁'.repeat(975_000) + '"}';
+  await mount(page, source);
+  const viewer = page.getByTestId("content-viewer");
+  const tree = viewer.getByTestId("object-inspector");
+  await viewer.getByRole("button", { name: "Tree", exact: true }).click();
+  await expect(tree.getByTestId("json-node")).toHaveCount(3);
+  await tree.getByRole("button", { name: "Expand items" }).click();
+  await expect(tree.getByTestId("json-node")).toHaveCount(103);
+  await tree.getByRole("button", { name: "Next range" }).click();
+  await expect(tree.getByText("101–200 of 2501")).toBeVisible();
+  await expect(tree.getByTestId("json-node")).toHaveCount(103);
+  await tree.getByRole("button", { name: "Expand long" }).click();
+  await expect(tree.getByRole("button", { name: "Next section" })).toBeVisible();
+  expect((await tree.textContent())!.length).toBeLessThan(10000);
+  await tree.getByRole("button", { name: "Copy exact value: long" }).click();
+  expect(await page.evaluate(() => (window as any).__copied?.length)).toBe(1_950_000);
+  await viewer.getByRole("button", { name: "Text", exact: true }).click();
+  await expect(viewer.locator("pre")).toBeVisible();
+});

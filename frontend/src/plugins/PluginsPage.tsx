@@ -1,3 +1,5 @@
+import { referenceLabels } from "../features/referenceLabels";
+import { ExpandableNotice } from "../features/ExpandableNotice";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { useAppFields, useAppStore, useClientPlugins } from "../state";
 import { t } from "../i18n";
@@ -53,6 +55,7 @@ export function PluginsPage({ embedded = false }: { embedded?: boolean }) {
   const registry = plugins.registry;
   const { state, dispatch } = useAppFields([
     "sessionId",
+    "sessions",
     "resolvedLocale",
     "pluginWorkspace",
   ]);
@@ -88,6 +91,9 @@ export function PluginsPage({ embedded = false }: { embedded?: boolean }) {
 
   const installed = registry?.getSnapshot() ?? [];
 
+  const artifactLabel = useMemo(() => referenceLabels("digest", installed.map((plugin) => plugin.artifact)), [installed]);
+  const sessionLabel = referenceLabels("session", state.sessions.map((row) => row.id));
+
   const isPluginActiveInScope = (plugin: InstalledPlugin) =>
     registry
       ? state.sessionId
@@ -102,10 +108,11 @@ export function PluginsPage({ embedded = false }: { embedded?: boolean }) {
       return (
         plugin.manifest.name.toLowerCase().includes(q) ||
         plugin.manifest.id.toLowerCase().includes(q) ||
-        (plugin.manifest.description ?? "").toLowerCase().includes(q)
+        (plugin.manifest.description ?? "").toLowerCase().includes(q) ||
+        Boolean(plugin.artifact && (plugin.artifact.toLowerCase() === q || artifactLabel(plugin.artifact).includes(q)))
       );
     });
-  }, [installed, searchQuery]);
+  }, [artifactLabel, installed, searchQuery]);
 
   useEffect(() => {
     if (
@@ -305,9 +312,9 @@ export function PluginsPage({ embedded = false }: { embedded?: boolean }) {
                   </div>
                   <div
                     className="client-plugin-nav-hash"
-                    title={plugin.artifact ?? plugin.manifest.id}
+                    title={plugin.artifact ? artifactLabel(plugin.artifact) : plugin.manifest.id}
                   >
-                    {plugin.artifact ?? plugin.manifest.id}
+                    {plugin.artifact ? artifactLabel(plugin.artifact) : plugin.manifest.id}
                   </div>
                 </div>
               </button>
@@ -326,9 +333,14 @@ export function PluginsPage({ embedded = false }: { embedded?: boolean }) {
         data-testid="client-plugins-detail"
       >
         {(error || plugins.error) && (
-          <div role="alert" className="client-plugin-notice">
-            <span>{error || plugins.error}</span>
-            {plugins.error &&
+          <ExpandableNotice
+            role="alert"
+            className="client-plugin-notice"
+            tone="danger"
+            marker="none"
+            text={String(error || plugins.error)}
+            action={
+              plugins.error &&
               !plugins.initializing &&
               !plugins.isReadyFor(state.sessionId) && (
                 <button
@@ -340,13 +352,18 @@ export function PluginsPage({ embedded = false }: { embedded?: boolean }) {
                 >
                   {t("plugins.retry")}
                 </button>
-              )}
-          </div>
+              )
+            }
+          />
         )}
         {notice && (
-          <div role="status" className="client-plugin-feedback-banner">
-            <span>{notice}</span>
-          </div>
+          <ExpandableNotice
+            role="status"
+            className="client-plugin-feedback-banner"
+            tone="info"
+            marker="none"
+            text={notice}
+          />
         )}
         {!registry && (
           <div className="client-plugins-empty-stage" role="status">
@@ -391,12 +408,13 @@ export function PluginsPage({ embedded = false }: { embedded?: boolean }) {
               {/* Row 2: WASM SHA-256 Hash */}
               <div
                 className="client-plugin-header-row client-plugin-sha256"
-                title={activePlugin.artifact ?? activePlugin.manifest.id}
+                title={activePlugin.artifact ? artifactLabel(activePlugin.artifact) : activePlugin.manifest.id}
               >
                 <span className="client-plugin-hash-label">SHA-256</span>
                 <code className="client-plugin-hash-value">
-                  {activePlugin.artifact ?? "—"}
+                  {activePlugin.artifact ? artifactLabel(activePlugin.artifact) : "—"}
                 </code>
+                {activePlugin.artifact && <button type="button" className="ghost-btn" onClick={() => dispatch({ type: "CopyText", value: activePlugin.artifact })}>{t("references.copyChecksum")}</button>}
               </div>
 
               {/* Row 3: Description + Contract Metadata (ID / Targets / Imports / Origins) */}
@@ -484,23 +502,29 @@ export function PluginsPage({ embedded = false }: { embedded?: boolean }) {
               </div>
 
               {activePlugin.error && (
-                <div role="alert" className="client-plugin-notice">
-                  <span>{activePlugin.error}</span>
-                  {isPluginActiveInScope(activePlugin) && (
-                    <button
-                      type="button"
-                      className="ghost-btn btn-sm"
-                      disabled={busy}
-                      onClick={() =>
-                        void run(() =>
-                          registry.restart(activePlugin.manifest.id),
-                        )
-                      }
-                    >
-                      {t("plugins.retry")}
-                    </button>
-                  )}
-                </div>
+                <ExpandableNotice
+                  role="alert"
+                  className="client-plugin-notice"
+                  tone="danger"
+                  marker="none"
+                  text={String(activePlugin.error)}
+                  action={
+                    isPluginActiveInScope(activePlugin) && (
+                      <button
+                        type="button"
+                        className="ghost-btn btn-sm"
+                        disabled={busy}
+                        onClick={() =>
+                          void run(() =>
+                            registry.restart(activePlugin.manifest.id),
+                          )
+                        }
+                      >
+                        {t("plugins.retry")}
+                      </button>
+                    )
+                  }
+                />
               )}
             </div>
 
@@ -517,7 +541,7 @@ export function PluginsPage({ embedded = false }: { embedded?: boolean }) {
                     </div>
                     <div className="settings-row-sub">
                       {t("plugins.sessionEnabledHint")} (
-                      {state.sessionId.slice(0, 16)})
+                      {sessionLabel(state.sessionId)})
                     </div>
                   </div>
                   <div className="settings-row-action">

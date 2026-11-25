@@ -78,6 +78,15 @@ function scenario() {
       message("result0", "tool", "file contents", {
         call_id: "t0",
         tool_name: "read",
+        parts: [
+          {
+            type: "image",
+            source: {
+              type: "url",
+              url: "/api/v1/sessions/s1/images/result0/0",
+            },
+          },
+        ],
       }),
     ),
   );
@@ -136,6 +145,12 @@ test("interleaved parallel tool segments keep one first-appearance card per invo
   const originalIds = cards(live).map((block) => block.id);
   expect(originalIds).toEqual(["tool0-first", "tool1-first"]);
   expect(cards(live)[0].payload.text).toBe("file contents");
+  expect(cards(live)[0].payload.attachments).toEqual([
+    expect.objectContaining({
+      url: expect.stringContaining("/images/result0/0"),
+      sourceOmitted: false,
+    }),
+  ]);
   expect(cards(live)[1].kind).toBe("child");
   expect(cards(live)[1].tool.childSessionId).toBe("child");
   expect(cards(live).filter((block) => block.executionId === 7)).toHaveLength(

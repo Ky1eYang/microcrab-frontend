@@ -1,6 +1,11 @@
 /* The composer is Home's single primary surface; workspace and status read
    as context on the same left edge, not as additional cards. */
+.home-page-container {
+  padding: var(--sp-5) var(--sp-4);
+}
+
 .home-page-container .home-center-stage {
+  max-inline-size: 720px;
   align-items: stretch;
   gap: var(--sp-3);
 }
@@ -14,11 +19,12 @@
   min-block-size: 32px;
   max-inline-size: 100%;
   gap: var(--sp-2);
-  padding: var(--sp-1) var(--sp-2);
+  padding: var(--sp-1) var(--sp-3) var(--sp-1) var(--sp-2);
   font-size: var(--fs-sm);
   line-height: 1.4;
   text-align: start;
-  transition: none;
+  box-shadow: var(--shadow-card);
+  transition: background-color var(--dur-fast) ease, border-color var(--dur-fast) ease, color var(--dur-fast) ease;
 }
 
 .home-page-container .workspace-badge-text {
@@ -28,19 +34,23 @@
 
 .home-page-container .home-workspace-badge-btn:is([aria-expanded="true"], :active) {
   background: var(--bg-muted);
+  border-color: var(--border-strong);
   color: var(--text);
 }
 
 .home-page-container .home-workspace-selector-wrap > .workspace-cascading-menu {
-  top: calc(100% + var(--sp-1));
+  top: calc(100% + 6px);
 }
 
 .home-page-container .home-composer-box {
-  border-color: var(--control-border);
+  border-color: var(--border-strong);
+  border-radius: 14px;
+  box-shadow: var(--shadow-composer);
+  transition: border-color var(--dur-fast) ease, box-shadow var(--dur-fast) ease;
 }
 
 .home-page-container .home-composer-box:focus-within {
-  border-color: var(--focus);
+  border-color: var(--control-border);
 }
 
 .home-page-container .home-composer-box:has(> .home-composer-textarea:focus-visible) {
@@ -49,7 +59,7 @@
 }
 
 .home-page-container .home-composer-box > .home-composer-textarea {
-  padding-inline: var(--sp-4);
+  padding: var(--sp-4) var(--sp-4) var(--sp-2);
   font-size: var(--fs-lg);
 }
 
@@ -66,7 +76,18 @@
 }
 
 @media (max-width: 767px) {
+  .home-page-container {
+    padding: var(--sp-4) var(--sp-3);
+  }
+
   .home-page-container .home-composer-box > .home-composer-textarea {
     padding-inline: var(--sp-3);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home-page-container .home-workspace-badge-btn,
+  .home-page-container .home-composer-box {
+    transition: none;
   }
 }

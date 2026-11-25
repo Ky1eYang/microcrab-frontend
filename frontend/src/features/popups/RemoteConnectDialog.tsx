@@ -1,3 +1,4 @@
+import { referenceLabels } from "../referenceLabels";
 import { useEffect, useRef, useState } from "react";
 import { useApp, useAppStore } from "../../state";
 import { hostReadiness } from "../../state/host-readiness";
@@ -305,7 +306,7 @@ export function RemoteConnectDialog() {
                     <code>{project.root || "."}</code>
                     {project.host_id && (
                       <code data-testid="host-fixed-identity">
-                        {project.host_id}
+                        {referenceLabels("host", state.projects.map((row) => row.host_id))(project.host_id)}
                       </code>
                     )}
                     {project.workspace_id && (

@@ -6,12 +6,13 @@ import {
   selectedModelRequests,
 } from "./trajectoryTiming";
 import type { FeatureBlock } from "./shared";
-import type {
-  AuditAttempt,
-  AuditResponse,
-  AuditTimeline,
-  AuditStage,
-  AuditScope,
+import {
+  isAncestryBudgetError,
+  type AuditAttempt,
+  type AuditResponse,
+  type AuditTimeline,
+  type AuditStage,
+  type AuditScope,
 } from "./RequestAudit";
 
 interface AssistantRecords {
@@ -234,7 +235,15 @@ export function useInternalAssistantAudit(
                   stages: [],
                 },
           );
-          setError(`内部助手审计读取失败：${String(failure)}`);
+          if (isAncestryBudgetError(failure)) {
+            setError("正在后台验证历史检查点链，稍后自动重试…");
+            requested = null;
+            setTimeout(() => {
+              if (active && !running) void read();
+            }, 1500);
+          } else {
+            setError(`内部助手审计读取失败：${String(failure)}`);
+          }
         }
       } finally {
         running = false;

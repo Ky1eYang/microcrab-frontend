@@ -5,6 +5,7 @@ import { useApp } from "../../state";
 import { t } from "../../i18n";
 import { registerDocumentLeave } from "../../client/document-leave";
 import {
+  DEFAULT_AGENT_WASM_FUEL,
   LIMIT_FIELDS,
   PROMPT_FIELDS,
   validateSettingsOverrides,
@@ -108,7 +109,8 @@ function settingsSection(path: string): ProjectSettingsSection | undefined {
     PROMPT_FIELDS.some((name) => name === field)
   )
     return "prompts";
-  if (field === "agent" || field === "mode") return "agents";
+  if (field === "agent" || field === "mode" || field === "agent_wasm_fuel")
+    return "agents";
 }
 
 /** Each scope has its own CAS record. Saving defaults never applies to live Sessions. */
@@ -257,6 +259,22 @@ export function OwnerSettings({
       const next = { ...draft };
       for (const field of PROMPT_FIELDS)
         if (scope.kind === "session" || next[field] == null) delete next[field];
+      if (scope.kind !== "project") {
+        delete next.agent_wasm_fuel;
+      } else if (next.agent_wasm_fuel !== undefined) {
+        if (
+          !Number.isSafeInteger(next.agent_wasm_fuel) ||
+          next.agent_wasm_fuel < 1
+        )
+          throw Error(
+            `settings.agent_wasm_fuel: ${t("settingsUX.positiveInteger")}`,
+          );
+        const maxFuel = snapshot.constraints.agent_wasm_fuel_max;
+        if (maxFuel !== undefined && next.agent_wasm_fuel > maxFuel)
+          throw Error(
+            `settings.agent_wasm_fuel: ${t("settingsUX.maximum", { value: maxFuel })}`,
+          );
+      }
       if (draft.permissions !== undefined) {
         try {
           next.permissions = JSON.parse(rules);
@@ -553,6 +571,160 @@ export function OwnerSettings({
                   {source("mode")}
                 </div>
               </div>
+              {scope.kind === "project" && (() => {
+                const defaultFuel =
+                  snapshot.constraints.agent_wasm_fuel_default ??
+                  DEFAULT_AGENT_WASM_FUEL;
+                const maxFuel =
+                  snapshot.constraints.agent_wasm_fuel_max ?? defaultFuel;
+                const effectiveFuel =
+                  snapshot.effective.agent_wasm_fuel ?? defaultFuel;
+                const sourceKey = snapshot.sources["agent_wasm_fuel"] ?? "admin";
+                const savedOverMax =
+                  snapshot.overrides.agent_wasm_fuel !== undefined &&
+                  snapshot.overrides.agent_wasm_fuel > maxFuel;
+                const activeSession = state.sessions.find(
+                  (row) => row.id === state.sessionId,
+                );
+                const projectHasActiveSession =
+                  activeSession?.projectID === scope.id;
+                const customMode = draft.agent_wasm_fuel !== undefined;
+                return (
+                  <div
+                    className="settings-subpanel"
+                    data-testid="project-agent-wasm-fuel-section"
+                  >
+                    <div className="limit-tile-top">
+                      <span className="settings-form-label">
+                        {t("ownerSettings.agentWasmFuel.label")}
+                      </span>
+                      <span className="limit-source-pill">
+                        {customMode
+                          ? t("ownerSettings.source.project")
+                          : t("ownerSettings.agentWasmFuel.inheritOption")}
+                      </span>
+                    </div>
+                    <p className="settings-description">
+                      {t("ownerSettings.agentWasmFuel.hint")}
+                    </p>
+                    <div className="settings-form-grid">
+                      <label className="settings-form-group">
+                        <span className="settings-form-label">
+                          {t("ownerSettings.agentWasmFuel.modeLabel")}
+                        </span>
+                        <select
+                          className="settings-input"
+                          disabled={busy}
+                          data-testid="project-agent-wasm-fuel-mode"
+                          value={customMode ? "custom" : "inherit"}
+                          onChange={(e) => {
+                            if (e.target.value === "inherit") {
+                              change("agent_wasm_fuel", undefined);
+                            } else {
+                              change(
+                                "agent_wasm_fuel",
+                                effectiveFuel <= maxFuel ? effectiveFuel : maxFuel,
+                              );
+                            }
+                          }}
+                        >
+                          <option value="inherit">
+                            {t("ownerSettings.agentWasmFuel.inheritOption")} (
+                            {defaultFuel})
+                          </option>
+                          <option value="custom">
+                            {t("ownerSettings.agentWasmFuel.customOption")}
+                          </option>
+                        </select>
+                      </label>
+                      {customMode && (
+                        <label className="settings-form-group">
+                          <span className="settings-form-label">
+                            {t("ownerSettings.agentWasmFuel.overrideLabel")}
+                          </span>
+                          <input
+                            className="settings-input"
+                            disabled={busy}
+                            data-testid="project-agent-wasm-fuel"
+                            data-validation-path="settings.agent_wasm_fuel"
+                            type="number"
+                            min={1}
+                            max={maxFuel}
+                            step="1"
+                            value={
+                              Number.isNaN(draft.agent_wasm_fuel)
+                                ? ""
+                                : (draft.agent_wasm_fuel ?? "")
+                            }
+                            onChange={(e) =>
+                              change(
+                                "agent_wasm_fuel",
+                                e.target.value === ""
+                                  ? Number.NaN
+                                  : Number(e.target.value),
+                              )
+                            }
+                          />
+                        </label>
+                      )}
+                    </div>
+                    <div className="limit-tile-meta">
+                      <span>
+                        {t("ownerSettings.effective", {
+                          value: effectiveFuel,
+                          source: t(`ownerSettings.source.${sourceKey}`),
+                        })}
+                      </span>
+                      <span>
+                        {t("ownerSettings.agentWasmFuel.bounds", {
+                          defaultValue: defaultFuel,
+                          maximum: maxFuel,
+                        })}
+                      </span>
+                    </div>
+                    {savedOverMax && (
+                      <p
+                        className="inline-notice"
+                        role="alert"
+                        data-testid="project-agent-wasm-fuel-over-max"
+                      >
+                        {t("ownerSettings.agentWasmFuel.overMaxWarning", {
+                          saved: snapshot.overrides.agent_wasm_fuel ?? effectiveFuel,
+                          maximum: maxFuel,
+                        })}
+                      </p>
+                    )}
+                    {projectHasActiveSession && (
+                      <p
+                        className="settings-description"
+                        data-testid="project-agent-wasm-fuel-live-note"
+                      >
+                        {t("ownerSettings.agentWasmFuel.liveSessionNote")}
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
+              {scope.kind === "session" && (
+                <div
+                  className="settings-subpanel"
+                  data-testid="session-agent-wasm-fuel"
+                >
+                  <div className="settings-form-label">
+                    {t("ownerSettings.agentWasmFuel.label")}
+                  </div>
+                  <p className="settings-description">
+                    {t("ownerSettings.agentWasmFuel.sessionReadOnly", {
+                      live:
+                        snapshot.effective.agent_wasm_fuel ??
+                        DEFAULT_AGENT_WASM_FUEL,
+                      desired:
+                        snapshot.desired_effective.agent_wasm_fuel ??
+                        DEFAULT_AGENT_WASM_FUEL,
+                    })}
+                  </p>
+                </div>
+              )}
               {scope.kind === "session" &&
                 state.publicState?.mode_prompt !== undefined && (
                   <div className="settings-subpanel">

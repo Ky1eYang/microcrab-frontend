@@ -3,6 +3,11 @@ import { messageBlocks } from "./native-message-blocks";
 import { createBlock } from "./create-block";
 import { settledToolStatus } from "./tool-outcome";
 import {
+  responseCompletionTime,
+  responseHistoryScope,
+  responseIdentity,
+} from "./response-completion";
+import {
   callOccurrenceKey,
   mergeDisplayExecution,
   preferDisplayExecution,
@@ -36,6 +41,7 @@ export interface DisplayGraphNode {
     canonical_source_id: string;
     message: import("./types").NativeMessage;
   };
+  canonicalResponseScope?: string;
   terminal?: "validated" | "invalidated";
   invalid?: boolean;
 }
@@ -50,11 +56,16 @@ export interface DisplayGraphState {
       tool_call_ids: string[];
       producer_block_ids: string[];
       message: import("./types").NativeMessage;
+      completion?: { time: number; scope: string };
     }
   >;
   remaps?: Record<
     string,
-    { canonical_message_id: string; message: import("./types").NativeMessage }
+    {
+      canonical_message_id: string;
+      message: import("./types").NativeMessage;
+      completion?: { time: number; scope: string };
+    }
   >;
   terminalSequences?: Record<string, number>;
   terminalTotals?: Record<string, { reasoning?: number; text?: number }>;
@@ -86,6 +97,7 @@ interface GraphWork {
   blocks?: Block[];
   indexes: Map<string, number>;
   attempts: Map<string, Set<string>>;
+  bindingAttempts: Map<string, string>;
   selected: Set<string>;
   connected?: boolean;
   status?: Transcript["sessionStatus"];
@@ -128,6 +140,12 @@ function dirtyGraph(graph: DisplayGraphState): GraphWork {
       structural: true,
       indexes: new Map(),
       attempts: new Map(),
+      bindingAttempts: new Map(
+        Object.entries(graph.bindings ?? {}).map(([attempt, binding]) => [
+          binding.canonical_source_id,
+          attempt,
+        ]),
+      ),
       selected: new Set(),
     };
     for (const node of Object.values(graph.nodes)) {
@@ -261,11 +279,25 @@ export function observeDisplayGraph(
           typeof mapping.canonical_message_id === "string" &&
           mapping.message?.id === mapping.canonical_message_id &&
           mapping.message.canonical_source_id === mapping.canonical_source_id
-        )
+        ) {
+          const prior = graph.remaps?.[mapping.canonical_source_id];
+          const time =
+            mapping.message.role === "assistant"
+              ? responseCompletionTime(mapping.message.response_completed_at_ms)
+              : undefined;
+          const incoming =
+            time === undefined
+              ? undefined
+              : { time, scope: responseHistoryScope(transcript.historyView) };
           (graph.remaps ??= {})[mapping.canonical_source_id] = {
             canonical_message_id: mapping.canonical_message_id,
             message: mapping.message,
+            completion:
+              prior?.canonical_message_id === mapping.canonical_message_id
+                ? (prior.completion ?? incoming)
+                : incoming,
           };
+        }
       }
     }
     dirtyGraph(graph).structural = true;
@@ -273,10 +305,16 @@ export function observeDisplayGraph(
     return true;
   }
   if (event.phase === "display_binding") {
+    // A canonical source belongs to one producer in this Session. Duplicate
+    // bindings may add missing metadata but may not move it to another attempt.
     if (
       typeof event.producer_call_id === "string" &&
+      !!event.producer_call_id &&
+      event.producer_call_id === attemptId &&
       typeof event.canonical_message_id === "string" &&
+      !!event.canonical_message_id &&
       typeof event.canonical_source_id === "string" &&
+      !!event.canonical_source_id &&
       Array.isArray(event.tool_call_ids) &&
       event.tool_call_ids.every((id) => typeof id === "string") &&
       Array.isArray(event.producer_block_ids) &&
@@ -284,22 +322,43 @@ export function observeDisplayGraph(
       event.message &&
       typeof event.message === "object"
     ) {
-      const binding = {
-        canonical_message_id: event.canonical_message_id,
-        canonical_source_id: event.canonical_source_id,
-        tool_call_ids: event.tool_call_ids as string[],
-        producer_block_ids: event.producer_block_ids as string[],
-        message: event.message as import("./types").NativeMessage,
-      };
-      const prior = graph.bindings?.[event.producer_call_id];
-      if (!prior || JSON.stringify(prior) === JSON.stringify(binding))
-        (graph.bindings ??= {})[event.producer_call_id] = binding;
+      const message = event.message as import("./types").NativeMessage;
+      if (
+        message.role === "assistant" &&
+        message.id === event.canonical_message_id &&
+        message.canonical_source_id === event.canonical_source_id
+      ) {
+        const binding = {
+          canonical_message_id: event.canonical_message_id,
+          canonical_source_id: event.canonical_source_id,
+          tool_call_ids: event.tool_call_ids as string[],
+          producer_block_ids: event.producer_block_ids as string[],
+          message,
+        };
+        const attempt = event.producer_call_id;
+        const prior = graph.bindings?.[attempt];
+        const owners = dirtyGraph(graph).bindingAttempts;
+        const time = responseCompletionTime(event.response_completed_at_ms);
+        const completion =
+          time === undefined
+            ? undefined
+            : { time, scope: responseHistoryScope(transcript.historyView) };
+        if (!prior && !owners.has(binding.canonical_source_id)) {
+          owners.set(binding.canonical_source_id, attempt);
+          (graph.bindings ??= {})[attempt] = { ...binding, completion };
+        } else if (prior && completion && !prior.completion) {
+          const { completion: _, ...previousBinding } = prior;
+          if (JSON.stringify(previousBinding) === JSON.stringify(binding))
+            graph.bindings![attempt] = { ...prior, completion };
+        }
+      }
     }
     dirtyGraph(graph).structural = true;
     if (compose) composeDisplayGraph(transcript);
     return true;
   }
   if (source) {
+    if (attemptId !== undefined && source.attempt_id !== attemptId) return true;
     if (!graph.nodes[source.block_id]) {
       const withoutPlaceholders = transcript.blocks.filter(
         (block) =>
@@ -402,14 +461,20 @@ export function observeDisplayGraph(
         typeof content.canonical_message_id === "string" &&
         typeof content.canonical_source_id === "string" &&
         content.message &&
-        typeof content.message.id === "string"
+        content.message.id === content.canonical_message_id &&
+        content.message.canonical_source_id === content.canonical_source_id
       ) {
         if (
           node.canonical &&
           JSON.stringify(node.canonical) !== JSON.stringify(content)
         )
           node.invalid = true;
-        else node.canonical = content;
+        else if (!node.canonical) {
+          node.canonical = content;
+          node.canonicalResponseScope = responseHistoryScope(
+            transcript.historyView,
+          );
+        }
       } else node.invalid = true;
     }
     node.terminal ??= graph.terminals?.[source.attempt_id];
@@ -663,6 +728,8 @@ export function composeDisplayGraph(
         ...prior,
         operationId: node.block.operationId,
         position: node.block.position,
+        responseAdmission: "preview",
+        responseCompletedAtMs: undefined,
         payload: {
           ...prior.payload,
           text: content.text,
@@ -733,6 +800,27 @@ export function composeDisplayGraph(
   }
   graph.incomplete = !complete;
   const prior = transcript.blocks;
+  const completionScope = responseHistoryScope(transcript.historyView);
+  const selectedCanonicalTimes = transcript.canonicalResponseTimes;
+  const canonicalBindings = new Map<
+    string,
+    { attempt: string; time: number }
+  >();
+  for (const [attempt, binding] of Object.entries(graph.bindings ?? {})) {
+    if (binding.completion?.scope !== completionScope) continue;
+    const exact = responseIdentity(
+      binding.canonical_message_id,
+      binding.canonical_source_id,
+    );
+    if (exact && !graph.remaps?.[binding.canonical_source_id])
+      canonicalBindings.set(exact, { attempt, time: binding.completion.time });
+  }
+  const selectedTime = (exact: string | undefined) =>
+    exact ? selectedCanonicalTimes?.get(exact) : undefined;
+  const bindingTime = (exact: string | undefined, attempt?: string) => {
+    const bound = exact ? canonicalBindings.get(exact) : undefined;
+    return attempt && bound?.attempt !== attempt ? undefined : bound?.time;
+  };
   // An input certificate can precede RoundStarted. Hydrate its later recorded
   // position only through the exact canonical source, preserving unknown until then.
   const canonicalPositions = new Map(
@@ -744,9 +832,25 @@ export function composeDisplayGraph(
   );
   const retained = complete
     ? []
-    : placement.filter(
-        (block) => block.displayGraphId && !visited.has(block.displayGraphId),
-      );
+    : placement.flatMap((block) => {
+        if (!block.displayGraphId || visited.has(block.displayGraphId))
+          return [];
+        // An incomplete walk preserves placement, not timing authority for an
+        // unproven ancestor. A current canonical row may still prove its time.
+        const exact = responseIdentity(
+          block.messageId,
+          block.canonicalSourceId,
+        );
+        const time =
+          block.responseAdmission === "admitted"
+            ? selectedTime(exact)
+            : undefined;
+        return [
+          block.responseCompletedAtMs === time
+            ? block
+            : { ...block, responseCompletedAtMs: time },
+        ];
+      });
   const projected: Block[] = [];
   const exactCalls = new Map<string, Block>();
   const settledCalls = new Set<Block>();
@@ -827,9 +931,12 @@ export function composeDisplayGraph(
   for (const node of chronological) {
     if (node.canonical) {
       coveredSources.add(node.canonical.canonical_source_id);
-      const canonicalMessage =
-        graph.remaps?.[node.canonical.canonical_source_id]?.message ??
-        node.canonical.message;
+      const remap = graph.remaps?.[node.canonical.canonical_source_id];
+      const canonicalMessage = remap?.message ?? node.canonical.message;
+      const exact = responseIdentity(
+        canonicalMessage.id,
+        canonicalMessage.canonical_source_id,
+      );
       coveredMessages.push(canonicalMessage);
       const rows = cachedMessageBlocks(
         graph.sessionId,
@@ -843,6 +950,19 @@ export function composeDisplayGraph(
             : `${node.identity.block_id}:${row.partId}`;
         row.displayGraphId = node.identity.block_id;
         row.canonicalSourceId = node.canonical.canonical_source_id;
+        if (row.responseAdmission === "admitted") {
+          const archivedTime =
+            node.canonicalResponseScope === completionScope
+              ? row.responseCompletedAtMs
+              : undefined;
+          row.responseCompletedAtMs =
+            selectedTime(exact) ??
+            (remap
+              ? remap.completion?.scope === completionScope
+                ? remap.completion.time
+                : undefined
+              : (archivedTime ?? bindingTime(exact, node.identity.attempt_id)));
+        }
         row.position =
           canonicalPositions.get(row.canonicalSourceId) ?? row.position;
         if (row.role === "tool") {
@@ -850,17 +970,24 @@ export function composeDisplayGraph(
           const call = exact
             ? exactCalls.get(exact)
             : row.displayExecutionId == null
-              ? [...projected].reverse().find(
-                  (candidate) =>
-                    (candidate.kind === "tool" || candidate.kind === "child") &&
-                    candidate.callId === row.callId &&
-                    candidate.role === "assistant" &&
-                    !settledCalls.has(candidate),
-                )
+              ? [...projected]
+                  .reverse()
+                  .find(
+                    (candidate) =>
+                      (candidate.kind === "tool" ||
+                        candidate.kind === "child") &&
+                      candidate.callId === row.callId &&
+                      candidate.role === "assistant" &&
+                      !settledCalls.has(candidate),
+                  )
               : undefined;
           if (call) {
             if (exact) {
-              mergeDisplayExecution(call, row.displayExecutionId, row.displayExecutionStatus);
+              mergeDisplayExecution(
+                call,
+                row.displayExecutionId,
+                row.displayExecutionStatus,
+              );
               registerCall(call);
             }
             // A selected call occurrence consumes one result, as in snapshot projection.
@@ -870,7 +997,9 @@ export function composeDisplayGraph(
             call.payload = {
               ...call.payload,
               text: row.payload.text,
+              toolPresentation: row.payload.toolPresentation,
               structured: row.payload.structured,
+              attachments: row.payload.attachments,
             };
             call.tool = { ...call.tool, status: settledToolStatus(call) };
             call.displaySourceIds = [
@@ -904,7 +1033,13 @@ export function composeDisplayGraph(
       : body(node);
     // Graph identity without a received body is coverage evidence, not a tool card.
     if (!content.present) continue;
-    const block: Block = { ...node.block, payload: { ...node.block.payload } };
+    const invalidContent = segments.some((segment) => segment.invalid === true);
+    const block: Block = {
+      ...node.block,
+      payload: { ...node.block.payload },
+      responseAdmission: "preview",
+      responseCompletedAtMs: undefined,
+    };
     if (toolNode) {
       // Producer rows may be reused after a remap; call slots and historical
       // numbers are derived again from the currently selected binding below.
@@ -938,6 +1073,7 @@ export function composeDisplayGraph(
     const binding =
       sourceBinding && remap ? { ...sourceBinding, ...remap } : sourceBinding;
     if (binding) {
+      let admittedFragment = !toolNode;
       if (toolNode) {
         const index = Number(
           /^tool:(\d+)$/.exec(node.identity.stream_key)?.[1],
@@ -949,14 +1085,17 @@ export function composeDisplayGraph(
         if (
           acceptedCall &&
           segments.every(
-            (segment) => !segment.toolCallId || segment.toolCallId === acceptedCall.id,
+            (segment) =>
+              !segment.toolCallId || segment.toolCallId === acceptedCall.id,
           ) &&
           binding.tool_call_ids.includes(acceptedCall.id)
         ) {
+          admittedFragment = true;
           block.toolCallIndex = index;
           block.callId = acceptedCall.id;
           block.tool = {
             ...block.tool,
+            presentation: acceptedCall.presentation,
             callId: acceptedCall.id,
             name: acceptedCall.name,
           };
@@ -966,6 +1105,20 @@ export function composeDisplayGraph(
       coveredSources.add(binding.canonical_source_id);
       block.messageId = binding.canonical_message_id;
       block.canonicalSourceId = binding.canonical_source_id;
+      if (admittedFragment && !invalidContent) {
+        block.responseAdmission = "admitted";
+        const exact = responseIdentity(
+          binding.canonical_message_id,
+          binding.canonical_source_id,
+        );
+        block.responseCompletedAtMs =
+          selectedTime(exact) ??
+          (remap
+            ? remap.completion?.scope === completionScope
+              ? remap.completion.time
+              : undefined
+            : bindingTime(exact, node.identity.attempt_id));
+      }
       const canonical = cachedMessageBlocks(
         graph.sessionId,
         binding.message,
@@ -985,6 +1138,14 @@ export function composeDisplayGraph(
           block.payload = {
             ...block.payload,
             providerMetadata: canonical.payload.providerMetadata,
+            ...(canonical.position?.epoch != null && !remap
+              ? {
+                  auditSchemaSelector: {
+                    epoch: canonical.position.epoch,
+                    call_id: node.identity.attempt_id,
+                  },
+                }
+              : {}),
           };
           mergeDisplayExecution(
             block,
@@ -1008,7 +1169,6 @@ export function composeDisplayGraph(
         }
       }
     } else block.payload.text = content.text;
-    const invalidContent = segments.some((segment) => segment.invalid === true);
     block.validated =
       !invalidContent &&
       (admittedTool ||
@@ -1034,7 +1194,8 @@ export function composeDisplayGraph(
   const windowStart = transcript.displayWindowBounded
     ? projected.findIndex(
         (block) =>
-          loadedSources.has(block.canonicalSourceId) ||
+          (block.canonicalSourceId != null &&
+            loadedSources.has(block.canonicalSourceId)) ||
           (block.displaySourceIds ?? []).some((source: string) =>
             loadedSources.has(source),
           ),
@@ -1095,7 +1256,8 @@ export function composeDisplayGraph(
       !block.displayGraphId &&
       !(
         block.temporary &&
-        block.role === "user" && isDirectUserSource(block.payload.source) &&
+        block.role === "user" &&
+        isDirectUserSource(block.payload.source) &&
         block.sessionId === graph.sessionId &&
         admittedSubmissions.has(block.operationId ?? "")
       ) &&
@@ -1115,6 +1277,14 @@ export function composeDisplayGraph(
               message.position?.round === block.position?.round,
           )),
   );
+  for (const [index, block] of fallback.entries()) {
+    if (block.responseAdmission !== "admitted") continue;
+    const exact = responseIdentity(block.messageId, block.canonicalSourceId);
+    if (!exact || !selectedCanonicalTimes?.has(exact)) continue;
+    const time = selectedTime(exact) ?? bindingTime(exact);
+    if (block.responseCompletedAtMs !== time)
+      fallback[index] = { ...block, responseCompletedAtMs: time };
+  }
   const anchorIndex = (block: Block) => {
     const exact = placement.findIndex((candidate) => candidate.id === block.id);
     if (exact >= 0) return exact;

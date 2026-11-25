@@ -1,9 +1,8 @@
-/* Modern WebKit & Firefox Scrollbars (DSH Parity) */
-@supports not selector(::-webkit-scrollbar) {
-  * {
-    scrollbar-width: thin;
-    scrollbar-color: var(--scrollbar-thumb) transparent;
-  }
+/* Standard scrollbars with 3:1 thumb contrast from tokens.css. */
+:root,
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 
 /* [!important] Stable vertical scrollbar slot.
@@ -25,35 +24,13 @@
 .todo-panel-body {
   scrollbar-gutter: stable;
 }
-::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
-}
-
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-  border-radius: var(--r-full);
-  background: var(--scrollbar-thumb);
-  background-clip: content-box;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background-color: var(--scrollbar-thumb-hover);
-}
-
-::-webkit-scrollbar-corner {
-  background: transparent;
-}
 
 .shell {
   display: flex;
   flex-direction: row;
-  height: 100vh;
-  min-height: 100vh;
-  width: 100vw;
+  height: 100dvh;
+  min-height: 100dvh;
+  width: 100dvw;
   overflow: hidden;
   background: var(--bg);
 }
@@ -74,7 +51,7 @@
   position: relative;
   z-index: var(--z-header);
   height: auto;
-  min-height: 44px;
+  min-height: 46px;
   display: flex;
   flex-direction: column;
   border-bottom: 1px solid var(--border);
@@ -105,8 +82,8 @@
 .session-rail {
   display: flex;
   flex-direction: column;
-  height: 100vh;
-  min-height: 100vh;
+  height: 100dvh;
+  min-height: 100dvh;
   background: var(--bg-subtle);
   border-right: 1px solid var(--border);
   box-sizing: border-box;
@@ -130,8 +107,8 @@
 .session-rail.expanded-rail {
   width: 260px;
   min-width: 260px;
-  padding: 12px;
-  gap: 8px;
+  padding: 14px 12px;
+  gap: 10px;
 }
 
 /* Collapsed rail action buttons */
@@ -244,10 +221,10 @@
 
 .session-rail-new-btn {
   width: 100%;
-  border: 1px solid var(--control-border);
+  border: 1px solid var(--border-strong);
   border-radius: var(--r-md);
   padding: 8px 12px;
-  background: var(--bg-muted);
+  background: var(--surface);
   color: var(--text);
   font-family: inherit;
   font-weight: 500;
@@ -257,17 +234,18 @@
   align-items: center;
   gap: 8px;
   cursor: pointer;
+  box-shadow: var(--shadow-card);
   transition: background-color var(--dur-fast) ease,
     border-color var(--dur-fast) ease, color var(--dur-fast) ease;
 }
 
 .session-rail-new-btn:hover {
-  background: var(--surface);
-  border-color: var(--text-2);
+  background: var(--bg-muted);
+  border-color: var(--control-border);
 }
 
 .session-rail-new-btn[data-active="true"] {
-  background: var(--surface);
+  background: var(--bg-muted);
   border-color: var(--control-border);
   font-weight: 600;
 }
@@ -352,10 +330,11 @@
 }
 
 .rail-section-title {
-  font-size: var(--fs-xs);
+  font-size: var(--fs-2xs);
   font-weight: 600;
-  color: var(--text-2);
-  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  letter-spacing: 0.06em;
 }
 
 .rail-section-header-actions {
@@ -755,6 +734,25 @@
   flex: 1;
 }
 
+/* Narrow: long toasts clamp to two lines; tap the text to read all of it. */
+@media (max-width: 767.98px) {
+  .toast-body[data-expanded="false"] {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+    cursor: pointer;
+    padding-bottom: 0;
+    margin-bottom: 10px;
+  }
+
+  .toast-body[data-expanded="true"] {
+    max-height: 40dvh;
+    overflow-y: auto;
+  }
+}
+
 .toast-close {
   background: transparent;
   border: none;
@@ -785,21 +783,26 @@
   background: var(--overlay);
   display: grid;
   place-items: center;
+  overscroll-behavior: contain;
   z-index: var(--z-modal);
 }
 
 .dialog {
-  width: min(680px, calc(100vw - 48px));
+  width: min(680px, calc(100dvw - 48px));
+  max-block-size: calc(100dvh - 48px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  padding: 18px;
+  border: 1px solid var(--border-strong);
+  border-radius: 14px;
+  padding: 20px;
   box-shadow: var(--shadow-modal);
 }
 
 .dialog h2 {
   margin: 0 0 12px;
   font-size: var(--fs-lg);
+  text-wrap: balance;
 }
 
 .dialog-actions {
@@ -1205,19 +1208,34 @@
     width: 100%;
   }
 
-  .session-rail.collapsed-rail {
-    width: 48px;
-    min-width: 48px;
-    padding: var(--sp-2) var(--sp-1);
-  }
-
+  .shell,
   .shell[data-left-collapsed] {
-    --left-rail-width: 48px;
+    --left-rail-width: 0px;
   }
 
-  .session-rail.collapsed-rail .rail-icon-btn {
-    width: 36px;
-    height: 36px;
+  .header-menu-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    width: 44px;
+    height: 44px;
+    margin-left: calc(-1 * var(--sp-2));
+    padding: 0;
+    border: 0;
+    border-radius: var(--r-md);
+    background: transparent;
+    color: var(--text);
+    cursor: pointer;
+  }
+
+  .header-menu-btn:hover {
+    background: var(--bg-muted);
+  }
+
+  .header-menu-btn:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: -2px;
   }
 
   .session-rail.rail-drawer {

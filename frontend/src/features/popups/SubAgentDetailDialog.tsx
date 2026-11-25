@@ -1,3 +1,4 @@
+import { referenceLabels } from "../referenceLabels";
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "../../state";
 import { createTranscript } from "../../client/projector";
@@ -15,6 +16,9 @@ import "../../styles/child-content.css";
 export function SubAgentDetailDialog() {
   const { state, dispatch } = useApp();
   const popup = state.popup;
+  const sessionLabel = referenceLabels("session", [
+    popup.parentId, popup.childId, ...(state.childList?.children ?? []).map((child) => child.id),
+  ]);
   const detail = popup.detail as NativeChildDetail | undefined;
   const [viewMode, setViewMode] = useState<"chat" | "trajectory">("chat");
   const transcript = useMemo(
@@ -117,7 +121,7 @@ export function SubAgentDetailDialog() {
                   parentId: popup.parentId,
                   childId: popup.childId,
                 }}
-                title={childText(detail.name) || popup.childId}
+                title={childText(detail.name) || sessionLabel(popup.childId)}
               />
             )}
           </div>

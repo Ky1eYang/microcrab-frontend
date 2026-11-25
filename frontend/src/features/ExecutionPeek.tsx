@@ -1,3 +1,4 @@
+import { toolReferenceProjection } from "./toolReferences";
 import {
   useEffect,
   useRef,
@@ -229,6 +230,7 @@ function ExecutionPeekContent({
   const content = (
     label: string,
     read: ReadState<Content>,
+    direction: "arguments" | "result",
     waiting = false,
   ) => (
     <section
@@ -245,6 +247,7 @@ function ExecutionPeekContent({
       {read.value?.available ? (
         <Payload
           value={read.value.content}
+          projection={toolReferenceProjection(read.value.content, live?.presentation, direction)}
           empty={t("execution.empty")}
           variant="trajectory"
         />
@@ -301,10 +304,11 @@ function ExecutionPeekContent({
             summary={live.failure?.message}
           />
         )}
-        {content(t("execution.arguments"), args)}
+        {content(t("execution.arguments"), args, "arguments")}
         {content(
           t("execution.result"),
           result,
+          "result",
           Boolean(live && pendingExecution(live)),
         )}
         <section

@@ -90,7 +90,7 @@ import RefreshRuntime from '/@react-refresh';
 RefreshRuntime.injectIntoGlobalHook(window); window.$RefreshReg$=()=>{}; window.$RefreshSig$=()=>type=>type; window.__vite_plugin_react_preamble_installed__=true;
 const {default:React}=await import('/node_modules/.vite/deps/react.js');
 const {default:ReactDOM}=await import('/node_modules/.vite/deps/react-dom_client.js');
-const {AppStore}=await import('/src/state/store.ts'); const {AppProvider}=await import('/src/state/context.tsx');
+const {AppStore}=await import('/src/state/store.ts'); const {AppProvider}=await import('/src/state/index.ts');
 const {WorkspacePicker}=await import('/src/features/home/WorkspacePicker/index.tsx'); const {PopupView}=await import('/src/features/popups.tsx');
 for (const style of ['client-plugins','plugins','tokens','chrome','components','interaction-polish','dashboard']) await import('/src/styles/' + style + '.css');
 const projects=${JSON.stringify(projects)}.map((project,index)=>index>=2?{...project,host_id:'host-2'}:project);

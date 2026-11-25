@@ -158,6 +158,81 @@ function owners(value: unknown, path: string) {
   }
 }
 
+export interface CurrentPermissionList {
+  runtime_instance_id: string;
+  catalog_revision: string;
+  policy_revision: string;
+  ancestor_witness: string;
+  agent: string;
+  mode: string;
+  tools: { name: string; policy: CompiledToolPolicy }[];
+}
+
+export interface CurrentPermissionResponse {
+  view: "current";
+  current: CurrentPermissionList;
+}
+
+export function validateCurrentPermissionResponse(
+  value: unknown,
+): asserts value is CurrentPermissionResponse {
+  const response = object(value, "permission", ["view", "current"]);
+  if (response.view !== "current")
+    throw Error("permission.view: expected current");
+  validateCurrentPermissions(response.current);
+}
+
+function validateCurrentPermissions(
+  value: unknown,
+): asserts value is CurrentPermissionList {
+  const row = object(value, "permission.current", [
+    "runtime_instance_id",
+    "catalog_revision",
+    "policy_revision",
+    "ancestor_witness",
+    "agent",
+    "mode",
+    "tools",
+  ]);
+  for (const field of ["runtime_instance_id", "ancestor_witness"]) {
+    const key = row[field];
+    text(key, `permission.current.${field}`, 256);
+    if (key.length === 0)
+      throw Error(`permission.current.${field}: expected a witness`);
+  }
+  for (const field of ["catalog_revision", "policy_revision"]) {
+    const revision = row[field];
+    if (
+      typeof revision !== "string" ||
+      !/^[1-9][0-9]{0,19}$/.test(revision) ||
+      (revision.length === 20 && revision > "18446744073709551615")
+    )
+      throw Error(
+        `permission.current.${field}: expected a positive u64 string`,
+      );
+  }
+  text(row.agent, "permission.current.agent", 128);
+  text(row.mode, "permission.current.mode", 128);
+  if (!Array.isArray(row.tools) || row.tools.length > 4096)
+    throw Error("permission.current.tools: expected a bounded tool list");
+  const seen = new Set<string>();
+  for (const [index, value] of row.tools.entries()) {
+    const path = `permission.current.tools[${index}]`;
+    const tool = object(value, path, ["name", "policy"]);
+    text(tool.name, `${path}.name`);
+    if (!tool.name || seen.has(tool.name))
+      throw Error(`${path}.name: expected a unique name`);
+    seen.add(tool.name);
+    if (
+      isRecord(tool.policy) &&
+      (Object.hasOwn(tool.policy, "owners") ||
+        Object.hasOwn(tool.policy, "tool"))
+    )
+      throw Error(`${path}.policy: management-only fields are not allowed`);
+    validateCompiledPolicy(tool.policy, `${path}.policy`);
+  }
+}
+
 export function validatePolicySnapshot(value: unknown): void {
   if (
     !isRecord(value) ||
@@ -166,6 +241,11 @@ export function validatePolicySnapshot(value: unknown): void {
   )
     throw Error("permission.revision: expected a nonnegative safe integer");
   validatePermissionConfig(value.config);
+  if (value.view === "management" && value.current !== undefined) {
+    validateCurrentPermissions(value.current);
+    if (value.current.policy_revision !== String(value.revision))
+      throw Error("permission.current: policy revision mismatch");
+  }
   if (value.tool_inventory == null) return;
   const inventory = value.tool_inventory;
   if (

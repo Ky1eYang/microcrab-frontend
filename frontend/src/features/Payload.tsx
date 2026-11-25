@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
+import type { JsonReaderSource } from "./content-inspection/JsonValueView";
 import { CodeText } from "./content-inspection/CodeText";
 import {
   ContentViewer,
@@ -31,6 +32,7 @@ export const PAYLOAD_COLLAPSE_PX = 320;
 export function Payload({
   label,
   value,
+  projection,
   testid,
   empty,
   status,
@@ -54,6 +56,8 @@ export function Payload({
   defaultFormat?: ContentFormat;
   label?: string;
   value: unknown;
+  /** Display-only source; exact evidence remains the existing value. */
+  projection?: { display: string; synthetic?: boolean; preservesJsonNodes?: boolean };
   testid?: string;
   empty?: string;
   status?: string;
@@ -68,10 +72,22 @@ export function Payload({
   const inDialog = useInContentDialog();
   const scroll = variant !== "default" || inDialog;
   const [dialogOpen, setDialogOpen] = useState(false);
-  const source = useMemo(() => sourceText(value), [value]);
+  const [exactSource, setExactSource] = useState<string>();
+  const evidence = useMemo(() => sourceText(value), [value]);
+  const canShowExact = Boolean(projection && !projection.synthetic);
+  const showExact = exactSource === evidence && canShowExact;
+  const source = useMemo(
+    () => (!showExact && projection ? projection.display : evidence),
+    [evidence, projection, showExact],
+  );
+  const jsonExact: JsonReaderSource | null | undefined = projection?.synthetic
+    ? null
+    : typeof value !== "string" ? { kind: "value", value }
+    : projection ? { kind: "text", text: evidence } : undefined;
+  const format = showExact ? "raw" : defaultFormat;
   const presentation = useMemo(
-    () => presentContent(source, defaultFormat),
-    [source, defaultFormat],
+    () => presentContent(source, format),
+    [source, format],
   );
   const { text } = presentation;
   const json = presentation.kind === "json";
@@ -125,6 +141,25 @@ export function Payload({
       setCopyFailed(true);
     }
   };
+  const exactLabel = t(showExact ? "references.compact" : "references.exact");
+  const toggleExact = () => {
+    setExactSource(showExact ? undefined : evidence);
+    setCopied(false);
+    setCopyFailed(false);
+  };
+  const exactToggle = canShowExact && (
+    <button
+      type="button"
+      className="payload-exact"
+      data-testid="payload-exact-toggle"
+      aria-pressed={showExact}
+      aria-label={exactLabel}
+      title={exactLabel}
+      onClick={toggleExact}
+    >
+      <Icon name="file-code" size={12} aria-hidden="true" focusable="false" />
+    </button>
+  );
   return (
     <>
       <section
@@ -152,16 +187,21 @@ export function Payload({
               </div>
             )}
             <ContentViewer
+              key={showExact ? "exact" : "formatted"}
               source={source}
-              serialized={typeof value !== "string"}
-              defaultFormat={defaultFormat}
+              serialized={!projection && typeof value !== "string"}
+              defaultFormat={format}
+              exactEvidence={showExact}
+              onToggleExact={canShowExact ? toggleExact : undefined}
+              jsonExact={jsonExact}
+              matchProjectedNodes={!projection || projection.preservesJsonNodes}
               title={label ?? dialogTitle}
               onEdit={onEdit}
               editValue={editValue}
               editContext={editContext}
               documentId={documentId}
               onObserve={onObserve}
-              allowedFormats={allowedFormats}
+              allowedFormats={showExact ? ["raw"] : allowedFormats}
               editDiagnostics={editDiagnostics}
               onValidateEdit={onValidateEdit}
               editNotice={editNotice}
@@ -172,16 +212,17 @@ export function Payload({
             <div ref={heading} className="payload-head">
               {label && <span className="payload-label">{label}</span>}
               <div className="payload-actions">
+                {exactToggle}
                 <button
                   type="button"
                   className="payload-copy"
-                  aria-label={copied ? t("content.copied") : t("content.copy")}
-                  title={copied ? t("content.copied") : t("content.copy")}
+                  aria-label={copied ? t("content.copied") : t(showExact ? "references.copyExact" : "content.copy")}
+                  title={copied ? t("content.copied") : t(showExact ? "references.copyExact" : "content.copy")}
                   onClick={() => void copy()}
                 >
                   <Icon name={copied ? "check" : "copy"} size={12} />
                 </button>
-                {(scroll || onEdit) && !inDialog && (
+                {(scroll || onEdit || (open && json)) && !inDialog && (
                   <button
                     type="button"
                     className="payload-dialog-expand"
@@ -241,6 +282,7 @@ export function Payload({
         >
           <Payload
             value={value}
+            projection={projection}
             label={label}
             status={status}
             variant="trajectory"

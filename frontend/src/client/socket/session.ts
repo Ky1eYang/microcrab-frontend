@@ -20,6 +20,54 @@ import type {
 } from "../types";
 
 const MAX_PENDING = 64;
+const MAX_RECOVERY_ATTEMPTS = 6;
+const MAX_RETRY_MS = 10_000;
+const STABLE_CONNECTION_MS = 5_000;
+let nextConnection = 0;
+
+type CloseCause =
+  | "stop"
+  | "selection_replaced"
+  | "resync"
+  | "refresh"
+  | "opening_timeout"
+  | "subscription_refused"
+  | "invalid_frame"
+  | "connection_error";
+export type SessionRecoveryStatus = "recovering" | "failed" | "forbidden";
+
+interface Handlers {
+  event: (event: NativeEvent) => void;
+  resubscribed?: (subscription: NativeSubscription) => void;
+  authRequired?: () => void;
+  recovery?: (status: SessionRecoveryStatus | null) => void;
+}
+
+function recoveryDelay(attempt: number) {
+  const ceiling = Math.min(1000 * 2 ** (attempt - 1), MAX_RETRY_MS);
+  return Math.round(ceiling * (0.5 + Math.random() * 0.5));
+}
+
+function mayRecover(error: unknown) {
+  return (
+    error instanceof CommandError &&
+    ([
+      "disconnected",
+      "timed_out",
+      "busy",
+      "temporarily_unavailable",
+      "unavailable",
+    ].includes(error.code) ||
+      (error.retryable &&
+        ![
+          "forbidden",
+          "permission_denied",
+          "unauthenticated",
+          "not_found",
+          "invalid_result",
+        ].includes(error.code)))
+  );
+}
 
 interface Pending {
   resolve: (value: any) => void;
@@ -40,15 +88,13 @@ export class SessionSocket {
   private subscription: NativeSubscription | null = null;
   private stopped = false;
   private ready = false;
-  private manualRefresh: Promise<NativeSubscription> | null = null;
+  private recovery: Promise<NativeSubscription> | null = null;
   private retry: ReturnType<typeof setTimeout> | undefined;
-  private failures = 0;
-  private handlers: {
-    event?: (event: NativeEvent) => void;
-    /** The reopened socket's barrier. Its sequence is the barrier, not an event. */
-    resubscribed?: (subscription: NativeSubscription) => void;
-    authRequired?: () => void;
-  } = {};
+  private attempts = 0;
+  private recoveryStatus: SessionRecoveryStatus | null = null;
+  private stableSince = 0;
+  private closeCurrent?: (cause: CloseCause, code?: number) => void;
+  private handlers!: Handlers;
 
   constructor(
     private readonly urlFor: (path: string) => string,
@@ -56,7 +102,24 @@ export class SessionSocket {
       display_watermark: number;
       history_lineage?: string;
     },
+    private readonly appliedBoundary?: (
+      subscription: NativeSubscription,
+    ) => { applied: number; watermark: number } | undefined,
   ) {}
+
+  get status() {
+    return this.recoveryStatus;
+  }
+
+  private setRecovery(status: SessionRecoveryStatus | null) {
+    if (this.recoveryStatus === status) return;
+    this.recoveryStatus = status;
+    this.handlers.recovery?.(status);
+  }
+
+  get selectedId() {
+    return this.subscription?.snapshot.session.id ?? null;
+  }
 
   private receivedBoundary() {
     // The advertised server high_water is availability, not client receipt.
@@ -74,78 +137,103 @@ export class SessionSocket {
   open(
     sessionId: string,
     query: { display_watermark: number; history_lineage?: string },
-    handlers: {
-      event: (event: NativeEvent) => void;
-      resubscribed?: (subscription: NativeSubscription) => void;
-      authRequired?: () => void;
-    },
+    handlers: Handlers,
   ): Promise<NativeSubscription> {
+    if (this.socket || this.retry !== undefined || this.recovery)
+      return Promise.reject(
+        new CommandError("busy", "Session subscription already in progress"),
+      );
     this.stopped = false;
-    this.ready = false;
     this.handlers = handlers;
-    clearTimeout(this.retry);
-    this.retry = undefined;
-    const previous = this.socket;
-    this.socket = null;
-    previous?.close();
-    const url = new URL(
-      this.urlFor(`api/v1/sessions/${encodeURIComponent(sessionId)}/ws`),
-    );
-    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-    url.searchParams.set("display_watermark", String(query.display_watermark));
-    if (query.history_lineage)
-      url.searchParams.set("history_lineage", query.history_lineage);
+    return this.start(sessionId, query);
+  }
+
+  private start(
+    sessionId: string,
+    query: ReturnType<SessionSocket["receivedBoundary"]>,
+  ) {
+    this.ready = false;
     return new Promise<NativeSubscription>((resolve, reject) => {
+      const url = new URL(
+        this.urlFor(`api/v1/sessions/${encodeURIComponent(sessionId)}/ws`),
+      );
+      url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+      url.searchParams.set(
+        "display_watermark",
+        String(query.display_watermark),
+      );
+      if (query.history_lineage)
+        url.searchParams.set("history_lineage", query.history_lineage);
       const socket = new WebSocket(url);
       this.socket = socket;
+      const connection = ++nextConnection;
+      const attempt = this.attempts;
+      let phase: "opening" | "open" | "initial_page" | "subscribed" = "opening";
+      let closeCause: CloseCause | undefined;
+      let failure: CommandError | undefined;
       let settled = false;
-      let established = false;
-      let diagnosticReported = false;
       let hasPage = false;
       let initial: NativeSubscription | null = null;
+      let receivedSequence: number | undefined;
+      let closedAt: { applied?: number; watermark: number } | undefined;
       let remaining = 0;
-      const fail = (error: Error) => {
-        if (settled) return;
-        settled = true;
-        if (!this.stopped && socket === this.socket && !diagnosticReported) {
-          diagnosticReported = true;
-          reportDiagnostic("session_socket", "subscribe", error);
-        } else silenceDiagnostic(error);
-        reject(error);
+      const cursor = () =>
+        (phase === "subscribed" && initial
+          ? this.appliedBoundary?.(initial)
+          : undefined) ?? {
+          applied: undefined,
+          watermark: query.display_watermark,
+        };
+      const close = (cause: CloseCause, code?: number) => {
+        if (closeCause) return;
+        closeCause = cause;
+        closedAt = cursor();
+        this.ready = false;
+        // A timed-out open cannot later become a valid attachment, even if
+        // its transport takes longer to emit the close event.
+        clearTimeout(opening);
+        socket.close(code);
       };
-      // The initial page is part of opening: a connected socket that never
-      // supplies its declared events must not leave navigation pending forever.
+      this.closeCurrent = close;
+      // The initial page is part of opening, not merely the HTTP upgrade.
       const opening = setTimeout(() => {
-        fail(
-          new CommandError("timed_out", "Session attachment timed out", true),
+        failure = new CommandError(
+          "timed_out",
+          "Session attachment timed out",
+          true,
         );
-        socket.close();
-      }, 60000);
+        close("opening_timeout");
+      }, 60_000);
+      socket.onopen = () => {
+        if (!closeCause) phase = "open";
+      };
       socket.onmessage = ({ data }) => {
-        if (socket !== this.socket) return;
+        if (socket !== this.socket || closeCause) return;
         const decoded = decodeFrame(data);
         if (!decoded.ok) {
-          diagnosticReported = true;
-          reportDiagnostic("session_socket", "decode", {
-            code: "invalid_result",
-            message: "Invalid Session WebSocket frame",
-            details: { close_code: decoded.closeCode, reason: decoded.reason },
-          });
-          socket.close(decoded.closeCode);
+          failure = new CommandError(
+            "invalid_result",
+            "Invalid Session WebSocket frame",
+            false,
+            false,
+            {
+              reason: decoded.reason,
+            },
+          );
+          close("invalid_frame", decoded.closeCode);
           return;
         }
         const frame = decoded.frame;
         if (!settled) {
           if (frame.type === "error") {
-            if (frame.error?.code === "unauthenticated")
-              this.handlers.authRequired?.();
-            fail(
-              new CommandError(
-                frame.error?.code ?? "unavailable",
-                frame.error?.message ?? "Session subscription refused",
-              ),
+            failure = new CommandError(
+              frame.error?.code ?? "unavailable",
+              frame.error?.message ?? "Session subscription refused",
+              frame.error?.retryable === true,
             );
-            socket.close();
+            close("subscription_refused");
+            if (failure.code === "unauthenticated")
+              this.handlers.authRequired?.();
             return;
           }
           if (initial) {
@@ -162,26 +250,21 @@ export class SessionSocket {
                 "history.reset",
               ].includes(frame.event)
             ) {
-              fail(
-                new CommandError(
-                  "invalid_result",
-                  "Invalid initial Session event sequence",
-                  true,
-                ),
+              failure = new CommandError(
+                "invalid_result",
+                "Invalid initial Session event sequence",
               );
-              socket.close(4002);
+              close("invalid_frame", 4002);
               return;
             }
+            receivedSequence = frame.sequence;
             const next = materialize(initial.snapshot, frame.event, frame.data);
             if (next.incomplete) {
-              fail(
-                new CommandError(
-                  "invalid_result",
-                  "Initial Session page omitted a block body",
-                  true,
-                ),
+              failure = new CommandError(
+                "invalid_result",
+                "Initial Session page omitted a block body",
               );
-              socket.close(4002);
+              close("invalid_frame", 4002);
               return;
             }
             hasPage ||= frame.event === "blocks.page";
@@ -189,96 +272,117 @@ export class SessionSocket {
             initial.sequence = frame.sequence;
             if (--remaining > 0) return;
             if (!hasPage) {
-              fail(
-                new CommandError(
-                  "invalid_result",
-                  "Initial Session events omitted the canonical page",
-                  true,
-                ),
+              failure = new CommandError(
+                "invalid_result",
+                "Initial Session events omitted the canonical page",
               );
-              socket.close(4002);
+              close("invalid_frame", 4002);
               return;
             }
             settled = true;
-            established = true;
+            phase = "subscribed";
             this.ready = true;
+            this.stableSince = performance.now();
             this.diagnostics.connected();
             clearTimeout(opening);
             this.subscription = initial;
-            this.failures = 0;
             resolve(initial);
             return;
           }
-          let subscription: NativeSubscription;
           try {
-            subscription = subscriptionOf(frame, sessionId);
+            initial = subscriptionOf(frame, sessionId);
           } catch (error) {
-            fail(error as Error);
-            socket.close(4002);
+            failure = error as CommandError;
+            close("invalid_frame", 4002);
             return;
           }
-          initial = subscription;
+          phase = "initial_page";
+          receivedSequence = initial.sequence;
           remaining = frame.initial_events;
-          if (remaining > 0) return;
-          settled = true;
-          established = true;
-          this.ready = true;
-          this.diagnostics.connected();
-          clearTimeout(opening);
-          this.subscription = subscription;
-          this.failures = 0;
-          resolve(subscription);
           return;
         }
         if (frame.type === "result") this.settle(frame);
-        else if (frame.type === "event" && validEvent(frame))
-          this.handlers.event?.(frame);
-        else socket.close(4002);
+        else if (frame.type === "event" && validEvent(frame)) {
+          if (
+            frame.session_id === sessionId &&
+            frame.subscription_id === initial?.subscription_id &&
+            frame.generation === initial.generation
+          )
+            receivedSequence = Math.max(receivedSequence ?? 0, frame.sequence);
+          this.handlers.event(frame);
+        } else close("invalid_frame", 4002);
       };
-      socket.onerror = () =>
-        fail(
-          new CommandError(
+      socket.onerror = () => {
+        // Browsers expose no underlying network error here. Keep the close
+        // code as separate evidence; do not guess the peer's initiator.
+        if (!settled && !closeCause) {
+          failure = new CommandError(
             "disconnected",
-            "WebSocket unavailable; sign in again if your session expired",
+            "Session WebSocket unavailable",
             true,
-          ),
-        );
-      socket.onclose = (event) => {
+          );
+          close("connection_error");
+        }
+      };
+      socket.onclose = ({ code }) => {
         clearTimeout(opening);
         const current = socket === this.socket;
+        const at = closedAt ?? cursor();
+        const intentional =
+          closeCause === "stop" ||
+          closeCause === "selection_replaced" ||
+          closeCause === "resync" ||
+          closeCause === "refresh";
+        const error =
+          failure ??
+          new CommandError("disconnected", "Session connection lost", true);
+        const evidence = {
+          code: closeCause === "invalid_frame" ? "invalid_result" : error.code,
+          message: intentional
+            ? "Session WebSocket closed by browser request"
+            : "Session WebSocket closed",
+          details: {
+            ...error.details,
+            connection,
+            close_code: code,
+            phase,
+            cause: closeCause ?? "no_local_close_request",
+            reason:
+              code === 1006 ? "abnormal_closure_no_close_frame" : "close_event",
+            attempt,
+            buffered_bytes: socket.bufferedAmount,
+            received_sequence: receivedSequence,
+            applied_sequence: at.applied,
+            display_watermark: at.watermark,
+          },
+        };
+        if (intentional)
+          reportDiagnostic(
+            "session_socket",
+            "close",
+            evidence,
+            undefined,
+            "info",
+          );
+        else this.diagnostics.failure("close", evidence);
         if (current) {
-          if (!this.stopped && !diagnosticReported) {
-            diagnosticReported = true;
-            this.diagnostics.failure("close", {
-              code: "disconnected",
-              message: "Session WebSocket closed unexpectedly",
-              details: {
-                close_code: event.code,
-                cause: event.reason,
-                phase: established ? "established" : "opening",
-                reason:
-                  event.code === 1006
-                    ? "abnormal_closure_no_close_frame"
-                    : "close_frame",
-                attempt: this.failures,
-                buffered_bytes: socket.bufferedAmount,
-              },
-            });
-          }
           this.socket = null;
+          this.closeCurrent = undefined;
           this.ready = false;
         }
-        if (!established) {
-          fail(new CommandError("disconnected", "Connection lost", true));
-          return;
+        if (!settled) {
+          if (intentional || attempt > 0) silenceDiagnostic(error);
+          reject(error);
         }
         if (!current) return;
         this.rejectPending();
-        if (!this.stopped && this.subscription)
-          this.retry = setTimeout(
-            () => this.reopen(sessionId),
-            Math.min(1000 * 2 ** this.failures++, 10000),
-          );
+        if (
+          settled &&
+          performance.now() - this.stableSince >= STABLE_CONNECTION_MS
+        )
+          this.attempts = 0;
+        if (this.continueAfterClose) this.continueAfterClose(!this.stopped);
+        else if (!this.stopped && settled) this.scheduleRecovery();
       };
     });
   }
@@ -321,7 +425,7 @@ export class SessionSocket {
       return Promise.reject(
         new CommandError(
           "disconnected",
-          "Connection is not ready; reconnect before sending",
+          "Not sent: the selected Session connection is not ready",
           true,
         ),
       );
@@ -382,38 +486,25 @@ export class SessionSocket {
   }
 
   /** Closes this socket. The server releases its subscription and executor lease. */
-  stop(reject = true) {
+  stop(cause: "stop" | "selection_replaced" = "stop") {
     this.stopped = true;
     this.ready = false;
     clearTimeout(this.retry);
     this.retry = undefined;
-    const socket = this.socket;
-    this.socket = null;
-    socket?.close();
-    if (reject) this.rejectPending();
-  }
-
-  /** Drops the live socket and opens a fresh subscription with the same
-   * watermark. A gap or `resync_required` is the only caller: the barrier
-   * view arrives through `resubscribed`, never as a synthetic event. */
-  reconnect() {
-    if (this.stopped || !this.subscription) return;
-    this.ready = false;
-    clearTimeout(this.retry);
-    this.retry = undefined;
-    const sessionId = this.subscription.snapshot.session.id;
-    const socket = this.socket;
-    this.socket = null;
+    this.closeCurrent?.(cause);
     this.rejectPending();
-    socket?.close();
-    this.reopen(sessionId);
   }
 
-  /** Explicit user refresh uses the same path and display watermark as gap
-   * recovery. It awaits the new canonical page and pending questions; it never
-   * borrows child authority or touches the global Host carrier. */
+  /** Coalesce resync signals and always wait for the old socket to close. */
+  reconnect() {
+    if (this.stopped || !this.subscription || !this.ready) return;
+    this.beginReplacement("resync");
+  }
+
+  /** Explicit refresh joins the in-flight observer or consumes the one retry
+   * timer. It never submits any pending command again. */
   refresh(): Promise<NativeSubscription> {
-    if (this.manualRefresh) return this.manualRefresh;
+    if (this.recovery) return this.recovery;
     if (this.stopped || !this.subscription)
       return Promise.reject(
         new CommandError(
@@ -422,58 +513,116 @@ export class SessionSocket {
           true,
         ),
       );
-    const previous = this.subscription;
-    this.ready = false;
+    if (this.afterClose) return this.afterClose;
+    if (this.ready) {
+      this.attempts = 0;
+      this.beginReplacement("refresh");
+      // The old connection must actually close before opening its replacement.
+      return this.afterClose!;
+    }
+    if (this.socket) {
+      // A network close may already be in flight before its event is delivered.
+      this.ready = false;
+      return this.waitForClose();
+    }
+    if (this.retry === undefined) this.attempts = 0;
     clearTimeout(this.retry);
     this.retry = undefined;
-    const socket = this.socket;
-    this.socket = null;
-    this.rejectPending();
-    socket?.close();
-    const refresh = this.open(
-      previous.snapshot.session.id,
-      this.receivedBoundary(),
-      this.handlers as { event: (event: NativeEvent) => void },
-    )
-      .then((subscription) => {
-        this.handlers.resubscribed?.(subscription);
-        return subscription;
-      })
-      .catch((error) => {
-        if (!this.stopped)
-          this.retry = setTimeout(
-            () => this.reopen(previous.snapshot.session.id),
-            1000,
-          );
-        throw error;
-      })
-      .finally(() => {
-        if (this.manualRefresh === refresh) this.manualRefresh = null;
-      });
-    this.manualRefresh = refresh;
-    return refresh;
+    return this.reopen();
   }
 
-  private reopen(sessionId: string) {
-    if (this.stopped) return;
-    void this.open(
-      sessionId,
-      this.receivedBoundary(),
-      this.handlers as { event: (event: NativeEvent) => void },
-    )
-      .then((subscription) => {
-        // `open` already installed the barrier. Its sequence is not an event:
-        // the next live frame is sequence + 1, so a synthetic snapshot would
-        // collide with it and be dropped as a duplicate.
+  private afterClose?: Promise<NativeSubscription>;
+  private continueAfterClose?: (resume: boolean) => void;
+
+  private waitForClose() {
+    const next = new Promise<NativeSubscription>((resolve, reject) => {
+      this.continueAfterClose = (resume) => {
+        this.continueAfterClose = undefined;
+        this.afterClose = undefined;
+        if (resume) this.reopen().then(resolve, reject);
+        else
+          reject(
+            new CommandError(
+              "disconnected",
+              "Session selection was closed",
+              true,
+            ),
+          );
+      };
+    });
+    this.afterClose = next;
+    // A resync may not have a manual caller waiting for its first attempt.
+    void next.catch(() => {});
+    return next;
+  }
+
+  private beginReplacement(cause: "resync" | "refresh") {
+    if (cause === "refresh") this.waitForClose();
+    this.closeCurrent?.(cause);
+    this.rejectPending();
+    this.setRecovery("recovering");
+  }
+
+  private scheduleRecovery() {
+    if (
+      this.stopped ||
+      this.retry !== undefined ||
+      this.attempts >= MAX_RECOVERY_ATTEMPTS
+    ) {
+      if (!this.stopped && this.attempts >= MAX_RECOVERY_ATTEMPTS)
+        this.setRecovery("failed");
+      return;
+    }
+    this.setRecovery("recovering");
+    this.retry = setTimeout(
+      () => {
+        this.retry = undefined;
+        void this.reopen().catch(() => {});
+      },
+      recoveryDelay(this.attempts + 1),
+    );
+  }
+
+  private reopen(): Promise<NativeSubscription> {
+    if (this.recovery) return this.recovery;
+    const sessionId = this.selectedId;
+    if (this.stopped || !sessionId)
+      return Promise.reject(
+        new CommandError("disconnected", "Session selection was closed", true),
+      );
+    this.attempts++;
+    this.setRecovery("recovering");
+    const opening = this.start(sessionId, this.receivedBoundary()).then(
+      (subscription) => {
+        if (this.stopped || !this.ready || this.subscription !== subscription)
+          throw new CommandError(
+            "disconnected",
+            "Session selection was closed",
+            true,
+          );
+        // The barrier sequence is not a synthetic event. Adopt it before the
+        // next live frame; buffered old bytes cannot advance this watermark.
         this.handlers.resubscribed?.(subscription);
-      })
-      .catch(() => {
-        if (this.stopped) return;
-        this.retry = setTimeout(
-          () => this.reopen(sessionId),
-          Math.min(1000 * 2 ** this.failures++, 10000),
+        this.setRecovery(null);
+        return subscription;
+      },
+    );
+    const attempt = opening.finally(() => {
+      if (this.recovery === attempt) this.recovery = null;
+    });
+    this.recovery = attempt;
+    void attempt.catch((error) => {
+      if (this.stopped) return;
+      if (mayRecover(error)) this.scheduleRecovery();
+      else
+        this.setRecovery(
+          error instanceof CommandError &&
+            ["forbidden", "permission_denied"].includes(error.code)
+            ? "forbidden"
+            : "failed",
         );
-      });
+    });
+    return attempt;
   }
 
   private settle(frame: Record<string, any>) {
@@ -502,7 +651,9 @@ export class SessionSocket {
       clearTimeout(value.timer);
       const error = new CommandError(
         "disconnected",
-        "Connection lost",
+        value.mutation
+          ? "Connection lost after sending; the command outcome is unknown"
+          : "Connection lost",
         true,
         value.mutation,
       );

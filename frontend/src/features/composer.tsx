@@ -1,5 +1,6 @@
 import { userTaskInputAllowed } from "../client/session-kind";
 import { Icon as PermissionIcon } from "../shell/Icon";
+import { ExpandableNotice } from "./ExpandableNotice";
 import { QueueDock } from "./composer/QueueDock";
 import { ComposerSurface } from "./composer/ComposerSurface";
 import {
@@ -71,6 +72,7 @@ export function Composer({
           "isCreatingSession",
           "compactInflight",
           "sessionRecoveryPending",
+          "sessionTransportRecovery",
           "sessionRecoveryUnknown",
           "agentInitRetryRequired",
           "autoCompactionRetryAvailable",
@@ -84,6 +86,7 @@ export function Composer({
           "historyTruncated",
           "agents",
           "draftAgent",
+          "draftAgentComponent",
           "draftMode",
           "draftModel",
           "userSessionDefaults",
@@ -120,7 +123,9 @@ export function Composer({
       element.setSelectionRange(element.value.length, element.value.length);
     }
   }, [state.composerFocusRequest, state.sessionId, child]);
-  const ready = state.connection === "ws" && !!state.authSession?.authenticated;
+  const connected = state.connection === "ws" && !!state.authSession?.authenticated;
+  const recovery = state.sessionId ? state.sessionTransportRecovery : null;
+  const ready = connected && !recovery;
   const host = hostReadiness(state);
   const isHostReady = host.ready;
   const isProjectOffline = !isHostReady;
@@ -438,6 +443,7 @@ export function Composer({
             <AgentModeMenu
               agents={state.agents}
               agent={state.draftAgent}
+              agentComponent={state.draftAgentComponent}
               mode={state.draftMode}
               pinned={!!state.sessionId}
               pending={
@@ -449,7 +455,9 @@ export function Composer({
               }
               onSelect={(agent, mode) => {
                 setMenu(null);
-                dispatch({ type: "SetAgentMode", agent, mode });
+                dispatch({
+                  type: "SetAgentMode", agent: agent.name, mode, catalogRow: agent,
+                });
                 input.current?.focus();
               }}
             />
@@ -537,72 +545,83 @@ export function Composer({
       clip={isProjectOffline && !hostNoticeInDock}
     >
       {!hostNoticeInDock && <ComposerHostNotice />}
+      {recovery && connected && (
+        <ExpandableNotice
+          className="inline-notice"
+          tone="warn"
+          marker="none"
+          role="status"
+          text={t(`session.transport.${recovery}`)}
+          action={
+            recovery === "failed" && (
+              <button
+                type="button"
+                className="ghost-btn"
+                onClick={() => dispatch({ type: "RecoverSessionTransport" })}
+              >
+                {t("session.transport.retry")}
+              </button>
+            )
+          }
+        />
+      )}
       {!child &&
         state.sessionId &&
         (state.agentInitRetryRequired ||
           state.autoCompactionRetryAvailable ||
           state.sessionRecoveryUnknown) && (
-          <div
+          <ExpandableNotice
             className="composer-offline-banner"
             role="status"
             data-testid="session-recovery-notice"
-          >
-            <div className="composer-offline-left">
-              <Icon
-                name="warning"
-                size={16}
-                className="offline-icon"
-                aria-hidden="true"
-              />
-              <span className="offline-text">
-                {t(
-                  state.sessionRecoveryUnknown
-                    ? "sessionRecovery.unknown"
-                    : state.agentInitRetryRequired
-                      ? "sessionRecovery.initNotice"
-                      : "sessionRecovery.autoNotice",
-                )}
-              </span>
-            </div>
-            {state.sessionRecoveryUnknown ? (
-              <button
-                type="button"
-                className="composer-offline-reconnect-btn"
-                disabled={
-                  !ready || !isHostReady || state.sessionRecoveryPending
-                }
-                onClick={() => dispatch({ type: "CheckSessionRecovery" })}
-              >
-                {t("sessionRecovery.checkStatus")}
-              </button>
-            ) : state.agentInitRetryRequired ? (
-              <button
-                type="button"
-                className="composer-offline-reconnect-btn"
-                data-testid="retry-agent-init"
-                disabled={!ready || !isHostReady || busy || session?.archived}
-                onClick={() => dispatch({ type: "RetryAgentInit" })}
-              >
-                {t("sessionRecovery.retryInit")}
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="composer-offline-reconnect-btn"
-                data-testid="retry-auto-compaction"
-                disabled={
-                  !ready ||
-                  !isHostReady ||
-                  busy ||
-                  session?.archived ||
-                  state.transcript.sessionStatus !== "idle"
-                }
-                onClick={() => dispatch({ type: "RetryAutoCompaction" })}
-              >
-                {t("sessionRecovery.retryAuto")}
-              </button>
+            text={t(
+              state.sessionRecoveryUnknown
+                ? "sessionRecovery.unknown"
+                : state.agentInitRetryRequired
+                  ? "sessionRecovery.initNotice"
+                  : "sessionRecovery.autoNotice",
             )}
-          </div>
+            action={
+              state.sessionRecoveryUnknown ? (
+                <button
+                  type="button"
+                  className="composer-offline-reconnect-btn"
+                  disabled={
+                    !ready || !isHostReady || state.sessionRecoveryPending
+                  }
+                  onClick={() => dispatch({ type: "CheckSessionRecovery" })}
+                >
+                  {t("sessionRecovery.checkStatus")}
+                </button>
+              ) : state.agentInitRetryRequired ? (
+                <button
+                  type="button"
+                  className="composer-offline-reconnect-btn"
+                  data-testid="retry-agent-init"
+                  disabled={!ready || !isHostReady || busy || session?.archived}
+                  onClick={() => dispatch({ type: "RetryAgentInit" })}
+                >
+                  {t("sessionRecovery.retryInit")}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="composer-offline-reconnect-btn"
+                  data-testid="retry-auto-compaction"
+                  disabled={
+                    !ready ||
+                    !isHostReady ||
+                    busy ||
+                    session?.archived ||
+                    state.transcript.sessionStatus !== "idle"
+                  }
+                  onClick={() => dispatch({ type: "RetryAutoCompaction" })}
+                >
+                  {t("sessionRecovery.retryAuto")}
+                </button>
+              )
+            }
+          />
         )}
       <ComposerImages
         images={state.composerImages}
@@ -620,7 +639,8 @@ export function Composer({
         }
         value={draft}
         disabled={
-          child || !ready || (isProjectOffline && !offlineDraft) || state.isCreatingSession
+          child || !connected || (isProjectOffline && !offlineDraft) ||
+          (state.isCreatingSession && !recovery)
         }
         rows={2}
         aria-controls={slashVisible ? "composer-slash-palette" : undefined}

@@ -462,6 +462,16 @@
   width: 100%;
 }
 
+.transcript-status-notice {
+  justify-content: center;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+}
+
+.transcript-status-notice .notice-message {
+  flex: 0 1 auto;
+}
+
 .transcript-history-fold-btn {
   display: inline-flex;
   align-items: center;
@@ -494,17 +504,19 @@
 .block[data-role="user"] .block-body,
 .user-bubble {
   align-self: flex-end;
-  background: var(--bg-muted);
-  border-radius: var(--r-lg);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
   border-bottom-right-radius: var(--r-sm);
-  padding: 9px 14px;
-  max-width: 70%;
+  padding: 10px 15px;
+  max-width: 72%;
   margin: 0;
   word-break: normal;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
   font-size: var(--fs-md);
-  line-height: 24px;
+  line-height: 1.55;
+  box-shadow: var(--shadow-card);
 }
 
 @media (max-width: 767.98px) {
@@ -658,12 +670,18 @@
   width: min(768px, calc(100% - 48px));
   margin: 0 auto 20px;
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
+  border: 1px solid var(--border-strong);
+  border-radius: 14px;
   padding: 10px 12px 10px 16px;
   display: flex;
   align-items: flex-end;
   gap: 8px;
+  box-shadow: var(--shadow-composer);
+  transition: border-color var(--dur-fast) ease;
+}
+
+.composer:focus-within {
+  border-color: var(--control-border);
 }
 
 .composer textarea {
@@ -1656,18 +1674,6 @@
   color: var(--text-2);
 }
 
-.composer-offline-left {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  color: var(--text-2);
-}
-
-.composer-offline-left .offline-icon {
-  color: var(--text-2);
-  flex-shrink: 0;
-}
-
 .composer-offline-reconnect-btn {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -1911,8 +1917,8 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 26px;
-  padding: 0 10px;
+  height: 28px;
+  padding: 0 11px;
   border-radius: var(--r-full);
   background: transparent;
   border: 1px solid var(--border);
@@ -1922,6 +1928,7 @@
   cursor: pointer;
   white-space: nowrap;
   box-sizing: border-box;
+  transition: background-color var(--dur-fast) ease, border-color var(--dur-fast) ease, color var(--dur-fast) ease;
 }
 
 .composer-pill:hover:not(:disabled),
@@ -2920,16 +2927,23 @@
 .markdown-content h1 {
   font-size: var(--fs-xl);
   margin-top: 16px;
+  text-wrap: balance;
 }
 
 .markdown-body :is(h2, h3),
 .markdown-content :is(h2, h3) {
   font-size: var(--fs-lg);
+  text-wrap: balance;
 }
 
 .markdown-body :is(h4, h5, h6),
 .markdown-content :is(h4, h5, h6) {
   font-size: var(--fs-md);
+}
+
+.markdown-body p,
+.markdown-content p {
+  text-wrap: pretty;
 }
 
 /* Both adjoining margins must stay compact after margin collapse. */
@@ -3332,6 +3346,41 @@
   pointer-events: auto;
 }
 
+@media (hover: none) {
+  .message-turn-container:has([data-testid="operation-failure"])
+    .message-action-bar {
+    opacity: 1;
+    pointer-events: auto;
+    transform: none;
+  }
+}
+
+.operation-failure-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+}
+
+.operation-failure-retry {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-height: 32px;
+  padding: 0 var(--sp-3);
+}
+
+.operation-failure-retry svg {
+  width: 14px;
+  height: 14px;
+}
+
+@media (max-width: 767.98px), (pointer: coarse) {
+  .operation-failure-retry {
+    min-height: 44px;
+  }
+}
+
 .assistant-action-bar {
   align-self: flex-start;
   margin: 6px 0 0 4px;
@@ -3560,6 +3609,7 @@
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
   font-weight: 500;
+  font-variant-numeric: tabular-nums;
   line-height: 28px;
   display: inline-flex;
   gap: 4px;
@@ -3600,8 +3650,9 @@
   flex: none;
   margin-left: 6px;
   font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
   color: var(--text-2);
-  opacity: 0.8;
+  opacity: 0.85;
   line-height: 28px;
 }
 
@@ -3652,8 +3703,8 @@
   min-width: 0;
   box-sizing: border-box;
   border: 1px solid var(--border);
-  background: transparent;
-  border-radius: var(--r-md);
+  background: color-mix(in oklab, var(--bg-subtle) 55%, transparent);
+  border-radius: 10px;
   overflow: hidden;
   margin: 4px 0;
 }
@@ -3770,10 +3821,10 @@
   color: var(--danger);
 }
 
-.payload-copy {
-  width: 20px;
-  height: 20px;
-  margin-left: auto;
+.payload-copy,
+.payload-exact {
+  width: var(--sp-5);
+  height: var(--sp-5);
   padding: 0;
   display: inline-flex;
   align-items: center;
@@ -3784,21 +3835,38 @@
   color: var(--text-2);
   cursor: pointer;
   opacity: 0;
-  transition: opacity 0.12s ease;
+  transition: opacity 0.12s ease, background-color 0.12s ease, color 0.12s ease;
 }
 
 .payload:hover .payload-copy,
-.payload-copy:focus-visible {
+.payload:hover .payload-exact,
+.payload-copy:focus-visible,
+.payload-exact:focus-visible,
+.payload-exact[aria-pressed="true"] {
   opacity: 1;
 }
 
-.payload-copy:hover {
+.payload-exact[aria-pressed="true"] {
+  color: var(--text);
+  background: var(--bg-muted);
+  box-shadow: inset 0 0 0 1px var(--control-border);
+}
+
+.payload-copy:hover,
+.payload-exact:hover {
   color: var(--text);
 }
 
 @media (hover: none) {
-  .payload-copy {
+  .payload-copy,
+  .payload-exact {
     opacity: 1;
+  }
+}
+
+@media (forced-colors: active) {
+  .payload-exact[aria-pressed="true"] {
+    outline: 1px solid Highlight;
   }
 }
 
@@ -4890,10 +4958,10 @@
   width: 100%;
   height: 32px;
   display: grid;
-  grid-template-columns: minmax(0, clamp(92px, 25%, 172px)) minmax(0, 1fr) 68px;
+  grid-template-columns: 18px minmax(0, clamp(92px, 25%, 172px)) minmax(0, 1fr) 68px;
   align-items: center;
-  gap: 12px;
-  padding: 0 16px;
+  gap: 10px;
+  padding: 0 16px 0 12px;
   border: 0;
   border-left: 2px solid transparent;
   background: transparent;
@@ -4904,6 +4972,20 @@
 
 .trajectory-entry:hover {
   background: var(--bg-muted);
+}
+
+.trajectory-entry-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-right: 0;
+  color: var(--text-3);
+}
+
+.trajectory-entry-glyph[data-status="none"] {
+  visibility: hidden;
 }
 
 .trajectory-entry[data-selected="true"] {

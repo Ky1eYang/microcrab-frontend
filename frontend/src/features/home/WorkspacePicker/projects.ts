@@ -1,3 +1,4 @@
+import { referenceLabels } from "../../referenceLabels";
 import type {
   AppState,
   NativeProject,
@@ -49,6 +50,38 @@ export function projectAvailability(
     : "unknown";
 }
 
+export function compactProjectRoot(root?: string) {
+  if (!root) return "";
+  const normalized = root.replace(/\\/g, "/").replace(/\/+$/, "");
+  if (!normalized || normalized === "/") return normalized || root;
+  const parts = normalized.split("/").filter(Boolean);
+  if (parts.length <= 2) return normalized;
+  return `…/${parts.slice(-2).join("/")}`;
+}
+
+export function sortHostProjects(
+  projects: NativeProject[],
+  sessions: SessionView[],
+) {
+  const activity = new Map<string, number>();
+  for (const session of sessions) {
+    if (session.parentID || !session.projectID) continue;
+    activity.set(
+      session.projectID,
+      Math.max(
+        activity.get(session.projectID) ?? 0,
+        sessionActiveTime(session),
+      ),
+    );
+  }
+  if (!activity.size) return projects;
+  return [...projects].sort((a, b) => {
+    const scoreA = activity.get(a.id) ?? -1;
+    const scoreB = activity.get(b.id) ?? -1;
+    return scoreB - scoreA;
+  });
+}
+
 export function filterProjects(projects: NativeProject[], query: string) {
   const q = query.trim().toLowerCase();
   return projects.filter((p) =>
@@ -87,20 +120,15 @@ export function hostGroups(
   const list = [...groups.values()].sort((a, b) =>
     !a.id ? 1 : !b.id ? -1 : a.id.localeCompare(b.id),
   );
-  for (const group of list) group.label ||= group.id.slice(0, 12);
-  const sharedLabels = new Set(
-    list
-      .filter((group) =>
-        list.some((other) => other !== group && other.label === group.label),
-      )
-      .map((group) => group.label),
-  );
+  const hostLabel = referenceLabels("host", list.map((group) => group.id));
+  const counts = new Map<string, number>();
   for (const group of list) {
-    if (group.id && sharedLabels.has(group.label)) {
-      // Include the full identity if its short prefix is shared as well.
-      const short = group.id.slice(0, 8);
-      group.label += ` · ${list.some((other) => other !== group && other.id.startsWith(short)) ? group.id : short}`;
-    }
+    group.label ||= hostLabel(group.id);
+    counts.set(group.label, (counts.get(group.label) ?? 0) + 1);
+  }
+  for (const group of list) {
+    if (group.id && (counts.get(group.label) ?? 0) > 1)
+      group.label += ` · ${hostLabel(group.id)}`;
   }
   return list;
 }

@@ -135,7 +135,7 @@ async function remote(page: Page) {
   return transport;
 }
 
-async function setup(page: Page, session: string | null = "zig-session") {
+async function setup(page: Page, { seedExcludedGrants = false } = {}) {
   await nativeBackend(page);
   let bytes: Buffer;
   try {
@@ -177,9 +177,18 @@ document.documentElement.dataset.theme = 'light';
 const id = 'microcrab.mcp-bridge';
 const ownerId = sessionStorage.getItem('zig-mcp-acceptance-owner') || 'zig-mcp-' + crypto.randomUUID();
 sessionStorage.setItem('zig-mcp-acceptance-owner', ownerId);
+if (${seedExcludedGrants}) {
+  // Simulate persisted vault data, not guest vars: the real host computes
+  // requires_reenable from an enabled grant bound to different exact bytes.
+  const key = 'microcrab.plugin.resources.v1:' + JSON.stringify([location.origin, ownerId, id]);
+  if (!localStorage.getItem(key)) localStorage.setItem(key, JSON.stringify([
+    {id:'disabled-service', endpoint:${JSON.stringify(endpoint)}, enabled:false, config_pin:'disabled-pin', grant_artifact:${JSON.stringify(sha256)}},
+    {id:'previous-artifact-service', endpoint:${JSON.stringify(endpoint)}, enabled:true, config_pin:'old-artifact-pin', grant_artifact:'0'.repeat(64)},
+  ]));
+}
 const registry = new PluginRegistry({serverOrigin:location.origin, ownerId});
 await registry.initialize();
-let session = ${JSON.stringify(session)};
+let session = 'zig-session';
 await registry.setSession(session);
 registry.setEnvironment({locale:'en'});
 let target = 'setting-page';
@@ -221,8 +230,14 @@ function run(request, token){
     call_id:crypto.randomUUID(),catalog_digest:'zig-browser-acceptance',epoch:1,turn_id:7,round_id:3,deadline_ms:0
   },controller.signal).finally(()=>{if(token)controllers.delete(token);});
 }
+const concurrentSettings = {surface_id:'zig-concurrent-settings',target:'setting-page'};
 window.zigMcp={registry,observed,view,mount,run,
   action:(name,payload)=>registry.action(id,name,payload,surface),
+  settingsAction:async(name,payload)=>{
+    await registry.render(id,'setting-page',false,concurrentSettings);
+    await registry.action(id,name,payload,concurrentSettings);
+  },
+  settingsView:()=>registry.view(id,'setting-page',concurrentSettings).viewState,
   abort:(token)=>controllers.get(token)?.abort(),
   attempt:async(request)=>{try{return {ok:true,value:await run(request)};}catch(e){return {ok:false,error:String(e)};}},
   session:async(next)=>{session=next;await registry.setSession(next);await mount(target);},
@@ -253,7 +268,7 @@ window.zigReady=true;
   });
   expect(plugin.manifest).toMatchObject({
     id,
-    version: "0.4.0",
+    version: "0.4.1",
     targets: ["sidebar", "setting-page"],
   });
   expect(plugin.artifact).toBe(sha256);
@@ -441,6 +456,156 @@ test("real Zig settings isolate transient credentials and preserve a live themed
   await expect(
     page.getByTestId("plugin-webview").contentFrame().locator("#no-session"),
   ).toBeVisible();
+});
+
+test("real Zig sidebar lists enabled services and only shows health for the current configuration", async ({
+  page,
+}) => {
+  const transport = await remote(page);
+  const settings = await setup(page, { seedExcludedGrants: true });
+  await configure(page);
+  // Verify these grants are in the real guest's settings, not merely absent
+  // because the inventory has not loaded.
+  await expect(
+    settings
+      .getByTestId("server-row")
+      .filter({
+        has: settings.getByRole("heading", {
+          name: "disabled-service",
+          exact: true,
+        }),
+      })
+      .getByText("Disabled", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    settings
+      .getByTestId("server-row")
+      .filter({
+        has: settings.getByRole("heading", {
+          name: "previous-artifact-service",
+          exact: true,
+        }),
+      })
+      .getByText("Reauthorization required", { exact: true }),
+  ).toBeVisible();
+
+  const sidebar = await mountSidebar(page);
+  const services = sidebar.getByTestId("enabled-services");
+  const rows = services.getByTestId("enabled-service-row");
+  const status = rows.getByTestId("enabled-service-status");
+  await expect(services).toBeVisible();
+  await expect(rows).toHaveCount(1);
+  await expect(rows.getByText("one", { exact: true })).toBeVisible();
+  await expect(status).toHaveText("Not tested");
+  expect(
+    await page.evaluate(() => (window as any).zigMcp.view().viewState.services),
+  ).toEqual([{ id: "one", status: "unchecked" }]);
+  await expect(sidebar.getByRole("heading", { level: 1 })).toHaveText(
+    "MCP Bridge",
+  );
+  await expect(
+    sidebar.getByRole("heading", { level: 2, name: "Tool call history" }),
+  ).toBeVisible();
+  await expect(
+    sidebar.locator(
+      "form,input,[data-testid=refresh-config],[data-testid=add-server],[data-testid=server-toggle],[data-testid=test-connection],[data-testid=remove-server],[data-testid=save-config]",
+    ),
+  ).toHaveCount(0);
+  await expect(
+    sidebar.getByRole("button", { name: /test connection|remove|save/i }),
+  ).toHaveCount(0);
+  expect(await services.evaluate((element) => element.outerHTML)).not.toContain(
+    "zig-mcp.example.test",
+  );
+  expect(transport.calls).toHaveLength(0);
+  await page.evaluate(() =>
+    (window as any).zigMcp.action("test-connection", { id: "one" }),
+  );
+  await expect(status).toHaveText("Not tested");
+  expect(transport.calls).toHaveLength(0);
+
+  // Successful tool calls are retained but must not establish connection health.
+  const info = await describe(page);
+  await run(page, {
+    action: "call",
+    pin: info.call_pin,
+    arguments: { message: "retained alongside services" },
+  });
+  const history = sidebar.getByTestId("history-row");
+  // Discovery and the subsequent invocation are separate retained records.
+  await expect(history).toHaveCount(2);
+  await expect(history.first()).toContainText("echo");
+  await expect(
+    sidebar.getByText("Retained-window metrics", { exact: true }),
+  ).toBeVisible();
+  await expect(sidebar.getByTestId("metric-total")).toHaveText("2");
+  await expect(status).toHaveText("Not tested");
+
+  await sidebar.locator("body").evaluate((body) => {
+    body.dataset.retainedDocument = "services";
+  });
+  const probe = () =>
+    page.evaluate(() =>
+      (window as any).zigMcp.settingsAction("test-connection", { id: "one" }),
+    );
+  await probe();
+  await expect(status).toHaveText("Connected");
+  const [checked] = await page.evaluate(
+    () => (window as any).zigMcp.view().viewState.services,
+  );
+  expect(checked).toEqual({
+    id: "one",
+    status: "connected",
+    tool_count: 1,
+    checked_at_ms: expect.any(Number),
+  });
+  expect(Number.isFinite(checked.checked_at_ms)).toBe(true);
+  await expect(sidebar.locator("body")).toHaveAttribute(
+    "data-retained-document",
+    "services",
+  );
+
+  // Changing the actual endpoint while keeping the same service ID must not
+  // reuse the completed probe, or discard independent call history.
+  const replacement = `${endpoint}/replacement`;
+  const requestsBeforeSave = transport.calls.length;
+  await page.evaluate(
+    (endpoint) =>
+      (window as any).zigMcp.settingsAction("save-config", {
+        id: "one",
+        endpoint,
+        authorization: "",
+        clear_authorization: false,
+        enabled: true,
+      }),
+    replacement,
+  );
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const { servers, busy } = (window as any).zigMcp.settingsView();
+        return busy
+          ? null
+          : servers.find((server: any) => server.id === "one")?.endpoint;
+      }),
+    )
+    .toBe(replacement);
+  await expect(status).toHaveText("Not tested");
+  expect(transport.calls).toHaveLength(requestsBeforeSave);
+  await expect(history).toHaveCount(2);
+  await expect(sidebar.getByTestId("metric-total")).toHaveText("2");
+
+  await probe();
+  await expect(status).toHaveText("Connected");
+  expect(
+    transport.calls.slice(requestsBeforeSave).map(({ rpc }) => rpc.method),
+  ).toContain("tools/list");
+  await page.evaluate(() => (window as any).zigMcp.session(null));
+  await expect(sidebar.locator("#no-session")).toBeVisible();
+  await expect(rows).toHaveCount(1);
+  await expect(rows.getByText("one", { exact: true })).toBeVisible();
+  await expect(status).toHaveText("Not tested");
+  await expect(history).toHaveCount(0);
 });
 
 test("real Zig negotiates supported protocols and empty notification ACKs, validates arguments and retires stale schema/config pins before dispatch", async ({

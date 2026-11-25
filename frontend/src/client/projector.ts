@@ -31,6 +31,10 @@ import { t as translate } from "../i18n";
 import { failureBlockText, wireFailure } from "./failure";
 import { messageBlocks } from "./native-message-blocks";
 import {
+  responseCompletionTime,
+  responseIdentity,
+} from "./response-completion";
+import {
   callOccurrenceKey,
   displayExecutionId,
   mergeDisplayExecution,
@@ -432,6 +436,17 @@ export function applySnapshot(
   for (const operation of snapshot.operations ?? [])
     observeTurnLifecycle(t, snapshot.session.id, operation);
   t.historyView = snapshot.history_view;
+  const canonicalResponseTimes = new Map<string, number | undefined>();
+  for (const row of snapshot.messages) {
+    if (row.role !== "assistant") continue;
+    const exact = responseIdentity(row.id, row.canonical_source_id);
+    if (exact)
+      canonicalResponseTimes.set(
+        exact,
+        responseCompletionTime(row.response_completed_at_ms),
+      );
+  }
+  t.canonicalResponseTimes = canonicalResponseTimes;
   t.historyGap = snapshot.history_gap === true;
   t.historyTruncated = snapshot.messages_truncated === true;
   t.blocks = snapshot.messages.flatMap((message) =>
@@ -683,6 +698,7 @@ export function applySnapshot(
       );
       block.id = `preview:${origin.key}:${kind}`;
       block.preview = origin;
+      block.responseAdmission = "preview";
       block.payload.text = text;
       block.stream = "stopped";
       retained.push(block);
@@ -1236,6 +1252,7 @@ export function applySnapshot(
         const occurrence = callOccurrenceKey(call);
         if (occurrence) exactCalls.delete(occurrence);
         call.payload.text = block.payload.text;
+        call.payload.toolPresentation = block.payload.toolPresentation;
         call.payload.structured = block.payload.structured;
         call.payload.attachments = block.payload.attachments;
         call.clientInvocationId = block.clientInvocationId;
@@ -1716,6 +1733,7 @@ export function applyEvent(t: Transcript, event: NativeEvent, compose = true) {
         );
         b.id = id;
         b.preview = origin;
+        b.responseAdmission = "preview";
         b.temporary = true;
         b.stream = "streaming";
         t.blocks.push(b);
@@ -1734,6 +1752,7 @@ export function applyEvent(t: Transcript, event: NativeEvent, compose = true) {
         );
         b.id = id;
         b.preview = origin;
+        b.responseAdmission = "preview";
         b.temporary = true;
         b.stream = "streaming";
         t.blocks.push(b);
@@ -1764,6 +1783,7 @@ export function applyEvent(t: Transcript, event: NativeEvent, compose = true) {
         );
         b.id = `${prefix}:tool:${data.index}`;
         b.preview = { ...origin, toolIndex: data.index };
+        b.responseAdmission = "preview";
         b.callId = toolCallId;
         b.temporary = true;
         b.stream = "streaming";
@@ -1879,6 +1899,7 @@ export function applyEvent(t: Transcript, event: NativeEvent, compose = true) {
       b.endedMs = b.startedMs + data.elapsed_ms;
     b.tool = {
       name: data.name ?? b.tool?.name ?? "tool",
+      presentation: data.presentation ?? b.tool?.presentation,
       callId: data.call_id,
       input: data.arguments ?? b.tool?.input ?? {},
       // Cancellation/interruption phases keep their own meaning; they are
@@ -1903,6 +1924,7 @@ export function applyEvent(t: Transcript, event: NativeEvent, compose = true) {
     if (outcome) b.payload.observedToolOutcome = outcome;
     if (b.payload.observedToolOutcome)
       b.tool.status = b.payload.observedToolOutcome;
+    if (data.result !== undefined) b.payload.toolPresentation = data.presentation;
     b.payload.text =
       typeof data.result === "string"
         ? data.result

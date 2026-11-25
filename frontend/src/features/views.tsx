@@ -1,3 +1,5 @@
+import { toolReferenceProjection, projectReferenceSlots } from "./toolReferences";
+import { referenceLabel } from "./referenceLabels";
 import {
   PluginBlockVariant,
   useBlockTextVariant,
@@ -566,8 +568,9 @@ export function CompactionSummaryCard({
 }
 export function toolArgsSummary(block: FeatureBlock) {
   const tool = block.tool;
-  if (tool?.title?.trim()) return tool.title.trim();
-  const input = tool?.input;
+  const projection = toolReferenceProjection(tool?.input, tool?.presentation, "arguments");
+  if (!projection && tool?.title?.trim()) return tool.title.trim();
+  const input = projection ? JSON.parse(projection.display) : tool?.input;
   if (!input) return "";
   return typeof input === "string"
     ? input
@@ -676,6 +679,7 @@ const ToolContent = memo(function ToolContent({
           <Payload
             label={t("tools.arguments")}
             value={noInput ? null : block.tool?.input}
+            projection={toolReferenceProjection(block.tool?.input, block.tool?.presentation, "arguments")}
             testid="tool-payload-input"
             variant="trajectory"
             dialogTitle={`${name} · ${t("tools.arguments")}`}
@@ -684,6 +688,7 @@ const ToolContent = memo(function ToolContent({
             label={t(status === "failed" ? "tools.error" : "tools.output")}
             status={status === "failed" ? "error" : status}
             value={block.payload.text}
+            projection={toolReferenceProjection(block.payload.text, block.payload.toolPresentation, "result")}
             testid="tool-payload-output"
             variant="trajectory"
             dialogTitle={`${name} · ${t(status === "failed" ? "tools.error" : "tools.output")}`}
@@ -739,14 +744,35 @@ export function ToolAccordionGroup({
       : statuses.length && outcomes.succeeded === statuses.length
         ? "succeeded"
         : "mixed";
-  const outcomeParts = (
-    [
-      ["failed", "tools.failedCount"],
-      ["cancelled", "tools.cancelledCount"],
-      ["interrupted", "tools.interruptedCount"],
-      ["unknown", "tools.unknownCount"],
-    ] as const
-  ).filter(([status]) => outcomes[status]);
+  // Header glyph counts (spinner = active, ✕ failed, ⊘ cancelled, · unknown).
+  const activeCount = statuses.filter(isActiveToolStatus).length;
+  const glyphs = [
+    ...(running
+      ? [
+          {
+            status: "running" as const,
+            count: activeCount,
+            label: activeCount
+              ? t("tools.runningCount", { count: activeCount })
+              : t("conversation.toolTurnActive"),
+          },
+        ]
+      : []),
+    ...(
+      [
+        ["failed", "tools.failedCount"],
+        ["cancelled", "tools.cancelledCount"],
+        ["interrupted", "tools.interruptedCount"],
+        ["unknown", "tools.unknownCount"],
+      ] as const
+    )
+      .filter(([status]) => outcomes[status])
+      .map(([status, key]) => ({
+        status,
+        count: outcomes[status] ?? 0,
+        label: t(key, { count: outcomes[status] ?? 0 }),
+      })),
+  ];
   const title = t(
     grouped
       ? partial
@@ -771,32 +797,32 @@ export function ToolAccordionGroup({
       >
         <span className="group-header-left">
           <span className="tool-group-title tool-group-seg">{title}</span>
-          {running && (
+          {glyphs.length > 0 && (
             <span
-              className="tool-group-seg tool-group-active"
+              className="tool-group-glyphs"
+              data-testid="tool-group-outcomes"
               data-expanded={expanded}
             >
-              <span className="tool-group-sep" aria-hidden="true">
-                {" · "}
-              </span>
-              {t("conversation.toolTurnActive")}
-            </span>
-          )}
-          {outcomeParts.length > 0 && (
-            <span
-              className="tool-group-outcomes"
-              data-testid="tool-group-outcomes"
-            >
-              {outcomeParts.map(([status, key]) => (
+              {glyphs.map(({ status, count, label }) => (
                 <span
                   key={status}
-                  className="tool-group-seg"
+                  className="tool-group-glyph"
                   data-status={status}
+                  title={label}
                 >
-                  <span className="tool-group-sep" aria-hidden="true">
-                    {" · "}
+                  <span
+                    className="tool-status-glyph"
+                    data-status={status}
+                    aria-hidden="true"
+                  >
+                    <Icon name={TOOL_STATUS_ICON[status]} size={12} />
                   </span>
-                  {t(key, { count: outcomes[status] ?? 0 })}
+                  {count > 0 && (
+                    <span className="tool-group-glyph-count" aria-hidden="true">
+                      {count}
+                    </span>
+                  )}
+                  <span className="sr-only">{label}</span>
                 </span>
               ))}
             </span>
@@ -1081,6 +1107,75 @@ export function blockRenderKey(block: FeatureBlock, locale: string): string {
 }
 /** The registry version is this block's subscription boundary. A contentKey is
  * optional for standalone render fixtures; the production list never stamps text. */
+/** A failed or cancelled block that the backend marked retryable carries its
+ * own always-visible, labelled Retry (not hover-revealed). */
+export function retryEligible(
+  block: FeatureBlock,
+  retryOperationId: string | null | undefined,
+) {
+  return (
+    !!retryOperationId &&
+    block.operationId === retryOperationId &&
+    ["error", "cancelled"].includes(block.stream ?? "")
+  );
+}
+
+function InlineRetry({ block }: { block: FeatureBlock }) {
+  const retryOperationId = useAppSelector((state) => state.retryOperationId);
+  if (!retryEligible(block, retryOperationId) || !retryOperationId) return null;
+  return (
+    <div className="operation-failure-actions">
+      <RetryButton retryId={retryOperationId} labelled />
+    </div>
+  );
+}
+
+export function RetryButton({
+  retryId,
+  labelled = false,
+}: {
+  retryId: string;
+  labelled?: boolean;
+}) {
+  const dispatch = useAppDispatch();
+  const disabledReason = useAppSelector((state) =>
+    !state.capabilities?.methods.includes("turn.retry") ||
+    state.transcript.sessionStatus === "busy" ||
+    state.transcript.inboxActive ||
+    state.compactInflight ||
+    state.retryPending ||
+    state.historyMutationPending ||
+    state.isCreatingSession
+      ? "conversation.retryUnavailable"
+      : null,
+  );
+  const disabled = disabledReason !== null;
+  const label = labelled ? t("conversation.retryShort") : t("conversation.retry");
+  return (
+    <button
+      type="button"
+      className={
+        labelled
+          ? "ghost-btn operation-failure-retry"
+          : "action-icon-btn action-retry-btn"
+      }
+      title={
+        disabled && labelled
+          ? t("conversation.retryUnavailable")
+          : t("conversation.retry")
+      }
+      aria-label={label}
+      data-testid="retry-model-request"
+      data-operation-id={retryId}
+      disabled={disabled}
+      onClick={() => dispatch({ type: "RetryTurn", value: retryId })}
+    >
+      <Icon name="refresh" />
+      {labelled && <span>{label}</span>}
+    </button>
+  );
+}
+
 export const BlockView = memo(function BlockView({
   block: fallback,
   readOnly = false,
@@ -1200,6 +1295,7 @@ export const BlockView = memo(function BlockView({
             <div style={{ whiteSpace: "pre-wrap" }}>
               {failureText(block.payload.failure)}
             </div>
+            {!readOnly && block.operationId && <InlineRetry block={block} />}
           </div>
         ) : kind === "reasoning" ? (
           <Think
@@ -1332,7 +1428,7 @@ export function ActionBar({
   text,
   timestamp,
   pending = false,
-  observedCompletionAt,
+  answerAdmitted = false,
   user = false,
   revertId,
   retryId,
@@ -1345,7 +1441,7 @@ export function ActionBar({
   pluginActionScope?: string;
   timestamp?: number | null;
   pending?: boolean;
-  observedCompletionAt?: number;
+  answerAdmitted?: boolean;
   user?: boolean;
   revertId?: string;
   retryId?: string;
@@ -1368,17 +1464,16 @@ export function ActionBar({
   );
   const state = useMemo(() => JSON.parse(selected), [selected]);
   const [copied, setCopied] = useState(false);
-  // Preserve existing mount-time display for untimed history; a witnessed live
-  // completion instead supplies its browser observation time, never runtime data.
-  const [mountedAt] = useState(Date.now);
+  // Only user input retains the existing browser mount-time fallback.
+  const [mountedAt] = useState(() => user ? Date.now() : undefined);
   const hasSourceTime =
     timestamp != null && Number.isFinite(timestamp) && timestamp > 0;
-  const displayTime = hasSourceTime ? timestamp : (observedCompletionAt ?? mountedAt);
-  const displayDate = new Date(displayTime);
+  const displayTime = hasSourceTime ? timestamp : mountedAt;
+  const displayDate = displayTime == null ? undefined : new Date(displayTime);
   const padTime = (value: number) => String(value).padStart(2, "0");
-  const utcOffset = -displayDate.getTimezoneOffset();
+  const utcOffset = displayDate ? -displayDate.getTimezoneOffset() : 0;
   const offsetMinutes = Math.abs(utcOffset);
-  const detailedTime = `${displayDate.getFullYear()}-${padTime(displayDate.getMonth() + 1)}-${padTime(displayDate.getDate())} ${padTime(displayDate.getHours())}:${padTime(displayDate.getMinutes())}:${padTime(displayDate.getSeconds())} UTC${utcOffset >= 0 ? "+" : "-"}${padTime(Math.floor(offsetMinutes / 60))}:${padTime(offsetMinutes % 60)}`;
+  const detailedTime = displayDate && `${displayDate.getFullYear()}-${padTime(displayDate.getMonth() + 1)}-${padTime(displayDate.getDate())} ${padTime(displayDate.getHours())}:${padTime(displayDate.getMinutes())}:${padTime(displayDate.getSeconds())} UTC${utcOffset >= 0 ? "+" : "-"}${padTime(Math.floor(offsetMinutes / 60))}:${padTime(offsetMinutes % 60)}`;
   useEffect(() => {
     if (!copied) return;
     const timer = setTimeout(() => setCopied(false), 1000);
@@ -1391,6 +1486,7 @@ export function ActionBar({
       <div className="action-leading-group">
         <button
           className="action-icon-btn"
+          data-testid="copy-message"
           title={t(
             copied
               ? "common.copied"
@@ -1447,27 +1543,7 @@ export function ActionBar({
             <Icon name="undo" />
           </button>
         )}
-        {retryId && (
-          <button
-            className="action-icon-btn action-retry-btn"
-            title={t("conversation.retry")}
-            aria-label={t("conversation.retry")}
-            data-testid="retry-model-request"
-            data-operation-id={retryId}
-            disabled={
-              !state.capabilities?.methods.includes("turn.retry") ||
-              state.sessionStatus === "busy" ||
-              state.inboxActive ||
-              state.compactInflight ||
-              state.retryPending ||
-              state.historyMutationPending ||
-              state.isCreatingSession
-            }
-            onClick={() => dispatch({ type: "RetryTurn", value: retryId })}
-          >
-            <Icon name="refresh" />
-          </button>
-        )}
+        {retryId && <RetryButton retryId={retryId} />}
       </div>
       <div className="action-trailing-info">
         {tokens && (
@@ -1489,15 +1565,11 @@ export function ActionBar({
             aria-label={t("message.answerInProgress")}
             title={t("message.answerInProgress")}
           />
-        ) : (
+        ) : displayDate ? (
           <time
             className="message-time-label"
             dateTime={displayDate.toISOString()}
-            title={
-              !hasSourceTime && observedCompletionAt != null
-                ? t("message.answerCompletionObserved", { time: detailedTime })
-                : detailedTime
-            }
+            title={detailedTime}
             data-time-source={hasSourceTime ? "source" : "browser"}
           >
             {displayDate.toLocaleTimeString([], {
@@ -1505,7 +1577,11 @@ export function ActionBar({
               minute: "2-digit",
             })}
           </time>
-        )}
+        ) : answerAdmitted ? (
+          <span className="message-time-label" data-time-source="unknown">
+            {t("message.answerTimeUnknown")}
+          </span>
+        ) : null}
       </div>
     </div>
   );
@@ -1555,12 +1631,12 @@ function PermissionRequestCard({
         )}{" "}
         ·{" "}
         {value.subject?.kind === "agent_init"
-          ? value.subject.component
+          ? referenceLabel("digest", value.subject.component)
           : value.tool}
       </h3>
       <p className="flow-card-meta">
         {value.session_id !== value.parent_session_id
-          ? t("permission.childSession", { id: value.session_id })
+          ? t("permission.childSession", { id: referenceLabel("session", value.session_id) })
           : t("permission.currentSession")}{" "}
       </p>
       <p className="flow-card-meta">
@@ -1619,6 +1695,15 @@ function PermissionRequestCard({
             subject: value.subject,
             arguments: value.arguments,
           }}
+          projection={value.subject?.kind === "agent_init"
+            ? projectReferenceSlots({ subject: value.subject, arguments: value.arguments }, (path) =>
+                path.length === 2 && (path[0] === "subject" || path[0] === "arguments") && path[1] === "component" ? "digest" : undefined)
+            : toolReferenceProjection(
+                { subject: value.subject, arguments: value.arguments },
+                value.presentation,
+                "arguments",
+                "arguments",
+              )}
           testid="permission-request-payload"
           dialogTitle={`${t("permission.details")} · ${value.tool}`}
         />

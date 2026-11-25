@@ -29,12 +29,19 @@ async function fitsViewport(page: Page, locator: Locator) {
 
 async function showUnsupportedToast(page: Page) {
   // Help remains explicitly unavailable; projectless Conversations are supported.
+  const menu = page.getByTestId("header-open-rail");
+  const narrow = await menu.isVisible();
+  if (narrow) await menu.click();
   await page.locator(".user-card-btn").first().click();
   await page
     .locator(".user-card-menu")
     .getByRole("button", { name: "帮助", exact: true })
     .click();
   await expect(page.locator(".toast-body")).toHaveText("帮助内容尚未接入");
+  if (narrow)
+    await page
+      .getByTestId("rail-drawer-backdrop")
+      .click({ position: { x: 380, y: 400 } });
   await expect(page.locator(".toast-container")).toHaveAttribute(
     "data-kind",
     "info",
@@ -170,11 +177,14 @@ for (const { colorScheme, width } of [
           fullPage: true,
         });
       }
+      const railMenu = page.getByTestId("header-open-rail");
+      if (await railMenu.isVisible()) await railMenu.click();
       await page
         .getByRole("button", {
           name: "新对话",
           exact: true,
         })
+        .first()
         .click();
       await page.getByTitle("选择项目工作区").click();
       const online = page.locator(".workspace-menu-item[data-active=true]");

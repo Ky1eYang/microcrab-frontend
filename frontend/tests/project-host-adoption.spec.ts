@@ -101,6 +101,70 @@ test("passive Session opens only after catalog and activation, observes loss and
   expect(backend.commands.filter((command) => ["turn.queue", "turn.retry", "host.relay_attach"].includes(command.method))).toEqual([]);
 });
 
+test("streamed model observations never drive Project Host reads", async ({ page }) => {
+  // Exclude the independent compatibility observer from this event-driven test.
+  await page.addInitScript(() => {
+    const schedule = window.setInterval.bind(window);
+    window.setInterval = (handler, delay, ...args) =>
+      delay === 5000 && String(handler).includes("observeHostChange")
+        ? 0
+        : schedule(handler, delay, ...args);
+  });
+  const backend = await nativeBackend(page);
+  let reads = 0;
+  let view = routeView(direct);
+  await page.route("**/api/v1/projects/project-1/host-state", (route) => {
+    reads++;
+    return route.fulfill({ json: view });
+  });
+  await page.goto("/#session/s1");
+  const header = page.getByTestId("header-host-connection");
+  await expect(header).toHaveAttribute("data-host-state", "ready");
+  const baseline = reads;
+  view = routeView(direct, "101", false, true);
+  for (let round = 1; round <= 10; round++) {
+    backend.event("model_observation", {
+      operation_id: "streaming-turn",
+      call_id: `request-${round}`,
+      epoch: 0,
+      turn: 2,
+      round,
+      phase: "started",
+    });
+  }
+  // Give unsolicited requests time to complete before the positive control.
+  await expect(header).not.toHaveAttribute("data-host-state", "reconciling", { timeout: 250 });
+  await expect.poll(() => reads, { timeout: 750 }).toBe(baseline);
+  backend.event("host_connection", { state: "reconciling" });
+  await expect(header).toHaveAttribute("data-host-state", "reconciling");
+  expect(reads).toBe(baseline + 1);
+});
+
+test("Project Host watch is independent of Session and suppresses recurring HTTP reads", async ({ page }) => {
+  const backend = await nativeBackend(page, {
+    extraMethods: ["project.host_watch", "project.host_unwatch"],
+    projectHostSummary: () => routeView(direct),
+  });
+  let reads = 0;
+  await page.route("**/api/v1/projects/project-1/host-state", (route) => {
+    reads++;
+    return route.fulfill({ json: routeView(direct) });
+  });
+  await page.clock.install();
+  await page.goto("/");
+  const header = page.getByTestId("header-host-connection");
+  await expect(header).toHaveAttribute("data-host-state", "ready");
+  await expect.poll(() => backend.commands.filter(c => c.method === "project.host_watch").length).toBe(1);
+  const baseline = reads;
+  backend.projectHostEvent({ ...detached, connection_generation: "101" });
+  await expect(header).toHaveAttribute("data-host-state", "detached");
+  backend.projectHostEvent(routeView(outbound, "102"));
+  await expect(header).toHaveAttribute("data-host-carrier", outbound);
+  await expect(header).toHaveAttribute("data-host-state", "ready");
+  await page.clock.fastForward(25_000);
+  expect(reads).toBe(baseline);
+});
+
 for (const scenario of ["failed", "unready", "reconciling"] as const) {
   test(`a saved locator is not used after ${scenario} observation`, async ({ page }) => {
     const backend = await nativeBackend(page);
