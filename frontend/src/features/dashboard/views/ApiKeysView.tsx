@@ -1,10 +1,12 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { relaySelectionKey } from "../../../client/account-preferences";
 import type { RelayKey } from "../../../client/relay-keys";
 import type { NativeModelSelection } from "../../../client/types";
 import { t } from "../../../i18n";
 import { useAppFields, useAppStore } from "../../../state";
 import { ModalContainer } from "../components/ModalContainer";
+
+type KeyFilterStatus = "all" | "active" | "disabled";
 
 export const ApiKeysView: React.FC<{
   owner: string;
@@ -22,7 +24,11 @@ export const ApiKeysView: React.FC<{
   const mutationInFlight = useRef(false);
   const [localRefresh, setLocalRefresh] = useState(0);
 
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<KeyFilterStatus>("all");
+
   const [quickKeyName, setQuickKeyName] = useState("");
+  const quickInputRef = useRef<HTMLInputElement>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editing, setEditing] = useState<RelayKey | null>(null);
   const [formName, setFormName] = useState("");
@@ -160,22 +166,51 @@ export const ApiKeysView: React.FC<{
   const relayBaseUrl = new URL("/v1", state.apiBase || window.location.origin).toString();
   const distinctProviders = [...new Set(relayModels.map((m) => m.provider_id))];
 
+  const counts = useMemo(() => {
+    let active = 0;
+    let disabled = 0;
+    for (const k of keys) {
+      if (k.enabled) active++;
+      else disabled++;
+    }
+    return { all: keys.length, active, disabled };
+  }, [keys]);
+
+  const filteredKeys = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return keys.filter((key) => {
+      if (statusFilter === "active" && !key.enabled) return false;
+      if (statusFilter === "disabled" && key.enabled) return false;
+      if (!q) return true;
+      const defaultModel = relaySelectionKey(key.default_model_selection).toLowerCase();
+      const providersText = (key.allowed_providers ?? []).join(" ").toLowerCase();
+      return (
+        key.name.toLowerCase().includes(q) ||
+        key.key_prefix.toLowerCase().includes(q) ||
+        providersText.includes(q) ||
+        defaultModel.includes(q)
+      );
+    });
+  }, [keys, searchQuery, statusFilter]);
+
+  const hasFilters = searchQuery.trim() !== "" || statusFilter !== "all";
+
   return (
     <div className="sb-view-container space-y-4">
-      {/* Top Header & Quick Create Card */}
-      <div className="sb-card p-4 space-y-3">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div>
-            <h2 className="text-xs font-semibold text-neutral-200">
+      {/* Top Header, Endpoint Strip & Quick Create Card */}
+      <div className="sb-card p-5 space-y-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="space-y-1 min-w-0">
+            <h2 className="text-base font-semibold text-white">
               {t("relayKeys.title")}
             </h2>
-            <p className="text-[11px] text-neutral-500 mt-0.5">
+            <p className="text-xs text-neutral-400">
               {t("relayKeys.description")}
             </p>
           </div>
           <button
             type="button"
-            className="sb-btn sb-btn-ghost sb-btn-sm"
+            className="sb-btn sb-btn-primary shrink-0"
             data-testid="relay-key-open-modal"
             disabled={pending}
             onClick={openCreateModal}
@@ -184,30 +219,36 @@ export const ApiKeysView: React.FC<{
           </button>
         </div>
 
-        {/* Relay Endpoint Box */}
-        <div className="sb-terminal-box p-3 space-y-1.5 text-[11px] font-mono">
+        {/* Relay Endpoint Command Card */}
+        <div className="sb-terminal-box p-3.5 space-y-2 text-xs font-mono">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <span className="text-neutral-400">
-              {t("relayKeys.endpoint")}:{" "}
-              <code className="text-neutral-200">{relayBaseUrl}</code>
-            </span>
+            <div className="flex flex-wrap items-center gap-2 min-w-0">
+              <span className="font-sans text-neutral-400">
+                {t("relayKeys.endpoint")}:
+              </span>
+              <code className="sb-tag-pill text-neutral-200 font-mono">
+                {relayBaseUrl}
+              </code>
+            </div>
             <button
               type="button"
-              className="sb-btn sb-btn-ghost sb-btn-sm"
+              className="sb-btn sb-btn-ghost sb-btn-sm font-sans"
               onClick={() => handleCopy(relayBaseUrl, "endpoint")}
             >
               {copiedId === "endpoint" ? t("common.copied") : t("common.copy")}
             </button>
           </div>
-          <pre className="text-neutral-400 overflow-x-auto m-0">
+          <pre className="text-[11px] text-neutral-400 overflow-x-auto m-0">
             <code>{`curl '${relayBaseUrl}/models' -H "Authorization: Bearer $MICROCRAB_KEY"`}</code>
           </pre>
         </div>
 
-        <div className="flex items-center gap-2 pt-2 border-t border-dash-line">
+        {/* Quick Create Input Strip */}
+        <div className="flex flex-wrap items-center gap-2.5 pt-1">
           <input
+            ref={quickInputRef}
             type="text"
-            className="sb-input flex-1 text-xs"
+            className="sb-input flex-1 min-w-[220px]"
             data-testid="relay-key-quick-name"
             placeholder={t("relayKeys.namePlaceholder")}
             maxLength={100}
@@ -219,7 +260,7 @@ export const ApiKeysView: React.FC<{
           />
           <button
             type="button"
-            className="sb-btn sb-btn-primary text-xs shrink-0"
+            className="sb-btn sb-btn-secondary shrink-0"
             data-testid="relay-key-quick-create"
             disabled={pending || !quickKeyName.trim()}
             onClick={handleQuickCreate}
@@ -230,7 +271,10 @@ export const ApiKeysView: React.FC<{
       </div>
 
       {error && (
-        <div className="sb-card p-3 border-rose-500/20 text-xs text-rose-400" role="alert">
+        <div
+          className="sb-card p-3.5 border-rose-500/20 bg-rose-500/10 text-xs text-rose-400"
+          role="alert"
+        >
           {error}
         </div>
       )}
@@ -241,10 +285,10 @@ export const ApiKeysView: React.FC<{
           className="sb-card p-4 border-amber-500/40 bg-amber-500/5 space-y-3"
           data-testid="relay-key-secret-banner"
         >
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2 text-xs font-semibold text-amber-400">
               <svg
-                className="w-4 h-4"
+                className="w-4 h-4 shrink-0"
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
@@ -263,13 +307,13 @@ export const ApiKeysView: React.FC<{
               ✕ {t("relayKeys.dismissSecret")}
             </button>
           </div>
-          <div className="flex items-center gap-2">
-            <code className="sb-terminal-box p-2.5 flex-1 font-mono text-xs text-emerald-400 break-all select-all board-secret">
+          <div className="flex flex-wrap items-center gap-2">
+            <code className="sb-terminal-box p-3 flex-1 min-w-[200px] font-mono text-xs text-emerald-400 break-all select-all board-secret">
               {revealedSecret}
             </code>
             <button
               type="button"
-              className="sb-btn sb-btn-secondary"
+              className="sb-btn sb-btn-primary shrink-0"
               onClick={() => handleCopy(revealedSecret, "revealed")}
             >
               {copiedId === "revealed" ? t("common.copied") : t("relayKeys.copySecret")}
@@ -278,18 +322,130 @@ export const ApiKeysView: React.FC<{
         </div>
       )}
 
-      {/* Keys Table Card */}
-      <div className="sb-card overflow-hidden">
-        <div className="overflow-x-auto">
-          {loading && keys.length === 0 ? (
-            <p className="p-6 text-xs text-neutral-400" role="status">
-              {t("console.loading")}
-            </p>
-          ) : keys.length === 0 ? (
-            <p className="p-6 text-xs text-neutral-500 text-center" role="status">
-              {t("relayKeys.empty")}
-            </p>
-          ) : (
+      {/* Search & Status Filter Toolbar */}
+      <search aria-label={t("relayKeys.title")}>
+        <div className="sb-toolbar">
+          <div className="sb-search-wrap">
+            <svg
+              className="sb-search-icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              aria-hidden="true"
+            >
+              <circle cx="11" cy="11" r="8" />
+              <path d="m21 21-4.3-4.3" />
+            </svg>
+            <input
+              type="search"
+              className="sb-input"
+              aria-label={t("relayKeys.searchPlaceholder")}
+              placeholder={t("relayKeys.searchPlaceholder")}
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                className="sb-search-clear"
+                aria-label={t("relayKeys.clearSearch")}
+                onClick={() => setSearchQuery("")}
+              >
+                ×
+              </button>
+            )}
+          </div>
+
+          <div className="sb-filter-pills" role="group" aria-label={t("relayKeys.col.status")}>
+            <button
+              type="button"
+              className="sb-filter-pill"
+              aria-pressed={statusFilter === "all"}
+              onClick={() => setStatusFilter("all")}
+            >
+              <span>{t("relayKeys.filter.all")}</span>
+              <span className="sb-pill-count">{counts.all}</span>
+            </button>
+            <button
+              type="button"
+              className="sb-filter-pill"
+              aria-pressed={statusFilter === "active"}
+              onClick={() => setStatusFilter("active")}
+            >
+              <span>{t("relayKeys.filter.active")}</span>
+              <span className="sb-pill-count">{counts.active}</span>
+            </button>
+            <button
+              type="button"
+              className="sb-filter-pill"
+              aria-pressed={statusFilter === "disabled"}
+              onClick={() => setStatusFilter("disabled")}
+            >
+              <span>{t("relayKeys.filter.disabled")}</span>
+              <span className="sb-pill-count">{counts.disabled}</span>
+            </button>
+          </div>
+        </div>
+      </search>
+
+      {/* Keys Table or Modern Empty State */}
+      {loading && keys.length === 0 ? (
+        <div className="sb-card p-6 text-xs text-neutral-400" role="status">
+          {t("console.loading")}
+        </div>
+      ) : filteredKeys.length === 0 ? (
+        <div className="sb-empty-state" role="status">
+          <div className="sb-empty-icon" aria-hidden="true">
+            {hasFilters ? (
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                <circle cx="11" cy="11" r="8" />
+                <path d="m21 21-4.3-4.3" />
+              </svg>
+            ) : (
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                <path d="m15.5 7.5 2.3 2.3a1 1 0 0 0 1.4 0l2.1-2.1a1 1 0 0 0 0-1.4L19 4" />
+                <path d="m21 2-9.6 9.6" />
+                <circle cx="7.5" cy="15.5" r="5.5" />
+              </svg>
+            )}
+          </div>
+          <h3 className="sb-empty-title">
+            {hasFilters ? t("relayKeys.emptyFilterTitle") : t("relayKeys.emptyTitle")}
+          </h3>
+          <p className="sb-empty-desc">
+            {hasFilters
+              ? searchQuery.trim()
+                ? t("relayKeys.emptyFilterDesc", { query: searchQuery.trim() })
+                : t("relayKeys.emptyFilterDescNoQuery")
+              : t("relayKeys.description")}
+          </p>
+          <div className="sb-empty-actions">
+            {hasFilters ? (
+              <button
+                type="button"
+                className="sb-btn sb-btn-secondary"
+                onClick={() => {
+                  setSearchQuery("");
+                  setStatusFilter("all");
+                }}
+              >
+                {t("relayKeys.clearFilters")}
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="sb-btn sb-btn-primary"
+                onClick={openCreateModal}
+              >
+                + {t("relayKeys.modalCreate")}
+              </button>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="sb-card overflow-hidden">
+          <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse text-xs">
               <thead>
                 <tr className="border-b border-dash-line bg-dash-terminal text-[11px] text-neutral-400 font-medium">
@@ -301,11 +457,8 @@ export const ApiKeysView: React.FC<{
                   <th className="py-3 px-4 text-right">{t("relayKeys.col.actions")}</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-dash-line font-mono">
-                {keys.map((key) => {
-                  const scopeProviders = key.allowed_providers?.length
-                    ? key.allowed_providers.join(", ")
-                    : t("relayKeys.allProviders");
+              <tbody className="divide-y divide-dash-line">
+                {filteredKeys.map((key) => {
                   const defaultModel = relaySelectionKey(key.default_model_selection);
                   return (
                     <tr
@@ -313,25 +466,43 @@ export const ApiKeysView: React.FC<{
                       data-testid={`relay-key-row-${key.id}`}
                       className="hover:bg-dash-soft transition-colors"
                     >
-                      <td className="py-3 px-4 font-sans text-neutral-200 font-medium">
+                      <td className="py-3.5 px-4 font-sans text-neutral-200 font-medium">
                         {key.name}
                       </td>
-                      <td className="py-3 px-4 text-neutral-400">
-                        <span className="text-neutral-300 font-mono">
-                          {key.key_prefix}...
-                        </span>
+                      <td className="py-3.5 px-4 font-mono">
+                        <button
+                          type="button"
+                          className="sb-tag-pill font-mono hover:opacity-80 cursor-pointer"
+                          title={t("relayKeys.copyPrefix")}
+                          onClick={() => handleCopy(key.key_prefix, `prefix-${key.id}`)}
+                        >
+                          <span>{key.key_prefix}••••</span>
+                          <span className="text-[10px] text-neutral-400 font-sans">
+                            {copiedId === `prefix-${key.id}` ? t("common.copied") : t("common.copy")}
+                          </span>
+                        </button>
                       </td>
-                      <td className="py-3 px-4 text-[11px] text-neutral-400">
-                        <div className="truncate max-w-[200px]" title={scopeProviders}>
-                          {scopeProviders}
+                      <td className="py-3.5 px-4">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {key.allowed_providers?.length ? (
+                            key.allowed_providers.map((pid) => (
+                              <span key={pid} className="sb-tag-pill font-mono">
+                                {pid}
+                              </span>
+                            ))
+                          ) : (
+                            <span className="sb-tag-pill">
+                              {t("relayKeys.allProviders")}
+                            </span>
+                          )}
+                          {defaultModel && (
+                            <span className="sb-tag-pill font-mono text-neutral-400">
+                              {t("relayKeys.defaultTag")}: {defaultModel}
+                            </span>
+                          )}
                         </div>
-                        {defaultModel && (
-                          <div className="text-[10px] text-neutral-500 truncate max-w-[200px]">
-                            {t("relayKeys.defaultTag")}: {defaultModel}
-                          </div>
-                        )}
                       </td>
-                      <td className="py-3 px-4 text-[11px] text-neutral-400">
+                      <td className="py-3.5 px-4 text-[11px] text-neutral-400 font-mono">
                         <div>
                           {t("relayKeys.callsUnit", {
                             count: key.request_count.toLocaleString(),
@@ -343,18 +514,20 @@ export const ApiKeysView: React.FC<{
                             : t("relayKeys.neverUsed")}
                         </div>
                       </td>
-                      <td className="py-3 px-4">
+                      <td className="py-3.5 px-4">
                         {key.enabled ? (
-                          <span className="text-emerald-400 text-[11px]">
-                            {t("relayKeys.status.active")}
+                          <span className="sb-status-pill sb-status-pill-active">
+                            <span className="sb-status-dot" aria-hidden="true" />
+                            <span>{t("relayKeys.status.active")}</span>
                           </span>
                         ) : (
-                          <span className="text-amber-400 text-[11px]">
-                            {t("relayKeys.status.disabled")}
+                          <span className="sb-status-pill sb-status-pill-disabled">
+                            <span className="sb-status-dot" aria-hidden="true" />
+                            <span>{t("relayKeys.status.disabled")}</span>
                           </span>
                         )}
                       </td>
-                      <td className="py-3 px-4 text-right">
+                      <td className="py-3.5 px-4 text-right">
                         <div className="flex items-center justify-end gap-2">
                           <button
                             type="button"
@@ -397,9 +570,9 @@ export const ApiKeysView: React.FC<{
                 })}
               </tbody>
             </table>
-          )}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Create / Edit Key Modal (Native Top-Layer Dialog via ModalContainer) */}
       <ModalContainer

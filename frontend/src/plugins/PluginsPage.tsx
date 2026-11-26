@@ -83,7 +83,7 @@ export function PluginsPage({ embedded = false }: { embedded?: boolean }) {
         const candidates = [
           opener.current,
           ...document.querySelectorAll(
-            '[data-testid="rail-plugins-btn"], [data-testid="composer"] textarea',
+            '[data-testid="nav-dashboard"], [data-testid="composer"] textarea',
           ),
         ];
         candidates.find(visible)?.focus({ preventScroll: true });

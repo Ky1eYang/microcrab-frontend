@@ -5,10 +5,10 @@ import { useAppFields } from "../../../state";
 export function PluginsView() {
   const { state, dispatch } = useAppFields(["sessionId", "resolvedLocale"]);
   return (
-    <div className="sb-view-container space-y-4">
+    <div className="sb-plugins-host">
       {state.sessionId && (
-        <div className="sb-card p-3 flex flex-wrap items-center justify-between gap-2 text-xs">
-          <span className="text-neutral-400">
+        <div className="sb-plugins-scope-bar">
+          <span className="text-xs text-neutral-400">
             {t("console.plugins.globalScopeHint")}
           </span>
           <button

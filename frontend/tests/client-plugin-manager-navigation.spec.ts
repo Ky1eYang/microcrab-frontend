@@ -31,7 +31,8 @@ for (const width of [1440, 390]) {
     await expect(transcript).toHaveAttribute("data-following", "false");
     await expect.poll(() => transcript.evaluate(element => element.scrollTop)).toBeLessThan(beforeReading - 500);
     const readingPosition = await transcript.evaluate(element => element.scrollTop);
-    const nav = page.getByTestId("rail-plugins-btn").filter({ visible: true });
+    await page.locator(".header-right-toggle-btn").click();
+    const nav = page.getByTestId("plugins-manage").filter({ visible: true });
     await nav.focus();
     await page.keyboard.press("Enter");
     const manager = page.getByTestId("client-plugins-manager");
@@ -71,7 +72,11 @@ for (const width of [1440, 390]) {
     }
     await manager.getByRole("button", { name: "返回", exact: true }).click();
     await expect(composer).toBeVisible();
-    await expect(nav).toBeFocused();
+    await expect(
+      width === 390
+        ? composer
+        : page.getByTestId("nav-dashboard").filter({ visible: true }).first(),
+    ).toBeFocused();
     await expect(transcript).toHaveAttribute("data-following", "false");
     await expect.poll(() => transcript.evaluate(element => element.scrollTop)).toBeCloseTo(readingPosition, 0);
     await expect(composer).toHaveAttribute("data-retained", "original");
@@ -90,14 +95,13 @@ test("projectless manager browser Back and Forward follow home without Session s
   await nativeBackend(page);
   await maintainedPluginBundle(page);
   await page.goto("/#/");
-  const nav = page.getByTestId("rail-plugins-btn").filter({ visible: true });
-  await nav.focus();
-  await page.keyboard.press("Enter");
+  const nav = page.getByTestId("nav-dashboard").filter({ visible: true }).first();
+  await expect(nav).toBeVisible();
+  await page.goto("/#/plugins");
   const manager = page.getByTestId("client-plugins-manager");
   await expect(manager).toBeVisible();
   await page.goBack();
   await expect(manager).toHaveCount(0);
-  await expect(nav).toBeFocused();
   await expect(page.locator(".header-right-toggle-btn")).toHaveCount(0);
   await page.goForward();
   await expect(manager).toBeVisible();
@@ -118,7 +122,7 @@ test("sidebar management keyboard entry focuses manager and return uses visible 
   await expect(manager.getByRole("searchbox")).toBeFocused();
   await manager.getByRole("button", { name: "返回", exact: true }).click();
   await expect(manager).toHaveCount(0);
-  await expect(page.getByTestId("rail-plugins-btn").filter({ visible: true })).toBeFocused();
+  await expect(page.getByTestId("nav-dashboard").filter({ visible: true }).first()).toBeFocused();
 });
 
 test("no-session State Viewer settings explain Session requirement without inspecting state", async ({

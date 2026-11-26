@@ -339,16 +339,6 @@ export function SessionRail() {
         </button>
         <button
           className="rail-icon-btn"
-          data-testid="rail-plugins-btn"
-          data-active={state.page === "plugins" || state.page === "plugin"}
-          title={t("rail.plugins")}
-          aria-label={t("rail.plugins")}
-          onClick={() => emit("OpenPluginsPage")}
-        >
-          <Icon name="plugin" size={18} />
-        </button>
-        <button
-          className="rail-icon-btn"
           data-testid="nav-history"
           title={t("rail.search")}
           aria-label={t("rail.search")}
@@ -434,16 +424,6 @@ export function SessionRail() {
         >
           <Icon name="dashboard" size={15} />
           <span>{t("rail.dashboard")}</span>
-        </button>
-        <button
-          className="subnav-item-btn"
-          data-testid="rail-plugins-btn"
-          data-active={state.page === "plugins" || state.page === "plugin"}
-          title={t("rail.plugins")}
-          onClick={() => emit("OpenPluginsPage")}
-        >
-          <Icon name="plugin" size={15} />
-          <span>{t("rail.plugins")}</span>
         </button>
         <button
           className="subnav-item-btn"

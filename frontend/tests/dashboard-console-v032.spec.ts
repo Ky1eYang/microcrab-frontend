@@ -343,7 +343,11 @@ for (const width of [1440, 390]) {
 
     const railMenu = page.locator('.shell [data-testid="header-open-rail"]');
     if (await railMenu.isVisible()) await railMenu.click();
-    await page.locator('.shell [data-testid="nav-dashboard"]').filter({ visible: true }).first().click();
+    // Standalone rail-plugins-btn is removed; session rail renames entry to "控制台".
+    await expect(page.getByTestId("rail-plugins-btn")).toHaveCount(0);
+    const navConsole = page.locator('.shell [data-testid="nav-dashboard"]').filter({ visible: true }).first();
+    await expect(navConsole).toHaveAccessibleName("控制台");
+    await navConsole.click();
 
     await expect(page.getByTestId("dashboard")).toBeVisible();
     // Hidden shell must not occupy height below Console or expose document scrolling into chat.
@@ -369,9 +373,21 @@ for (const width of [1440, 390]) {
     await page.getByRole("tab", { name: "缓存分析" }).click();
     await expect(page.getByTestId("dashboard")).toContainText("80.0%");
 
-    // API Keys lifecycle + one-time reveal + {count} formatting + permanent deletion on revoke
+    // Library modern empty + filter states
+    await openMobileDashDrawerIfNeeded();
+    await page.getByTestId("dashboard-nav-library").click();
+    await expect(page.getByTestId("personal-library-view")).toContainText("参考库暂无任何对象");
+    await page.getByPlaceholder("搜索标题、ref_ID 或 MIME 类型…").fill("nonexistent");
+    await expect(page.getByTestId("personal-library-view")).toContainText("当前筛选条件下没有内容");
+    await page.getByRole("button", { name: "重置筛选与搜索" }).click();
+    await expect(page.getByTestId("personal-library-view")).toContainText("参考库暂无任何对象");
+
+    // API Keys lifecycle + filter empty state + one-time reveal + {count} formatting + permanent deletion
     await openMobileDashDrawerIfNeeded();
     await page.getByTestId("dashboard-nav-keys").click();
+    await page.getByPlaceholder("按名称、前缀、服务商或模型搜索…").fill("no-match-key");
+    await expect(page.getByTestId("dashboard")).toContainText("当前筛选条件下没有内容");
+    await page.getByRole("button", { name: "重置筛选条件" }).click();
     await page.getByTestId("relay-key-quick-name").fill("New Automation Key");
     await page.getByTestId("relay-key-quick-create").click();
     await expect(page.getByTestId("relay-key-secret-banner")).toContainText(
@@ -383,7 +399,7 @@ for (const width of [1440, 390]) {
     await page.getByTestId("relay-key-confirm-revoke").click();
     await expect(page.getByTestId("relay-key-row-rk-2")).toHaveCount(0);
 
-    // Usage Logs & Plugins (verify WASM rail is not squashed) & Console Preferences sync
+    // Usage Logs & Plugins (flush single container + rail height) & Console Preferences sync
     await openMobileDashDrawerIfNeeded();
     await page.getByTestId("dashboard-nav-logs").click();
     await expect(page.getByTestId("dashboard")).toContainText("CLI Client");
@@ -391,10 +407,14 @@ for (const width of [1440, 390]) {
     await openMobileDashDrawerIfNeeded();
     await page.getByTestId("dashboard-nav-plugins").click();
     await expect(page.getByTestId("client-plugins-manager")).toBeVisible();
-    const railHeight = await page
-      .getByTestId("client-plugins-rail")
-      .evaluate((el) => el.getBoundingClientRect().height);
-    expect(railHeight).toBeGreaterThan(220);
+    const pluginBorders = await page
+      .getByTestId("client-plugins-manager")
+      .evaluate((el) => ({
+        border: getComputedStyle(el).borderTopWidth,
+        railHeight: el.querySelector('[data-testid="client-plugins-rail"]')?.getBoundingClientRect().height ?? 0,
+      }));
+    expect(pluginBorders.border).toBe("0px");
+    expect(pluginBorders.railHeight).toBeGreaterThan(220);
 
     await openMobileDashDrawerIfNeeded();
     await page.getByTestId("dashboard-nav-settings").click();

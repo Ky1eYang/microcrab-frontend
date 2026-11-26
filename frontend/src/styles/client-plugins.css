@@ -65,10 +65,12 @@
 }
 
 .client-plugins-page[data-embedded="true"] {
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  height: clamp(540px, calc(100dvh - 148px), 920px);
-  min-height: 520px;
+  border: 0;
+  border-radius: 0;
+  flex: 1 1 0;
+  min-height: 0;
+  height: 100%;
+  background: var(--bg);
 }
 
 .client-plugins-page h2 {
@@ -886,6 +888,7 @@
   .client-plugins-page,
   .client-plugins-page[data-embedded="true"] {
     flex-direction: column;
+    flex: 1 1 auto;
     height: auto;
     min-height: 0;
     overflow-y: auto;

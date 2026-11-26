@@ -220,7 +220,14 @@ export const DashboardPage: React.FC = () => {
           )}
         </header>
 
-        <div ref={contentRef} className="sb-dashboard-content">
+        <div
+          ref={contentRef}
+          className={
+            tab === "plugins"
+              ? "sb-dashboard-content sb-dashboard-content-flush"
+              : "sb-dashboard-content"
+          }
+        >
           <Suspense
             fallback={
               <div className="sb-view-container">

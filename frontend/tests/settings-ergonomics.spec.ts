@@ -246,19 +246,17 @@ test("recents persist minimal identities only within their owner and review curr
   await expect(page.getByText("最近选择", { exact: true })).toHaveCount(0);
 });
 
-test("Settings plugin entry opens dedicated management and returns to conversation", async ({
+test("Sidebar plugin management entry opens dedicated management and returns to conversation", async ({
   page,
 }) => {
   await nativeBackend(page, { owner: "settings-owner-a" });
   await page.goto("/#session/s1");
-  await page.getByRole("button", { name: "Test User", exact: true }).click();
-  await page.getByRole("button", { name: "设置", exact: true }).click();
-  await page.getByRole("button", { name: "客户端工具", exact: true }).click();
-  await page.getByRole("button", { name: "客户端插件", exact: true }).click();
+  await expect(page.getByTestId("composer").locator("textarea")).toBeVisible();
+  await page.locator(".header-right-toggle-btn").click();
+  await page.getByTestId("plugins-manage").click();
   const manager = page.getByTestId("client-plugins-manager");
   await expect(manager).toBeVisible();
   await expect(page.getByTestId("content-dialog")).toHaveCount(0);
-  await expect(page.getByRole("dialog", { name: "设置", exact: true })).toHaveCount(0);
   await expect(page).toHaveURL(/session\/s1\/plugins$/);
   await manager.getByRole("button", { name: "返回", exact: true }).click();
   await expect(manager).toHaveCount(0);
