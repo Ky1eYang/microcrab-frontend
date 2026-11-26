@@ -1178,6 +1178,10 @@ export interface AppState {
   authRequired?: boolean;
   connection: string;
   page: string;
+  dashboardTab?: import("./dashboard-route").DashboardTab;
+  dashboardSubTab?: import("./dashboard-route").DashboardSubTab;
+  consoleSettingsSection?: import("./dashboard-route").ConsoleSettingsSection;
+  accountPreferences?: import("./account-preferences").AccountPreferences | null;
   pluginId?: string | null;
   pluginReturnPath?: string | null;
   pluginWorkspace?: { type: "view"; pluginId: string } | null;

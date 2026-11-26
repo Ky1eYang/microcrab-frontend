@@ -1,6 +1,6 @@
 import { referenceLabels } from "../referenceLabels";
 import { ExternalSpeakersSettings } from "./ExternalSpeakersSettings";
-import { OwnerSettings, ProvidersSettings } from "./OwnerSettings";
+import { OwnerSettings } from "./OwnerSettings";
 import {
   browserHostOrigins,
   resetBrowserHostOrigins,
@@ -273,8 +273,6 @@ export function SettingsDialog() {
     return dispatch({ type, value });
   };
   const tabs = [
-    ["providers", t("ownerSettings.providers"), t("ownerSettings.providers")],
-    ["defaults", t("ownerSettings.defaults"), t("ownerSettings.defaults")],
     ["session-config", t("ownerSettings.session"), t("ownerSettings.session")],
     [
       "backend",
@@ -316,26 +314,7 @@ export function SettingsDialog() {
       strokeLinecap="round"
       strokeLinejoin="round"
     >
-      {tab === "providers" ? (
-        <>
-          <rect x="2" y="3" width="20" height="7" rx="2" />
-          <rect x="2" y="14" width="20" height="7" rx="2" />
-          <line x1="6" y1="6.5" x2="6.01" y2="6.5" />
-          <line x1="6" y1="17.5" x2="6.01" y2="17.5" />
-        </>
-      ) : tab === "defaults" ? (
-        <>
-          <line x1="4" y1="21" x2="4" y2="14" />
-          <line x1="4" y1="10" x2="4" y2="3" />
-          <line x1="12" y1="21" x2="12" y2="12" />
-          <line x1="12" y1="8" x2="12" y2="3" />
-          <line x1="20" y1="21" x2="20" y2="16" />
-          <line x1="20" y1="12" x2="20" y2="3" />
-          <line x1="1" y1="14" x2="7" y2="14" />
-          <line x1="9" y1="8" x2="15" y2="8" />
-          <line x1="17" y1="16" x2="23" y2="16" />
-        </>
-      ) : tab === "session-config" ? (
+      {tab === "session-config" ? (
         <>
           <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
         </>
@@ -384,8 +363,8 @@ export function SettingsDialog() {
         <aside className="settings-nav">
           <div className="settings-nav-title">{t("settingsDlg.title")}</div>
           {[
-            [0, 6, t("settingsDlg.group.system")],
-            [6, 9, t("settingsDlg.group.data")],
+            [0, 4, t("settingsDlg.group.system")],
+            [4, 7, t("settingsDlg.group.data")],
           ].map(([start, end, title]) => (
             <div className="settings-nav-group" key={String(title)}>
               <div className="settings-nav-group-label">{title}</div>
@@ -406,7 +385,7 @@ export function SettingsDialog() {
         <section className="settings-content-wrapper">
           <div className="settings-header">
             <h3 className="settings-tab-heading">
-              {tabs.find((t) => t[0] === p.tab)?.[2]}
+              {tabs.find((t) => t[0] === p.tab)?.[2] ?? t("console.movedSettingsTitle")}
             </h3>
             <button
               className="settings-close-btn"
@@ -419,13 +398,29 @@ export function SettingsDialog() {
           </div>
           <div className="settings-body" ref={body}>
             <div className="settings-tab-pane">
-              {p.tab === "providers" && (
-                <ProvidersSettings key={networkOwner} />
-              )}
-              {p.tab === "defaults" && (
-                <>
-                  <OwnerSettings key={networkOwner} />
-                </>
+              {(p.tab === "providers" || p.tab === "defaults") && (
+                <div className="settings-card">
+                  <div className="settings-card-title">
+                    {t("console.movedSettingsTitle")}
+                  </div>
+                  <p className="settings-description">
+                    {t("console.movedSettingsBody")}
+                  </p>
+                  <div className="settings-actions-row">
+                    <button
+                      type="button"
+                      className="primary-btn"
+                      onClick={() =>
+                        void dispatch({
+                          type: "OpenDashboard",
+                          value: p.tab === "providers" ? "settings/providers" : "settings/defaults",
+                        })
+                      }
+                    >
+                      {t("console.openConsoleSettings")}
+                    </button>
+                  </div>
+                </div>
               )}
               {p.tab === "session-config" &&
                 (state.sessionId ? (

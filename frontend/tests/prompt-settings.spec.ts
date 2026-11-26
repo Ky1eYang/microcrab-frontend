@@ -51,14 +51,25 @@ async function setup(
     },
   );
   await page.goto("/#session/s1");
-  await page.getByRole("button", { name: "Test User", exact: true }).click();
-  await page.getByRole("button", { name: "设置", exact: true }).click();
-  await page
-    .getByRole("button", {
-      name: session ? "当前会话配置" : "会话默认设置",
-      exact: true,
-    })
-    .click();
+  if (session) {
+    await page.getByRole("button", { name: "Test User", exact: true }).click();
+    await page.getByRole("button", { name: "设置", exact: true }).click();
+    await page
+      .getByRole("button", {
+        name: "当前会话配置",
+        exact: true,
+      })
+      .click();
+  } else {
+    await expect(page.getByTestId("composer")).toBeVisible();
+    const railMenu = page.locator('.shell [data-testid="header-open-rail"]');
+    if (await railMenu.isVisible()) await railMenu.click();
+    await page.locator('.shell [data-testid="nav-dashboard"]').filter({ visible: true }).first().click();
+    const dashMenu = page.locator('[data-testid="dashboard"] [data-testid="header-open-rail"]');
+    if (await dashMenu.isVisible()) await dashMenu.click();
+    await page.getByTestId("dashboard-nav-settings").click();
+    await page.getByTestId("console-settings-tab-defaults").click();
+  }
   await expect(page.getByTestId("prompt-settings")).toBeVisible();
   return { writes, backend };
 }

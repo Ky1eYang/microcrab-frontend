@@ -5,6 +5,10 @@ import type {
   DraftWorkspace,
   SessionView,
 } from "../client/types";
+import {
+  parseDashboardPath,
+  type DashboardLocation,
+} from "../client/dashboard-route";
 import { t } from "../i18n";
 import { createTranscript } from "../client/projector";
 import { resolveApiBase } from "../client/api";
@@ -15,6 +19,10 @@ export function initialState(): AppState {
   return {
     connection: "disconnected",
     page: "home",
+    dashboardTab: "dashboard",
+    dashboardSubTab: "overview",
+    consoleSettingsSection: "providers",
+    accountPreferences: null,
     sessionId: null,
     sessionAttachingId: null,
     sessions: [],
@@ -214,6 +222,7 @@ export interface AppRoute {
   sessionId: string | null;
   parentId?: string | null;
   pluginId?: string | null;
+  dashboard?: DashboardLocation;
 }
 const decodeSegment = (value: string) => {
   try {
@@ -232,13 +241,9 @@ export function parseLocation(pathname: string, hash: string): AppRoute {
   const clean = (s: string) => s.replace(/^#?\/?|\/$/g, "");
   const pathPart = clean(pathname);
   const hashPart = clean(hash);
-  if (
-    pathPart === "dashboard" ||
-    hashPart === "dashboard" ||
-    pathPart === "admin" ||
-    hashPart === "admin"
-  ) {
-    return { page: "dashboard", sessionId: null };
+  const dashboard = parseDashboardPath(hashPart) ?? parseDashboardPath(pathPart);
+  if (dashboard) {
+    return { page: "dashboard", sessionId: null, dashboard };
   }
   const path = hashPart || pathPart;
   const plugin = /^(?:session\/([^/]+)\/)?plugins(?:\/([^/]+))?$/.exec(path);

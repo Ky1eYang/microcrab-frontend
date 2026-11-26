@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useId, useRef } from "react";
 
 export interface ModalContainerProps {
   isOpen: boolean;
@@ -25,43 +25,42 @@ export const ModalContainer: React.FC<ModalContainerProps> = ({
   confirmDisabled = false,
   maxWidth = "max-w-lg",
 }) => {
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        onClose();
-      }
-    };
-    if (isOpen) {
-      window.addEventListener("keydown", handleKeyDown);
-    }
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [isOpen, onClose]);
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
 
-  if (!isOpen) return null;
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    if (isOpen) {
+      if (!dialog.open) dialog.showModal();
+    } else if (dialog.open) {
+      dialog.close();
+    }
+  }, [isOpen]);
 
   return (
-    <div
-      className="sb-modal-backdrop"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) {
-          onClose();
-        }
+    <dialog
+      ref={dialogRef}
+      className="sb-native-dialog"
+      aria-labelledby={titleId}
+      onCancel={(event) => {
+        event.preventDefault();
+        onClose();
+      }}
+      onClick={(event) => {
+        if (event.target === dialogRef.current) onClose();
       }}
     >
-      <div
-        className={`sb-modal-box sb-card ${maxWidth}`}
-        role="dialog"
-        aria-modal="true"
-      >
+      <div className={`sb-modal-box sb-card ${maxWidth}`}>
         <div className="sb-modal-header">
-          <h3 className="sb-modal-title">{title}</h3>
+          <h3 id={titleId} className="sb-modal-title">
+            {title}
+          </h3>
           <button
             type="button"
             className="sb-modal-close"
             onClick={onClose}
-            aria-label="Close"
+            aria-label={cancelText}
           >
             ✕
           </button>
@@ -95,6 +94,6 @@ export const ModalContainer: React.FC<ModalContainerProps> = ({
           )}
         </div>
       </div>
-    </div>
+    </dialog>
   );
 };

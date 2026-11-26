@@ -1624,7 +1624,8 @@ export class ApiClient {
     executorLease?: string,
     sensitive = false,
     readOnlyRequest = false,
-    nativeStateDecoder?: (text: string, signal: AbortSignal) => Promise<T>,
+    decodeSuccess?: (text: string, signal: AbortSignal, headers: Headers) => Promise<T> | T,
+    acceptHeader?: string,
   ): Promise<T> {
     const controller = new AbortController();
     const abort = () => controller.abort(signal?.reason);
@@ -1645,7 +1646,9 @@ export class ApiClient {
         credentials: "include",
         cache: "no-store",
         headers: {
-          Accept: binary ? "application/octet-stream, image/png, image/jpeg, image/gif, image/webp" : "application/json",
+          Accept: binary
+            ? "application/octet-stream, image/png, image/jpeg, image/gif, image/webp"
+            : acceptHeader ?? "application/json",
           "x-client-tab-id": this.tabId,
           ...(trigger ? { "x-client-trigger": trigger } : {}),
           ...(body === undefined ? {} : { "Content-Type": contentType }),
@@ -1676,7 +1679,7 @@ export class ApiClient {
         return await boundedCitationBlob(response, controller.signal) as T;
       // Bound reads while streaming; an unreadable success can hide an admitted mutation.
       const reader = response.body?.getReader();
-      const decoder = new TextDecoder("utf-8", { fatal: !!nativeStateDecoder && response.ok });
+      const decoder = new TextDecoder("utf-8", { fatal: !!decodeSuccess && response.ok });
       const decode = (input?: Uint8Array) => {
         try {
           return input ? decoder.decode(input, { stream: true }) : decoder.decode();
@@ -1708,8 +1711,8 @@ export class ApiClient {
           reader.releaseLock();
         }
       }
-      if (response.ok && nativeStateDecoder)
-        return await nativeStateDecoder(text, controller.signal);
+      if (response.ok && decodeSuccess)
+        return await decodeSuccess(text, controller.signal, response.headers);
       let data: any;
       try {
         data = JSON.parse(text);
@@ -1915,6 +1918,129 @@ export class ApiClient {
       30000,
     );
   }
+  readDashboardReport<E extends keyof import("./dashboard-usage").DashboardReports>(
+    userId: string,
+    route: E,
+    query: URLSearchParams,
+    signal?: AbortSignal,
+  ): Promise<import("./dashboard-usage").DashboardReports[E]> {
+    type Report = import("./dashboard-usage").DashboardReports[E];
+    const path = this.url(`api/v1/users/${encodeURIComponent(userId)}/dashboard/${route}?${query}`);
+    if (route !== "logs.csv") {
+      return this.http<Report>(path, "GET", undefined, 30000, undefined, undefined, undefined, signal);
+    }
+    return this.http<Report>(
+      path,
+      "GET",
+      undefined,
+      30000,
+      undefined,
+      undefined,
+      undefined,
+      signal,
+      false,
+      undefined,
+      false,
+      true,
+      (text, _, headers) => {
+        const truncated = headers.get("x-microcrab-export-truncated");
+        if (
+          !/^text\/csv(?:;|$)/i.test(headers.get("content-type") ?? "") ||
+          (truncated !== "true" && truncated !== "false")
+        ) {
+          throw new CommandError("invalid_result", "Server returned an invalid CSV export", true);
+        }
+        return { text, truncated: truncated === "true" } as Report;
+      },
+      "text/csv",
+    );
+  }
+  async readAccountPreferences(owner: string, signal?: AbortSignal) {
+    const mod = await import("./account-preferences");
+    const result = await this.http<import("./account-preferences").AccountPreferences>(
+      this.url(`api/v1/users/${encodeURIComponent(owner)}/preferences`),
+      "GET",
+      undefined,
+      10000,
+      undefined,
+      undefined,
+      undefined,
+      signal,
+    );
+    return mod.validateAccountPreferences(result);
+  }
+  async saveAccountPreferences(
+    owner: string,
+    payload: import("./account-preferences").SaveAccountPreferences,
+    signal?: AbortSignal,
+  ) {
+    const mod = await import("./account-preferences");
+    const result = await this.http<import("./account-preferences").AccountPreferences>(
+      this.url(`api/v1/users/${encodeURIComponent(owner)}/preferences`),
+      "PUT",
+      JSON.stringify(payload),
+      10000,
+      "application/json",
+      undefined,
+      undefined,
+      signal,
+    );
+    return mod.validateAccountPreferences(result, payload);
+  }
+  private relayKeyPath(owner: string, id?: string) {
+    return this.url(
+      `api/v1/users/${encodeURIComponent(owner)}/api-keys${id ? `/${encodeURIComponent(id)}` : ""}`,
+    );
+  }
+  listRelayKeys(owner: string, signal?: AbortSignal) {
+    return this.http<{ keys: import("./relay-keys").RelayKey[] }>(
+      this.relayKeyPath(owner),
+      "GET",
+      undefined,
+      30000,
+      undefined,
+      undefined,
+      undefined,
+      signal,
+    );
+  }
+  createRelayKey(owner: string, payload: import("./relay-keys").RelayKeyConfig) {
+    return this.http<{ key: import("./relay-keys").RelayKey; secret: string }>(
+      this.relayKeyPath(owner),
+      "POST",
+      JSON.stringify(payload),
+      30000,
+      "application/json",
+      undefined,
+      undefined,
+      undefined,
+      false,
+      undefined,
+      true,
+    );
+  }
+  editRelayKey(
+    owner: string,
+    id: string,
+    payload: Partial<import("./relay-keys").RelayKeyConfig> & { expected_revision: number },
+  ) {
+    return this.http<{ key: import("./relay-keys").RelayKey }>(
+      this.relayKeyPath(owner, id),
+      "PATCH",
+      JSON.stringify(payload),
+      30000,
+      "application/json",
+    );
+  }
+  revokeRelayKey(owner: string, id: string, expected_revision: number) {
+    return this.http<{ key: import("./relay-keys").RelayKey }>(
+      this.relayKeyPath(owner, id),
+      "DELETE",
+      JSON.stringify({ expected_revision }),
+      30000,
+      "application/json",
+    );
+  }
   async libraryList(
     userId: string,
     filters?: {
@@ -1950,7 +2076,7 @@ export class ApiClient {
   ) {
     if (this.httpPending.size + this.pending.size >= MAX_PENDING)
       throw new CommandError("overloaded", "Too many pending requests");
-    const query = new URLSearchParams();
+    const query = new URLSearchParams({ upload: "true" });
     if (opts?.title?.trim()) query.set("title", opts.title.trim());
     if (opts?.mountSessionId)
       query.set("mount_session_id", opts.mountSessionId);

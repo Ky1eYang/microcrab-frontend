@@ -1,108 +1,246 @@
-import React, { useState } from "react";
-import { useApp } from "../../../state";
+import React, { useEffect, useRef, useState } from "react";
+import { relaySelectionKey } from "../../../client/account-preferences";
+import type { RelayKey } from "../../../client/relay-keys";
+import type { NativeModelSelection } from "../../../client/types";
+import { t } from "../../../i18n";
+import { useAppFields, useAppStore } from "../../../state";
 import { ModalContainer } from "../components/ModalContainer";
-import { mockApiKeys } from "../mockData";
 
-export const ApiKeysView: React.FC = () => {
-  const { state, dispatch } = useApp();
-  const board = state.board;
-  const isAdmin = board.role === "admin" || board.role === "super_admin";
+export const ApiKeysView: React.FC<{
+  owner: string;
+  refreshSignal?: number;
+}> = ({ owner, refreshSignal = 0 }) => {
+  const { state, dispatch } = useAppFields(["apiBase", "resolvedLocale"]);
+  const store = useAppStore();
+  const api = store.api;
 
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [newKeyName, setNewKeyName] = useState("");
+  const [keys, setKeys] = useState<RelayKey[]>([]);
+  const [relayModels, setRelayModels] = useState<NativeModelSelection[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [pending, setPending] = useState(false);
+  const mutationInFlight = useRef(false);
+  const [localRefresh, setLocalRefresh] = useState(0);
+
   const [quickKeyName, setQuickKeyName] = useState("");
-  const [newKeyRole, setNewKeyRole] = useState<"user" | "admin">("user");
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editing, setEditing] = useState<RelayKey | null>(null);
+  const [formName, setFormName] = useState("");
+  const [formProviders, setFormProviders] = useState("");
+  const [formModel, setFormModel] = useState("");
+  const [formEnabled, setFormEnabled] = useState(true);
+
+  const [revealedSecret, setRevealedSecret] = useState<string | null>(null);
+  const [revokeTarget, setRevokeTarget] = useState<RelayKey | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  // If real keys from backend exist, use them. Otherwise fallback to mock keys.
-  const backendKeys = board.keys || [];
-  const displayRealKeys = backendKeys.length > 0;
+  useEffect(() => {
+    const abort = new AbortController();
+    setLoading(true);
+    setError("");
+    Promise.all([
+      api.listRelayKeys(owner, abort.signal),
+      api.readAccountPreferences(owner, abort.signal).catch(() => null),
+    ])
+      .then(
+        ([keyRes, prefs]) => {
+          if (!abort.signal.aborted) {
+            setKeys(keyRes.keys);
+            if (prefs) setRelayModels(prefs.relay_models);
+          }
+        },
+        (cause: unknown) => {
+          if (!abort.signal.aborted) {
+            setError(cause instanceof Error ? cause.message : String(cause));
+          }
+        },
+      )
+      .finally(() => {
+        if (!abort.signal.aborted) setLoading(false);
+      });
+    return () => abort.abort();
+  }, [api, owner, refreshSignal, localRefresh]);
+
+  const mutate = async (work: () => Promise<void>) => {
+    if (mutationInFlight.current) return;
+    mutationInFlight.current = true;
+    setPending(true);
+    setError("");
+    try {
+      await work();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      mutationInFlight.current = false;
+      setPending(false);
+      setLocalRefresh((n) => n + 1);
+    }
+  };
 
   const handleCopy = (text: string, id: string) => {
-    dispatch({ type: "CopyText", value: text });
+    void dispatch({ type: "CopyText", value: text });
     setCopiedId(id);
-    setTimeout(() => setCopiedId(null), 2000);
+    window.setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  const openCreateModal = () => {
+    setEditing(null);
+    setFormName("");
+    setFormProviders("");
+    setFormModel("");
+    setFormEnabled(true);
+    setIsModalOpen(true);
+  };
+
+  const openEditModal = (key: RelayKey) => {
+    setEditing(key);
+    setFormName(key.name);
+    setFormProviders(key.allowed_providers?.join(", ") ?? "");
+    setFormModel(relaySelectionKey(key.default_model_selection));
+    setFormEnabled(key.enabled);
+    setIsModalOpen(true);
   };
 
   const handleQuickCreate = () => {
     if (!quickKeyName.trim()) return;
-    dispatch({
-      type: "CreateUserKey",
-      value: quickKeyName.trim(),
-    });
+    const name = quickKeyName.trim();
     setQuickKeyName("");
+    void mutate(async () => {
+      const created = await api.createRelayKey(owner, { name, enabled: true });
+      setRevealedSecret(created.secret);
+    });
   };
 
-  const handleCreateKey = () => {
-    if (!newKeyName.trim()) return;
-    if (isAdmin && newKeyRole === "admin") {
-      dispatch({
-        type: "CreatePrivilegedKey",
-        name: newKeyName.trim(),
-        role: "admin",
-      });
-    } else {
-      dispatch({
-        type: "CreateUserKey",
-        value: newKeyName.trim(),
-      });
+  const handleSubmitModal = () => {
+    if (!formName.trim()) return;
+    const trimmedModel = formModel.trim();
+    const slash = trimmedModel.indexOf("/");
+    if (trimmedModel && (slash <= 0 || !trimmedModel.slice(slash + 1).trim())) {
+      setError(t("relayKeys.modelFormat"));
+      return;
     }
-    setNewKeyName("");
+    const parsedProviders = formProviders.trim()
+      ? [
+          ...new Set(
+            formProviders
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean),
+          ),
+        ]
+      : null;
+
+    const payload = {
+      name: formName.trim(),
+      enabled: formEnabled,
+      allowed_providers: parsedProviders,
+      default_model_selection: trimmedModel
+        ? {
+            provider_id: trimmedModel.slice(0, slash).trim(),
+            model: trimmedModel.slice(slash + 1).trim(),
+          }
+        : null,
+    };
+
+    const currentEdit = editing;
     setIsModalOpen(false);
+    void mutate(async () => {
+      if (currentEdit) {
+        await api.editRelayKey(owner, currentEdit.id, {
+          ...payload,
+          expected_revision: currentEdit.revision,
+        });
+      } else {
+        const created = await api.createRelayKey(owner, payload);
+        setRevealedSecret(created.secret);
+      }
+    });
   };
 
-  const handleRevoke = (keyId: string) => {
-    if (window.confirm("确定要吊销此 API 密钥吗？吊销后将无法继续发起请求。")) {
-      dispatch({ type: "RevokeKey", id: keyId, admin: isAdmin });
-    }
-  };
+  const relayBaseUrl = new URL("/v1", state.apiBase || window.location.origin).toString();
+  const distinctProviders = [...new Set(relayModels.map((m) => m.provider_id))];
 
   return (
     <div className="sb-view-container space-y-4">
-      {/* Top Header Card */}
+      {/* Top Header & Quick Create Card */}
       <div className="sb-card p-4 space-y-3">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <h2 className="text-xs font-semibold text-neutral-200">
-              API 密钥管理
+              {t("relayKeys.title")}
             </h2>
             <p className="text-[11px] text-neutral-500 mt-0.5">
-              管理各令牌的调用权限、速率限制、Token 消耗与吊销状态
+              {t("relayKeys.description")}
             </p>
           </div>
           <button
             type="button"
             className="sb-btn sb-btn-ghost sb-btn-sm"
-            onClick={() => setIsModalOpen(true)}
+            data-testid="relay-key-open-modal"
+            disabled={pending}
+            onClick={openCreateModal}
           >
-            <span>+ 模态窗新建</span>
+            <span>+ {t("relayKeys.modalCreate")}</span>
           </button>
+        </div>
+
+        {/* Relay Endpoint Box */}
+        <div className="sb-terminal-box p-3 space-y-1.5 text-[11px] font-mono">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="text-neutral-400">
+              {t("relayKeys.endpoint")}:{" "}
+              <code className="text-neutral-200">{relayBaseUrl}</code>
+            </span>
+            <button
+              type="button"
+              className="sb-btn sb-btn-ghost sb-btn-sm"
+              onClick={() => handleCopy(relayBaseUrl, "endpoint")}
+            >
+              {copiedId === "endpoint" ? t("common.copied") : t("common.copy")}
+            </button>
+          </div>
+          <pre className="text-neutral-400 overflow-x-auto m-0">
+            <code>{`curl '${relayBaseUrl}/models' -H "Authorization: Bearer $MICROCRAB_KEY"`}</code>
+          </pre>
         </div>
 
         <div className="flex items-center gap-2 pt-2 border-t border-dash-line">
           <input
             type="text"
             className="sb-input flex-1 text-xs"
-            placeholder="密钥名称"
+            data-testid="relay-key-quick-name"
+            placeholder={t("relayKeys.namePlaceholder")}
+            maxLength={100}
             value={quickKeyName}
             onChange={(e) => setQuickKeyName(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter") handleQuickCreate();
+              if (e.key === "Enter" && !e.nativeEvent.isComposing) handleQuickCreate();
             }}
           />
           <button
             type="button"
             className="sb-btn sb-btn-primary text-xs shrink-0"
+            data-testid="relay-key-quick-create"
+            disabled={pending || !quickKeyName.trim()}
             onClick={handleQuickCreate}
           >
-            创建 User 密钥
+            {t("relayKeys.createButton")}
           </button>
         </div>
       </div>
 
+      {error && (
+        <div className="sb-card p-3 border-rose-500/20 text-xs text-rose-400" role="alert">
+          {error}
+        </div>
+      )}
+
       {/* Secret Banner for Newly Created Key */}
-      {board.revealed && (
-        <div className="sb-card p-4 border-amber-500/40 bg-amber-500/5 space-y-3">
+      {revealedSecret && (
+        <div
+          className="sb-card p-4 border-amber-500/40 bg-amber-500/5 space-y-3"
+          data-testid="relay-key-secret-banner"
+        >
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 text-xs font-semibold text-amber-400">
               <svg
@@ -111,29 +249,30 @@ export const ApiKeysView: React.FC = () => {
                 fill="none"
                 stroke="currentColor"
                 strokeWidth="2"
+                aria-hidden="true"
               >
                 <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
               </svg>
-              <span>请妥善保存新密钥（仅显示一次）</span>
+              <span>{t("relayKeys.onceNotice")}</span>
             </div>
             <button
               type="button"
-              className="text-xs text-neutral-400 hover:text-white"
-              onClick={() => dispatch({ type: "DismissRevealed" })}
+              className="sb-btn sb-btn-ghost sb-btn-sm"
+              onClick={() => setRevealedSecret(null)}
             >
-              ✕ 我已保存
+              ✕ {t("relayKeys.dismissSecret")}
             </button>
           </div>
           <div className="flex items-center gap-2">
             <code className="sb-terminal-box p-2.5 flex-1 font-mono text-xs text-emerald-400 break-all select-all board-secret">
-              {board.revealed}
+              {revealedSecret}
             </code>
             <button
               type="button"
               className="sb-btn sb-btn-secondary"
-              onClick={() => handleCopy(board.revealed!, "revealed")}
+              onClick={() => handleCopy(revealedSecret, "revealed")}
             >
-              {copiedId === "revealed" ? "已复制 ✓" : "复制密钥"}
+              {copiedId === "revealed" ? t("common.copied") : t("relayKeys.copySecret")}
             </button>
           </div>
         </div>
@@ -142,183 +281,253 @@ export const ApiKeysView: React.FC = () => {
       {/* Keys Table Card */}
       <div className="sb-card overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse text-xs">
-            <thead>
-              <tr className="border-b border-dash-line bg-dash-terminal text-[11px] text-neutral-400 font-medium">
-                <th className="py-3 px-4">名称</th>
-                <th className="py-3 px-4">密钥前缀 / 令牌</th>
-                <th className="py-3 px-4">权限角色</th>
-                <th className="py-3 px-4">状态</th>
-                <th className="py-3 px-4 text-right">操作</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-dash-line font-mono">
-              {displayRealKeys
-                ? backendKeys.map((key: any) => {
-                    const isCurrent = key.id === board.keyId;
-                    const isRevoked = !!key.revoked;
-                    return (
-                      <tr
-                        key={key.id}
-                        className="hover:bg-dash-soft transition-colors"
-                      >
-                        <td className="py-3 px-4 font-sans text-neutral-200 font-medium">
-                          {key.name || "未命名密钥"}
-                          {isCurrent && (
-                            <span className="ml-2 px-1.5 py-0.5 rounded text-[10px] bg-blue-500/10 text-blue-400 border border-blue-500/20 font-mono">
-                              当前使用
-                            </span>
-                          )}
-                        </td>
-                        <td className="py-3 px-4 text-neutral-400">
-                          <span className="text-neutral-300 font-mono">
-                            {key.keyPrefix ? `${key.keyPrefix}...` : key.id}
-                          </span>
-                        </td>
-                        <td className="py-3 px-4">
-                          <span className="px-2 py-0.5 rounded text-[10px] bg-neutral-800 text-neutral-300 border border-neutral-700 font-mono uppercase">
-                            {key.role || "user"}
-                          </span>
-                        </td>
-                        <td className="py-3 px-4">
-                          {isRevoked ? (
-                            <span className="text-rose-400 text-[11px]">
-                              已吊销
-                            </span>
-                          ) : (
-                            <span className="text-emerald-400 text-[11px]">
-                              有效
-                            </span>
-                          )}
-                        </td>
-                        <td className="py-3 px-4 text-right">
-                          <div className="flex items-center justify-end gap-2">
-                            <button
-                              type="button"
-                              className="sb-btn sb-btn-ghost sb-btn-sm"
-                              onClick={() =>
-                                handleCopy(key.keyPrefix || key.id, key.id)
-                              }
-                            >
-                              {copiedId === key.id ? "已复制" : "复制"}
-                            </button>
-                            <button
-                              type="button"
-                              className="sb-btn sb-btn-danger sb-btn-sm"
-                              disabled={isRevoked || isCurrent}
-                              onClick={() => handleRevoke(key.id)}
-                            >
-                              吊销
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })
-                : mockApiKeys.map((k) => (
+          {loading && keys.length === 0 ? (
+            <p className="p-6 text-xs text-neutral-400" role="status">
+              {t("console.loading")}
+            </p>
+          ) : keys.length === 0 ? (
+            <p className="p-6 text-xs text-neutral-500 text-center" role="status">
+              {t("relayKeys.empty")}
+            </p>
+          ) : (
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="border-b border-dash-line bg-dash-terminal text-[11px] text-neutral-400 font-medium">
+                  <th className="py-3 px-4">{t("relayKeys.col.name")}</th>
+                  <th className="py-3 px-4">{t("relayKeys.col.prefix")}</th>
+                  <th className="py-3 px-4">{t("relayKeys.col.scope")}</th>
+                  <th className="py-3 px-4">{t("relayKeys.col.usage")}</th>
+                  <th className="py-3 px-4">{t("relayKeys.col.status")}</th>
+                  <th className="py-3 px-4 text-right">{t("relayKeys.col.actions")}</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-dash-line font-mono">
+                {keys.map((key) => {
+                  const scopeProviders = key.allowed_providers?.length
+                    ? key.allowed_providers.join(", ")
+                    : t("relayKeys.allProviders");
+                  const defaultModel = relaySelectionKey(key.default_model_selection);
+                  return (
                     <tr
-                      key={k.id}
+                      key={key.id}
+                      data-testid={`relay-key-row-${key.id}`}
                       className="hover:bg-dash-soft transition-colors"
                     >
                       <td className="py-3 px-4 font-sans text-neutral-200 font-medium">
-                        {k.name}
+                        {key.name}
                       </td>
                       <td className="py-3 px-4 text-neutral-400">
                         <span className="text-neutral-300 font-mono">
-                          {k.key}
+                          {key.key_prefix}...
                         </span>
                       </td>
-                      <td className="py-3 px-4">
-                        <span className="px-2 py-0.5 rounded text-[10px] bg-neutral-800 text-neutral-300 border border-neutral-700 font-mono uppercase">
-                          {k.platform}
-                        </span>
+                      <td className="py-3 px-4 text-[11px] text-neutral-400">
+                        <div className="truncate max-w-[200px]" title={scopeProviders}>
+                          {scopeProviders}
+                        </div>
+                        {defaultModel && (
+                          <div className="text-[10px] text-neutral-500 truncate max-w-[200px]">
+                            {t("relayKeys.defaultTag")}: {defaultModel}
+                          </div>
+                        )}
+                      </td>
+                      <td className="py-3 px-4 text-[11px] text-neutral-400">
+                        <div>
+                          {key.request_count.toLocaleString()} {t("relayKeys.callsUnit")}
+                        </div>
+                        <div className="text-[10px] text-neutral-500">
+                          {key.last_used_at_ms
+                            ? new Date(key.last_used_at_ms).toLocaleString(state.resolvedLocale)
+                            : t("relayKeys.neverUsed")}
+                        </div>
                       </td>
                       <td className="py-3 px-4">
-                        {k.active ? (
+                        {key.revoked ? (
+                          <span className="text-rose-400 text-[11px]">
+                            {t("relayKeys.status.revoked")}
+                          </span>
+                        ) : key.enabled ? (
                           <span className="text-emerald-400 text-[11px]">
-                            有效
+                            {t("relayKeys.status.active")}
                           </span>
                         ) : (
-                          <span className="text-rose-400 text-[11px]">
-                            已吊销
+                          <span className="text-amber-400 text-[11px]">
+                            {t("relayKeys.status.disabled")}
                           </span>
                         )}
                       </td>
                       <td className="py-3 px-4 text-right">
                         <div className="flex items-center justify-end gap-2">
-                          <button
-                            type="button"
-                            className="sb-btn sb-btn-ghost sb-btn-sm"
-                            onClick={() => handleCopy(k.key, k.id)}
-                          >
-                            {copiedId === k.id ? "已复制" : "复制"}
-                          </button>
+                          {!key.revoked && (
+                            <>
+                              <button
+                                type="button"
+                                className="sb-btn sb-btn-ghost sb-btn-sm"
+                                disabled={pending}
+                                onClick={() =>
+                                  void mutate(async () => {
+                                    await api.editRelayKey(owner, key.id, {
+                                      enabled: !key.enabled,
+                                      expected_revision: key.revision,
+                                    });
+                                  })
+                                }
+                              >
+                                {key.enabled
+                                  ? t("relayKeys.action.disable")
+                                  : t("relayKeys.action.enable")}
+                              </button>
+                              <button
+                                type="button"
+                                className="sb-btn sb-btn-ghost sb-btn-sm"
+                                disabled={pending}
+                                onClick={() => openEditModal(key)}
+                              >
+                                {t("common.edit")}
+                              </button>
+                            </>
+                          )}
                           <button
                             type="button"
                             className="sb-btn sb-btn-danger sb-btn-sm"
-                            disabled={!k.active}
-                            onClick={() => handleRevoke(k.id)}
+                            disabled={pending || key.revoked}
+                            onClick={() => setRevokeTarget(key)}
                           >
-                            吊销
+                            {t("relayKeys.action.revoke")}
                           </button>
                         </div>
                       </td>
                     </tr>
-                  ))}
-            </tbody>
-          </table>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
         </div>
       </div>
 
-      {/* Create Key Modal */}
+      {/* Create / Edit Key Modal (Native Top-Layer Dialog via ModalContainer) */}
       <ModalContainer
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
-        title="新建 API 密钥"
-        confirmText={
-          isAdmin && newKeyRole === "admin"
-            ? "创建 Admin 密钥"
-            : "创建 User 密钥"
-        }
-        onConfirm={handleCreateKey}
-        confirmDisabled={!newKeyName.trim()}
+        title={editing ? t("relayKeys.modalEditTitle") : t("relayKeys.modalCreate")}
+        confirmText={editing ? t("settingsDlg.save") : t("relayKeys.createButton")}
+        onConfirm={handleSubmitModal}
+        confirmDisabled={!formName.trim() || pending}
       >
         <div className="space-y-3.5 text-xs">
           <div>
-            <label className="block text-neutral-400 mb-1 font-medium">
-              密钥名称 / 标识
+            <label htmlFor="relay-key-form-name" className="block text-neutral-400 mb-1 font-medium">
+              {t("relayKeys.name")}
             </label>
             <input
+              id="relay-key-form-name"
               type="text"
               className="sb-input w-full"
-              placeholder="密钥名称"
-              value={newKeyName}
-              onChange={(e) => setNewKeyName(e.target.value)}
+              placeholder={t("relayKeys.namePlaceholder")}
+              maxLength={100}
+              value={formName}
+              onChange={(e) => setFormName(e.target.value)}
             />
           </div>
 
-          {isAdmin && (
-            <div>
-              <label className="block text-neutral-400 mb-1 font-medium">
-                权限角色
-              </label>
-              <select
-                className="sb-select w-full"
-                value={newKeyRole}
-                onChange={(e) =>
-                  setNewKeyRole(e.target.value as "user" | "admin")
-                }
-              >
-                <option value="user">普通用户 (User) - 仅限推理调用</option>
-                <option value="admin">管理员 (Admin) - 支持控制台管控</option>
-              </select>
+          <div>
+            <label htmlFor="relay-key-form-providers" className="block text-neutral-400 mb-1 font-medium">
+              {t("relayKeys.providers")}
+            </label>
+            <input
+              id="relay-key-form-providers"
+              type="text"
+              className="sb-input w-full"
+              placeholder={
+                distinctProviders.length
+                  ? distinctProviders.join(", ")
+                  : "configured, user:myproxy"
+              }
+              value={formProviders}
+              onChange={(e) => setFormProviders(e.target.value)}
+            />
+            <p className="text-[11px] text-neutral-500 mt-1">
+              {t("relayKeys.providersHint")}
+            </p>
+          </div>
+
+          <div>
+            <label htmlFor="relay-key-form-model" className="block text-neutral-400 mb-1 font-medium">
+              {t("relayKeys.model")}
+            </label>
+            <input
+              id="relay-key-form-model"
+              type="text"
+              list="relay-key-model-suggestions"
+              className="sb-input w-full"
+              placeholder="provider_id/model"
+              value={formModel}
+              onChange={(e) => setFormModel(e.target.value)}
+            />
+            <datalist id="relay-key-model-suggestions">
+              {relayModels.map((item) => {
+                const key = relaySelectionKey(item);
+                return <option key={key} value={key} />;
+              })}
+            </datalist>
+          </div>
+
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              className="accent-ink"
+              checked={formEnabled}
+              onChange={(e) => setFormEnabled(e.target.checked)}
+            />
+            <span className="text-neutral-300">{t("relayKeys.enabledLabel")}</span>
+          </label>
+
+          {!editing && (
+            <div className="sb-terminal-box p-3 text-neutral-500 text-[11px] leading-relaxed">
+              {t("relayKeys.onceNotice")}
             </div>
           )}
-
-          <div className="sb-terminal-box p-3 text-neutral-500 text-[11px] leading-relaxed">
-            新建的 API 密钥将在生成后立即展示一次明文，请确保您已安全留存。
-          </div>
         </div>
+      </ModalContainer>
+
+      <ModalContainer
+        isOpen={!!revokeTarget}
+        onClose={() => setRevokeTarget(null)}
+        title={t("relayKeys.revokeTitle")}
+        maxWidth="max-w-sm"
+        footer={
+          <>
+            <button
+              type="button"
+              className="sb-btn sb-btn-secondary"
+              onClick={() => setRevokeTarget(null)}
+            >
+              {t("common.cancel")}
+            </button>
+            <button
+              type="button"
+              className="sb-btn sb-btn-danger"
+              data-testid="relay-key-confirm-revoke"
+              onClick={() => {
+                if (!revokeTarget) return;
+                const target = revokeTarget;
+                setRevokeTarget(null);
+                void mutate(async () => {
+                  await api.revokeRelayKey(owner, target.id, target.revision);
+                });
+              }}
+            >
+              {t("relayKeys.action.revoke")}
+            </button>
+          </>
+        }
+      >
+        <p className="text-xs text-neutral-300 leading-relaxed">
+          {revokeTarget
+            ? t("relayKeys.revokeConfirm", { name: revokeTarget.name })
+            : ""}
+        </p>
       </ModalContainer>
     </div>
   );

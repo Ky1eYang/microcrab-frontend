@@ -274,11 +274,9 @@ for (const legacy of [false, true]) {
       return route.fulfill({ json: snapshot });
     });
     await page.goto("/#session/s1");
-    await page.getByRole("button", { name: "Test User", exact: true }).click();
-    await page.getByRole("button", { name: "设置", exact: true }).click();
-    await page
-      .getByRole("button", { name: "会话默认设置", exact: true })
-      .click();
+    await page.locator('.shell [data-testid="nav-dashboard"]').first().click();
+    await page.getByTestId("dashboard-nav-settings").click();
+    await page.getByTestId("console-settings-tab-defaults").click();
     const input = page.getByTestId("limit-max_tool_image_bytes");
     await expect(input).toHaveAttribute(
       "placeholder",

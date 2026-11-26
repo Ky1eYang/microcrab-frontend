@@ -33,6 +33,13 @@ function formatMetricNumber(val: number, isPercent = false): string {
   return val.toString();
 }
 
+function formatTokenScale(val: number, unit: "millions" | "tokens"): string {
+  if (unit === "millions") return `${val.toFixed(1)}M`;
+  if (val >= 1_000_000) return `${(val / 1_000_000).toFixed(2)}M`;
+  if (val >= 1_000) return `${(val / 1_000).toFixed(1)}K`;
+  return Math.round(val).toLocaleString();
+}
+
 /** Cubic Bezier curve path generator with smooth Catmull-Rom interpolation */
 function generateSmoothCurve(pts: { x: number; y: number }[]): string {
   if (pts.length === 0) return "";
@@ -63,6 +70,7 @@ function generateSmoothCurve(pts: { x: number; y: number }[]): string {
 export interface DonutChartProps {
   data: ModelDistribution[];
   metric?: ModelMetricMode;
+  tokenUnit?: "millions" | "tokens";
   onMetricChange?: (metric: ModelMetricMode) => void;
   selectedModel?: string | null;
   onSelectModel?: (model: string) => void;
@@ -73,6 +81,7 @@ export interface DonutChartProps {
 export const DonutChart: React.FC<DonutChartProps> = ({
   data,
   metric = "token",
+  tokenUnit = "millions",
   onMetricChange,
   selectedModel,
   onSelectModel,
@@ -278,7 +287,7 @@ export const DonutChart: React.FC<DonutChartProps> = ({
                     textAnchor="middle"
                     className="text-[11px] font-medium fill-neutral-400"
                   >
-                    {metric === "token" ? "总用量" : "总实付"}
+                    {metric === "token" ? "总用量" : "参考估算"}
                   </text>
                   <text
                     x={cx}
@@ -287,8 +296,8 @@ export const DonutChart: React.FC<DonutChartProps> = ({
                     className="text-base font-bold font-mono fill-white"
                   >
                     {metric === "token"
-                      ? `${totalVal.toFixed(1)}M`
-                      : `$${totalVal.toFixed(2)}`}
+                      ? formatTokenScale(totalVal, tokenUnit)
+                      : `$${totalVal.toFixed(4)}`}
                   </text>
                 </>
               )}
@@ -368,6 +377,7 @@ export const DonutChart: React.FC<DonutChartProps> = ({
 
 export interface TrendAreaChartProps {
   points: TrendPoint[];
+  tokenUnit?: "millions" | "tokens";
   height?: number;
   timeRangeText?: string;
   className?: string;
@@ -421,6 +431,7 @@ const TREND_SERIES: SeriesItem[] = [
 
 export const TrendAreaChart: React.FC<TrendAreaChartProps> = ({
   points,
+  tokenUnit = "millions",
   height = 260,
   timeRangeText,
   className = "",
@@ -783,7 +794,7 @@ export const TrendAreaChart: React.FC<TrendAreaChartProps> = ({
                     <span className="font-semibold text-white">
                       {s.unit === "%"
                         ? `${Number(val).toFixed(1)}%`
-                        : `${Number(val).toFixed(2)}M`}
+                        : formatTokenScale(Number(val) || 0, tokenUnit)}
                     </span>
                   </div>
                 );

@@ -136,6 +136,31 @@ function Layout() {
   useEffect(() => {
     document.title = "microcrab";
   }, []);
+  const dashboard = state.page === "dashboard";
+  const dashboardOpener = useRef<HTMLElement | null>(null);
+  const wasDashboard = useRef(false);
+  useEffect(() => {
+    if (dashboard && !wasDashboard.current) {
+      dashboardOpener.current =
+        document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    } else if (
+      !dashboard &&
+      wasDashboard.current &&
+      (state.page === "conversation" || state.page === "home")
+    ) {
+      requestAnimationFrame(() => {
+        const opener = dashboardOpener.current;
+        if (opener && opener.isConnected && !opener.closest("[inert]")) {
+          opener.focus({ preventScroll: true });
+          return;
+        }
+        document
+          .querySelector<HTMLElement>('[data-testid="rail-dashboard-btn"], [data-testid="header-open-rail"]')
+          ?.focus({ preventScroll: true });
+      });
+    }
+    wasDashboard.current = dashboard;
+  }, [dashboard, state.page]);
   return (
     <>
       {menu && (
@@ -147,56 +172,57 @@ function Layout() {
           }}
         />
       )}
-      {state.page === "dashboard" ? (
-        <DashboardPage />
-      ) : (
-        <div
-          className="shell"
-          data-session-status={sessionStatus ?? undefined}
-          data-rail-collapsed={state.railCollapsed}
-          data-left-collapsed={state.railCollapsed}
-          data-right-collapsed={!canShowRightRail || state.rightRailCollapsed}
-        >
-          <SessionRail />
-          <div className="main-container">
-            <Header />
-            <PluginSubmitNotice />
-            <main
-              className="page"
-              id="main-view-panel"
-              {...(state.page === "conversation" && state.sessionId
-                ? {
-                    role: "tabpanel",
-                    "aria-labelledby": selectedPlugin
-                      ? `view-tab-plugin-${selectedPlugin}`
-                      : `view-tab-${state.viewMode}`,
-                  }
-                : {})}
-            >
-              {(state.page === "conversation" ||
-                state.page === "plugins" ||
-                state.page === "plugin") && (
-                <div
-                  className="retained-conversation-page"
-                  data-inactive={state.page !== "conversation"}
-                  inert={state.page !== "conversation"}
-                  aria-hidden={state.page !== "conversation"}
-                >
-                  <ConversationPage active={state.page === "conversation"} />
-                </div>
-              )}
-              {state.page === "plugins" ? (
-                <PluginsPage />
-              ) : state.page === "plugin" ? (
-                <ExpandedPluginPage />
-              ) : state.page !== "conversation" ? (
-                <HomePage />
-              ) : null}
-            </main>
-          </div>
-          <RightRail />
+      {dashboard && <DashboardPage />}
+      <div
+        className="shell"
+        hidden={dashboard}
+        inert={dashboard || undefined}
+        aria-hidden={dashboard || undefined}
+        data-session-status={sessionStatus ?? undefined}
+        data-rail-collapsed={state.railCollapsed}
+        data-left-collapsed={state.railCollapsed}
+        data-right-collapsed={!canShowRightRail || state.rightRailCollapsed}
+      >
+        <SessionRail />
+        <div className="main-container">
+          <Header />
+          <PluginSubmitNotice />
+          <main
+            className="page"
+            id="main-view-panel"
+            {...(state.page === "conversation" && state.sessionId
+              ? {
+                  role: "tabpanel",
+                  "aria-labelledby": selectedPlugin
+                    ? `view-tab-plugin-${selectedPlugin}`
+                    : `view-tab-${state.viewMode}`,
+                }
+              : {})}
+          >
+            {(state.page === "conversation" ||
+              state.page === "plugins" ||
+              state.page === "plugin" ||
+              (dashboard && !!state.sessionId)) && (
+              <div
+                className="retained-conversation-page"
+                data-inactive={state.page !== "conversation"}
+                inert={state.page !== "conversation"}
+                aria-hidden={state.page !== "conversation"}
+              >
+                <ConversationPage active={state.page === "conversation"} />
+              </div>
+            )}
+            {state.page === "plugins" ? (
+              <PluginsPage />
+            ) : state.page === "plugin" ? (
+              <ExpandedPluginPage />
+            ) : state.page !== "conversation" && !dashboard ? (
+              <HomePage />
+            ) : null}
+          </main>
         </div>
-      )}
+        <RightRail />
+      </div>
       <PluginWorkspaceDialog />
       <PopupView />
       <PermissionProposalDialog />

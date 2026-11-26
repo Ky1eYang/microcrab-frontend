@@ -135,16 +135,19 @@ test("explicit child usage never borrows parent cache summaries or rates", () =>
 });
 
 for (const locale of ["en", "zh-CN"] as const) {
-  test(`cache dashboard visibly identifies sample data in ${locale}`, () => {
+  test(`cache dashboard omits mock banner and shows unknown text in ${locale}`, () => {
     setActiveLocale(locale);
-    const html = renderToStaticMarkup(createElement(CacheTab));
-    expect(html).toContain('data-testid="cache-sample-notice"');
-    expect(html).toContain(locale === "en" ? "Sample data:" : "示例数据：");
-    expect(html).toContain(
-      locale === "en"
-        ? "do not reflect actual session usage"
-        : "不代表实际会话用量",
+    const html = renderToStaticMarkup(
+      createElement(CacheTab, {
+        owner: "u1",
+        api: {
+          readDashboardReport: () => new Promise(() => {}),
+        } as any,
+      }),
     );
+    expect(html).not.toContain('data-testid="cache-sample-notice"');
+    expect(html).not.toContain(locale === "en" ? "Sample data:" : "示例数据：");
+    expect(html).toContain(locale === "en" ? "Loading" : "正在加载");
     setActiveLocale("zh-CN");
   });
 }

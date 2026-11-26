@@ -49,9 +49,14 @@ function settings() {
   };
 }
 async function open(page: Page, tab = "模型服务商") {
-  await page.getByRole("button", { name: "Test User", exact: true }).click();
-  await page.getByRole("button", { name: "设置", exact: true }).click();
-  await page.getByRole("button", { name: tab, exact: true }).click();
+  const railMenu = page.locator('.shell [data-testid="header-open-rail"]');
+  if (await railMenu.isVisible()) await railMenu.click();
+  await page.locator('.shell [data-testid="nav-dashboard"]').first().click();
+  const dashMenu = page.locator('[data-testid="dashboard"] [data-testid="header-open-rail"]');
+  if (await dashMenu.isVisible()) await dashMenu.click();
+  await page.getByTestId("dashboard-nav-settings").click();
+  const section = tab === "模型服务商" ? "providers" : "defaults";
+  await page.getByTestId(`console-settings-tab-${section}`).click();
 }
 async function setup(page: Page, items = [provider(), provider("user:beta")]) {
   await nativeBackend(page);
@@ -425,9 +430,7 @@ for (const width of [1440, 390])
         path: join(evidence, `providers-${width}-${theme}.png`),
         fullPage: true,
       });
-      await page
-        .getByRole("button", { name: "会话默认设置", exact: true })
-        .click();
+      await page.getByTestId("console-settings-tab-defaults").click();
       for (const field of LIMIT_FIELDS)
         await expect(page.getByTestId(`limit-${field}`)).toHaveCount(1);
       await page.locator(".limits-groups-stack").scrollIntoViewIfNeeded();

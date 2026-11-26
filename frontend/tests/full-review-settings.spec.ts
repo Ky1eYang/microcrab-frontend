@@ -261,9 +261,9 @@ for (const outcome of ["saved", "failed"] as const) {
       await route.fulfill({ json: snapshot });
     });
     await page.goto("/#session/s1");
-    await page.getByRole("button", { name: "Test User", exact: true }).click();
-    await page.getByRole("button", { name: "设置", exact: true }).click();
-    await page.getByRole("button", { name: "会话默认设置", exact: true }).click();
+    await page.locator('.shell [data-testid="nav-dashboard"]').first().click();
+    await page.getByTestId("dashboard-nav-settings").click();
+    await page.getByTestId("console-settings-tab-defaults").click();
     const owner = page.getByTestId("owner-settings-user");
     const limit = owner.getByTestId("limit-max_rounds");
     await limit.fill("23");

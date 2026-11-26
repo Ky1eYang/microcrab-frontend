@@ -59,8 +59,9 @@ export function PluginsPage({ embedded = false }: { embedded?: boolean }) {
     "resolvedLocale",
     "pluginWorkspace",
   ]);
+  const sessionId = embedded ? null : state.sessionId;
   const [working, setBusy] = useState(false);
-  const busy = working || !plugins.isReadyFor(state.sessionId);
+  const busy = working || !plugins.isReadyFor(sessionId);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -69,8 +70,9 @@ export function PluginsPage({ embedded = false }: { embedded?: boolean }) {
   // Render precedes removal of the invoking sidebar, so retain its exact trigger.
   const opener = useRef(document.activeElement);
   useEffect(() => {
-    searchInput.current?.focus({ preventScroll: true });
+    if (!embedded) searchInput.current?.focus({ preventScroll: true });
     return () => {
+      if (embedded) return;
       requestAnimationFrame(() => {
         const visible = (node: Element | null): node is HTMLElement =>
           node instanceof HTMLElement &&
@@ -87,7 +89,7 @@ export function PluginsPage({ embedded = false }: { embedded?: boolean }) {
         candidates.find(visible)?.focus({ preventScroll: true });
       });
     };
-  }, []);
+  }, [embedded]);
 
   const installed = registry?.getSnapshot() ?? [];
 
@@ -96,8 +98,8 @@ export function PluginsPage({ embedded = false }: { embedded?: boolean }) {
 
   const isPluginActiveInScope = (plugin: InstalledPlugin) =>
     registry
-      ? state.sessionId
-        ? registry.isEnabled(plugin.manifest.id, state.sessionId)
+      ? sessionId
+        ? registry.isEnabled(plugin.manifest.id, sessionId)
         : plugin.enabledByDefault
       : false;
 

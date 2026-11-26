@@ -151,6 +151,12 @@ import {
   selectedModel,
   modelChoices,
 } from "./model";
+import {
+  dashboardHash,
+  parseDashboardPath,
+  type DashboardLocation,
+} from "../client/dashboard-route";
+import type { AccountPreferences } from "../client/account-preferences";
 import { savePreference } from "../client/storage";
 import {
   applyTheme,
@@ -1144,16 +1150,138 @@ export class AppStore {
     )
       this.update({ theme: preference, resolvedTheme });
   }
+  private dashboardReturnPath: string | null = null;
+  private showDashboard(destination: DashboardLocation, previousHash?: string) {
+    if (this.state.page !== "dashboard" && previousHash !== undefined) {
+      const previous = parseLocation(location.pathname, previousHash);
+      this.dashboardReturnPath =
+        previous.page === "dashboard"
+          ? null
+          : previousHash ||
+            (this.state.sessionId ? `#/${sessionPath(this.state.sessionId)}` : "#/");
+    }
+    this.update({
+      page: "dashboard",
+      dashboardTab: destination.tab,
+      dashboardSubTab: destination.subTab,
+      consoleSettingsSection: destination.settings,
+      pluginId: null,
+      pluginWorkspace: null,
+      rightOverlayOpen: false,
+      popup: { type: "none" },
+    });
+  }
+  private openDashboard(value: unknown) {
+    let raw = "dashboard";
+    if (typeof value === "string") {
+      raw = value === "" ? "dashboard" : value.startsWith("dashboard") ? value : `dashboard/${value}`;
+    } else if (value && typeof value === "object") {
+      const v = value as Partial<DashboardLocation>;
+      if (v.tab) {
+        const hash = dashboardHash(v.tab, { subTab: v.subTab, settings: v.settings });
+        raw = hash.replace(/^#\//, "");
+      }
+    }
+    const destination = parseDashboardPath(raw) ?? {
+      tab: "dashboard",
+      subTab: "overview",
+      settings: "providers",
+    };
+    const previous = location.hash;
+    const next = dashboardHash(destination.tab, {
+      subTab: destination.subTab,
+      settings: destination.settings,
+    });
+    if (next !== previous) history.pushState(null, "", next);
+    this.showDashboard(destination, previous);
+  }
+  private closeDashboard() {
+    const target =
+      this.dashboardReturnPath ||
+      (this.state.sessionId ? `#/${sessionPath(this.state.sessionId)}` : "#/");
+    this.dashboardReturnPath = null;
+    const destination = parseLocation(location.pathname, target);
+    if (location.hash !== target) history.pushState(null, "", target);
+    if (
+      destination.sessionId &&
+      destination.sessionId === this.state.sessionId &&
+      this.subscription
+    ) {
+      this.update({ page: "conversation", pluginId: null });
+      return;
+    }
+    this.route();
+  }
+  private syncAccountPreferencesPatch(
+    patch: Partial<{ theme: AppState["theme"]; locale: AppState["locale"] }>,
+  ) {
+    const owner = this.state.authSession?.principal?.owner;
+    const current = this.state.accountPreferences;
+    if (!owner || !current) return;
+    const next = {
+      expected_revision: current.revision,
+      operation_id: crypto.randomUUID(),
+      dashboard_default_range: current.dashboard_default_range,
+      low_cache_hit_warn_pct: current.low_cache_hit_warn_pct,
+      relay_default_selection: current.relay_default_selection,
+      default_conversation_flavor: current.default_conversation_flavor,
+      theme: patch.theme ?? current.theme,
+      locale: patch.locale ?? current.locale,
+    };
+    void this.api
+      .saveAccountPreferences(owner, next)
+      .then((saved) => {
+        if (this.state.authSession?.principal?.owner === owner) {
+          this.update({ accountPreferences: saved });
+        }
+      })
+      .catch(() => {});
+  }
+  private loadAccountPreferences(cycle: number) {
+    const owner = this.state.authSession?.principal?.owner;
+    if (!owner) return;
+    void this.api
+      .readAccountPreferences(owner)
+      .then((prefs) => {
+        if (
+          cycle !== this.lifecycle ||
+          this.state.authSession?.principal?.owner !== owner
+        )
+          return;
+        this.update({ accountPreferences: prefs });
+        if (prefs.theme) {
+          savePreference("theme", prefs.theme);
+          this.applyTheme(prefs.theme);
+        }
+        if (prefs.locale) {
+          savePreference("locale", prefs.locale);
+          const resolvedLocale = syncLocaleFromPreference(prefs.locale);
+          if (
+            prefs.locale !== this.state.locale ||
+            resolvedLocale !== this.state.resolvedLocale
+          ) {
+            this.update({ locale: prefs.locale, resolvedLocale });
+          }
+        }
+      })
+      .catch(() => {});
+  }
   private route = (event?: HashChangeEvent) => {
     const destination = parseLocation(location.pathname, location.hash);
     const changesView =
       destination.page !== this.state.page ||
       (destination.sessionId &&
         destination.sessionId !== this.state.sessionId) ||
-      (destination.pluginId ?? null) !== this.state.pluginId;
+      (destination.pluginId ?? null) !== (this.state.pluginId ?? null) ||
+      (destination.dashboard &&
+        (destination.dashboard.tab !== this.state.dashboardTab ||
+          destination.dashboard.subTab !== this.state.dashboardSubTab ||
+          destination.dashboard.settings !== this.state.consoleSettingsSection));
+    let previousHash: string | undefined;
     if (event?.oldURL && changesView) {
       const target = location.href;
       const previous = event.oldURL;
+      previousHash = new URL(previous).hash;
       const cycle = this.lifecycle;
       const owner = this.state.authSession?.principal?.owner;
       const session = this.state.sessionId;
@@ -1169,7 +1297,8 @@ export class AppStore {
         if (synchronous) allowed = true;
         else {
           history.replaceState(null, "", target);
-          this.route();
+          if (destination.dashboard) this.showDashboard(destination.dashboard, previousHash);
+          else this.route();
         }
       });
       synchronous = false;
@@ -1213,7 +1342,7 @@ export class AppStore {
     }
     if (route.sessionId && this.state.connection === "ws")
       void this.attach(route.sessionId).catch((e) => this.toast(String(e)));
-    else if (route.page === "dashboard") this.update({ page: "dashboard" });
+    else if (route.dashboard) this.showDashboard(route.dashboard, previousHash);
     else if (route.page === "home")
       this.update({
         page: "home",
@@ -1298,6 +1427,10 @@ export class AppStore {
           history.replaceState(null, "", returned.route);
           this.returnedComposer = returned.composer;
         }
+      }
+      const initialDashboard = parseLocation(location.pathname, location.hash).dashboard;
+      if (initialDashboard && this.state.page !== "dashboard") {
+        this.showDashboard(initialDashboard);
       }
       this.scheduleAuthCheck();
       clearAutomaticLogin(this.api.base);
@@ -1509,9 +1642,10 @@ export class AppStore {
           }
         : { kind: this.savedDraftFlavor() } } : {}),
     });
+    this.loadAccountPreferences(cycle);
     await this.refreshDraftDefaults();
     if (!current()) return;
-    if (route.page === "dashboard") this.update({ page: "dashboard" });
+    if (route.dashboard) this.showDashboard(route.dashboard);
     const id = this.state.sessionId ?? route.sessionId;
     if (initialAttach) await initialAttach;
     else if (id && this.attaching === navigation) {
@@ -1550,10 +1684,11 @@ export class AppStore {
       const saved = localStorage.getItem(
         "microcrab.conversation-flavor.v1:" + this.hostScope(),
       );
-      return saved === "browser_sandbox" ? "browser_sandbox" : "chat_only";
-    } catch {
-      return "chat_only";
-    }
+      if (saved === "browser_sandbox" || saved === "chat_only") return saved;
+    } catch {}
+    return this.state.accountPreferences?.default_conversation_flavor === "browser_sandbox"
+      ? "browser_sandbox"
+      : "chat_only";
   }
   private draftFlavor(): ConversationHostFlavor | undefined {
     const kind = this.state.draftWorkspace.kind;
@@ -6704,7 +6839,13 @@ export class AppStore {
           return;
         }
         case "OpenDashboard":
-          this.update({ page: "dashboard" });
+          this.openDashboard(value);
+          return;
+        case "CloseDashboard":
+          this.closeDashboard();
+          return;
+        case "SetAccountPreferences":
+          this.update({ accountPreferences: value as AccountPreferences | null });
           return;
         case "Navigate":
           this.update({ page: value });
@@ -7764,6 +7905,7 @@ export class AppStore {
               : normalizeThemePreference(value);
           savePreference("theme", theme);
           this.applyTheme(theme);
+          this.syncAccountPreferencesPatch({ theme });
           return;
         }
         case "ToggleRail":
@@ -7898,6 +8040,7 @@ export class AppStore {
           savePreference("locale", locale);
           const resolvedLocale = syncLocaleFromPreference(locale);
           this.update({ locale, resolvedLocale });
+          this.syncAccountPreferencesPatch({ locale });
           return;
         }
         case "OpenSearch":

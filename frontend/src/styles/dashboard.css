@@ -411,6 +411,27 @@
    6. Modal Dialogs
    ========================================================================== */
 
+/* Native top-layer modal wrapper preserving .sb-modal-box visual card styles */
+dialog.sb-native-dialog {
+  margin: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  max-width: min(36rem, calc(100vw - 2rem));
+  width: 100%;
+  overflow: visible;
+}
+dialog.sb-native-dialog:modal {
+  overscroll-behavior: contain;
+}
+dialog.sb-native-dialog::backdrop {
+  background-color: var(--overlay);
+  backdrop-filter: blur(2px);
+  overflow: hidden;
+  overscroll-behavior: contain;
+}
+
 .sb-modal-backdrop {
   position: fixed;
   inset: 0;
@@ -791,4 +812,15 @@
 .sb-select:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 0;
+}
+
+@media (max-width: 767px) {
+  .sb-dashboard-root .session-rail.expanded-rail {
+    position: fixed;
+    inset-block: 0;
+    inset-inline-start: 0;
+    width: min(85vw, 300px);
+    z-index: var(--z-drawer);
+    box-shadow: var(--shadow-modal);
+  }
 }

@@ -26,9 +26,23 @@ function snapshot(overrides: Record<string, unknown> = {}, revision = 1) {
   };
 }
 async function open(page: Page, tab = "会话默认设置") {
-  await page.getByRole("button", { name: "Test User", exact: true }).click();
-  await page.getByRole("button", { name: "设置", exact: true }).click();
-  await page.getByRole("button", { name: tab, exact: true }).click();
+  const onDash = await page.evaluate(() =>
+    window.location.hash.startsWith("#/dashboard") ||
+    window.location.pathname.endsWith("/dashboard"),
+  );
+  if (onDash) {
+    await expect(page.getByTestId("dashboard")).toBeVisible();
+  } else {
+    await expect(page.getByTestId("composer")).toBeVisible();
+    const railMenu = page.locator('.shell [data-testid="header-open-rail"]');
+    if (await railMenu.isVisible()) await railMenu.click();
+    await page.locator('.shell [data-testid="nav-dashboard"]').filter({ visible: true }).first().click();
+  }
+  const dashMenu = page.locator('[data-testid="dashboard"] [data-testid="header-open-rail"]');
+  if (await dashMenu.isVisible()) await dashMenu.click();
+  await page.getByTestId("dashboard-nav-settings").click();
+  const section = tab === "模型服务商" ? "providers" : "defaults";
+  await page.getByTestId(`console-settings-tab-${section}`).click();
 }
 async function setup(page: Page, overrides: Record<string, unknown> = {}) {
   const backend = await nativeBackend(page, { owner: "settings-owner-a" });
@@ -152,9 +166,7 @@ test("Escape closes only model suggestions and unavailable selection survives; a
   ).toBeVisible();
   await model.press("Escape");
   await expect(model).toHaveAttribute("aria-expanded", "false");
-  await expect(
-    page.getByRole("dialog", { name: "设置", exact: true }),
-  ).toBeVisible();
+  await expect(page.getByTestId("dashboard")).toBeVisible();
   await expect(model).toHaveValue(/offline-model/);
   await page.getByTestId("settings-save").click();
   await expect.poll(() => writes.length).toBe(1);
@@ -163,6 +175,9 @@ test("Escape closes only model suggestions and unavailable selection survives; a
     model: "offline-model",
     variant: "legacy",
   });
+  await page.getByTestId("dashboard-back").click();
+  await page.getByRole("button", { name: "Test User", exact: true }).click();
+  await page.getByRole("button", { name: "设置", exact: true }).click();
   await page.getByRole("button", { name: "界面外观", exact: true }).click();
   await expect(
     page.getByRole("combobox", { name: "默认模型", exact: true }),
@@ -229,7 +244,10 @@ test("recents persist minimal identities only within their owner and review curr
 test("Settings plugin entry opens dedicated management and returns to conversation", async ({
   page,
 }) => {
-  await setup(page);
+  await nativeBackend(page, { owner: "settings-owner-a" });
+  await page.goto("/#session/s1");
+  await page.getByRole("button", { name: "Test User", exact: true }).click();
+  await page.getByRole("button", { name: "设置", exact: true }).click();
   await page.getByRole("button", { name: "客户端工具", exact: true }).click();
   await page.getByRole("button", { name: "客户端插件", exact: true }).click();
   const manager = page.getByTestId("client-plugins-manager");
@@ -261,7 +279,7 @@ test("provider and settings validation focus actual invalid controls with nearby
   await page.route("**/api/v1/providers", (route) =>
     route.fulfill({ json: { items: [] } }),
   );
-  await page.getByRole("button", { name: "模型服务商", exact: true }).click();
+  await page.getByTestId("console-settings-tab-providers").click();
   await page.getByRole("button", { name: "+ 新建服务商", exact: true }).click();
   await page.getByRole("button", { name: "添加模型", exact: true }).click();
   await page.locator('[data-validation-path="provider.models[0].id"]').fill("");

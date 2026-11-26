@@ -52,6 +52,17 @@ async function openSettings(
   page: import("@playwright/test").Page,
   tab: string,
 ) {
+  if (tab === "模型服务商" || tab === "会话默认设置") {
+    const railMenu = page.locator('.shell [data-testid="header-open-rail"]');
+    if (await railMenu.isVisible()) await railMenu.click();
+    await page.locator('.shell [data-testid="nav-dashboard"]').first().click();
+    const dashMenu = page.locator('[data-testid="dashboard"] [data-testid="header-open-rail"]');
+    if (await dashMenu.isVisible()) await dashMenu.click();
+    await page.getByTestId("dashboard-nav-settings").click();
+    const section = tab === "模型服务商" ? "providers" : "defaults";
+    await page.getByTestId(`console-settings-tab-${section}`).click();
+    return;
+  }
   await page.getByRole("button", { name: "Test User", exact: true }).click();
   await page.getByRole("button", { name: "设置", exact: true }).click();
   await page.getByRole("button", { name: tab, exact: true }).click();
