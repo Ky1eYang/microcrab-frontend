@@ -227,29 +227,29 @@ test("public Provider validation never admits credentials and manual routes rema
   ).toThrow("unique nonempty model");
 });
 
-test("reference sources use canonical type tags and reject stale draft identifiers", () => {
+test("reference mounts validate PersonalLibrary project contract and reject bad ref IDs", () => {
   expect(() =>
     validateReferences({
-      revision: 4,
-      sources: [
-        { type: "host_path", path: "AGENTS.md" },
-        { type: "host_glob", root: ".", pattern: "docs/*.md" },
-        { type: "directory_url", url: "https://example.test/references/" },
-      ],
+      project_id: "project-1",
+      ref_ids: ["ref_0123456789abcdef"],
+      items: [],
     }),
   ).not.toThrow();
   expect(() =>
     validateReferences({
-      revision: 4,
-      sources: [{ kind: "host_path", path: "AGENTS.md" }],
+      project_id: "project-1",
+      ref_ids: ["bad-id"],
+      items: [],
     }),
-  ).toThrow("unknown field");
+  ).toThrow("expected ref_* id");
   expect(() =>
     validateReferences({
-      revision: 4,
-      sources: [{ type: "host_path", path: "AGENTS.md", id: "draft-1" }],
+      project_id: "project-1",
+      ref_ids: [],
+      items: [],
+      extra: 1,
     }),
-  ).toThrow("id: unknown field");
+  ).toThrow("unknown field");
 });
 
 test("Session kind controls task input independently of parent permission visibility", () => {

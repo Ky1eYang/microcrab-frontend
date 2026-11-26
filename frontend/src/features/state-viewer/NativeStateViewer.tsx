@@ -9,7 +9,6 @@ import {
 } from "react";
 import { t } from "../../i18n";
 import { CommandError } from "../../client/errors";
-import type { BytesMetadata } from "../../client/state-inspection";
 import type { AppState } from "../../client/types";
 import { useAppSelector, useAppStore } from "../../state";
 import { Icon } from "../shared";
@@ -329,11 +328,7 @@ function StateContents({
   );
   const term = query.trim().toLowerCase();
   const search = Boolean(term);
-  const matchingBytes = tree.bytes.filter(({ name }) =>
-    name.toLowerCase().includes(term),
-  );
   const selectedKey = selection?.key;
-  const selectedBytes = matchingBytes.find(({ name }) => name === selectedKey);
   const selected =
     typeof selectedKey === "number" && (!search || matches.has(selectedKey))
       ? tree.nodes.get(selectedKey)
@@ -376,7 +371,7 @@ function StateContents({
       </ul>
     );
   }
-  if (!tree.roots.length && !tree.bytes.length)
+  if (!tree.roots.length)
     return <p role="status">{labels.empty}</p>;
   return (
     <>
@@ -385,50 +380,15 @@ function StateContents({
           {labels.limited}
         </p>
       )}
-      {search && !matches.size && !matchingBytes.length ? (
+      {search && !matches.size ? (
         <p role="status">{labels.noMatches}</p>
       ) : (
         <div className="native-state-layout">
           <nav aria-label={labels.title}>
             {render(tree.roots)}
-            {!!matchingBytes.length && (
-              <section
-                className="native-state-bytes"
-                aria-label={labels.privateBytes}
-              >
-                <h3>{labels.privateBytes}</h3>
-                <ul className="native-state-tree">
-                  {matchingBytes.map(({ name }) => (
-                    <li key={name} className="native-state-row">
-                      <span
-                        aria-hidden="true"
-                        className="native-state-spacer"
-                      />
-                      <button
-                        className="native-state-key"
-                        type="button"
-                        aria-pressed={selectedBytes?.name === name}
-                        aria-controls={detailsId}
-                        onClick={() => select(name)}
-                      >
-                        <code>{name}</code>
-                        <small>{labels.bytes}</small>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            )}
           </nav>
           <div className="native-state-detail" id={detailsId} ref={details}>
-            {selectedBytes ? (
-              <BytesDetails
-                key={selectedBytes.selector}
-                labels={labels}
-                bytes={selectedBytes}
-                current={currentSelection}
-              />
-            ) : selected ? (
+            {selected ? (
               <StateDetails
                 key={selected.id}
                 labels={labels}
@@ -509,65 +469,6 @@ function StateBranch({
   );
 }
 
-function BytesDetails({
-  labels,
-  bytes,
-  current,
-}: {
-  labels: StateLabels;
-  bytes: BytesMetadata;
-  current: () => boolean;
-}) {
-  const [copy, setCopy] = useState<
-    "imageSourceCopied" | "imageSourceCopyFailed"
-  >();
-  const facts = [
-    [labels.type, labels[bytes.kind]],
-    [labels.mediaType, bytes.media_type],
-    [labels.byteLength, String(bytes.byte_length)],
-    [labels.lifecycle, labels[bytes.lifecycle]],
-    [labels.availability, labels[bytes.availability]],
-    [labels.revision, bytes.revision],
-  ];
-  if (bytes.redirect_execution_id)
-    facts.push([labels.redirectExecution, bytes.redirect_execution_id]);
-  async function copyImageSource() {
-    if (!current()) return;
-    try {
-      await navigator.clipboard.writeText(`{{var:base64:@${bytes.selector}}}`);
-      if (current()) setCopy("imageSourceCopied");
-    } catch {
-      if (current()) setCopy("imageSourceCopyFailed");
-    }
-  }
-  return (
-    <>
-      <h3>
-        {labels.details}: <code>{bytes.name}</code>
-      </h3>
-      <dl>
-        {facts.map(([label, value]) => (
-          <div key={label}>
-            <dt>{label}</dt>
-            <dd>{value}</dd>
-          </div>
-        ))}
-      </dl>
-      <p>{labels.bytesNotPreviewed}</p>
-      <p>{labels.bytesHint}</p>
-      <button
-        type="button"
-        className="ghost-btn"
-        onClick={() => void copyImageSource()}
-      >
-        <Icon name="copy" aria-hidden="true" />
-        {labels.copyImageSource}
-      </button>
-      {copy && <p role="status">{labels[copy]}</p>}
-    </>
-  );
-}
-
 function StateDetails({
   labels,
   node,
@@ -579,7 +480,9 @@ function StateDetails({
   tree: StateTree;
   current: () => boolean;
 }) {
-  const [copy, setCopy] = useState<"copied" | "copyFailed">();
+  const [copy, setCopy] = useState<
+    "copied" | "copyFailed" | "refMarkdownCopied" | "refInjectionCopied"
+  >();
   const locale = useAppSelector((state) => state.resolvedLocale);
   const { descriptor, metadata, reference } = node;
   const [exact, setExact] = useState(false);
@@ -678,6 +581,30 @@ function StateDetails({
       </>
     );
   const exactToggleLabel = t(exact ? "references.compact" : "references.exact");
+  const refId = useMemo(() => {
+    if (node.rootKey !== "references") return undefined;
+    const idChild = node.children.find((c) => c.key === "id");
+    const candidate = idChild?.projectedString ?? node.projectedString;
+    return candidate && /^ref_[A-Za-z0-9_-]{16,64}$/.test(candidate)
+      ? candidate
+      : undefined;
+  }, [node]);
+  const refMediaType = useMemo(
+    () => node.children.find((c) => c.key === "media_type")?.projectedString,
+    [node],
+  );
+  async function copyValue(
+    textValue: string,
+    statusKey: "copied" | "refMarkdownCopied" | "refInjectionCopied",
+  ) {
+    if (!current()) return;
+    try {
+      await navigator.clipboard.writeText(textValue);
+      if (current()) setCopy(statusKey);
+    } catch {
+      if (current()) setCopy("copyFailed");
+    }
+  }
   return (
     <>
       <h3>
@@ -747,6 +674,40 @@ function StateDetails({
           <Icon name="copy" aria-hidden="true" />
           {labels.copy}
         </button>
+      )}
+      {refId && (
+        <div className="flex flex-wrap gap-2 mt-2">
+          <button
+            type="button"
+            className="ghost-btn"
+            onClick={() =>
+              void copyValue(
+                refMediaType?.startsWith("image/")
+                  ? `![${refId}](ref:${refId})`
+                  : `[${refId}](ref:${refId})`,
+                "refMarkdownCopied",
+              )
+            }
+          >
+            <Icon name="copy" aria-hidden="true" />
+            {labels.copyRefMarkdown}
+          </button>
+          <button
+            type="button"
+            className="ghost-btn"
+            onClick={() =>
+              void copyValue(
+                refMediaType?.startsWith("image/")
+                  ? `{{ref:base64:${refId}}}`
+                  : `{{ref:${refId}}}`,
+                "refInjectionCopied",
+              )
+            }
+          >
+            <Icon name="copy" aria-hidden="true" />
+            {labels.copyRefInjection}
+          </button>
+        </div>
       )}
       {copy && <p role="status">{labels[copy]}</p>}
     </>

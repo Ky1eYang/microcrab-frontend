@@ -346,9 +346,9 @@ test("protected image trajectory separates authored arguments, frozen schema and
       tool_calls: [
         {
           id: callId,
-          name: "view_image",
-          presentation: "view-image",
-          arguments: { image_url: "file:[redacted]" },
+          name: "reference",
+          presentation: "reference",
+          arguments: { action: "add", title: "[redacted]" },
         },
       ],
       position,
@@ -356,11 +356,11 @@ test("protected image trajectory separates authored arguments, frozen schema and
     {
       id: "image-result",
       role: "tool",
-      text: "image admitted",
+      text: "reference admitted",
       parts: [],
       tool_calls: [],
       call_id: callId,
-      tool_name: "view_image",
+      tool_name: "reference",
       position,
     },
   ];
@@ -387,11 +387,11 @@ test("protected image trajectory separates authored arguments, frozen schema and
             protected_tool_call_ids: [callId],
             frozen_tools: [
               {
-                name: "view_image",
+                name: "reference",
                 parameters: {
                   type: "object",
-                  required: ["image_url"],
-                  properties: { image_url: { type: "string" } },
+                  required: ["action"],
+                  properties: { action: { type: "string" } },
                 },
               },
             ],
@@ -413,7 +413,7 @@ test("protected image trajectory separates authored arguments, frozen schema and
     "不是提供商请求正文",
   );
   await expect(page.getByTestId("historical-tool-schema")).toContainText(
-    "image_url",
+    "action",
   );
   await page.getByRole("tab", { name: "请求信息", exact: true }).click();
   const info = page.getByTestId("request-audit-metadata");

@@ -17,6 +17,7 @@ import { markdownExtensions } from "./markdown-extensions";
 import SvgBlock from "./visualizers/SvgBlock";
 import { citationDestinations } from "./citations/parser";
 import { citationComponents } from "./citations/FileCitation";
+import { libraryContentPath } from "../client/library";
 import { useCitationScope, type CitationScope } from "./citations/context";
 import { stopReasonText } from "../client/stop-reason";
 import { failureText } from "../client/failure";
@@ -37,7 +38,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import ReactMarkdown, { type Components } from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { createContext, useContext } from "react";
@@ -390,6 +391,86 @@ function footnoteHeadingPrefix({ prefix }: { prefix: string }) {
   };
 }
 
+const REF_DESTINATION_PATTERN = /^ref:(ref_[A-Za-z0-9_-]{16,64})$/;
+
+function refDestinations() {
+  return (tree: any) => {
+    const definitions = new Map<string, string>();
+    const collect = (node: any) => {
+      if (node.type === "definition") definitions.set(node.identifier, node.url);
+      node.children?.forEach(collect);
+    };
+    collect(tree);
+    const visit = (node: any) => {
+      if (
+        ["link", "image", "linkReference", "imageReference"].includes(node.type)
+      ) {
+        const href = node.url ?? definitions.get(node.identifier);
+        const match =
+          typeof href === "string"
+            ? REF_DESTINATION_PATTERN.exec(href.trim())
+            : null;
+        if (match) {
+          node.data = {
+            ...node.data,
+            hProperties: {
+              ...node.data?.hProperties,
+              "data-ref-id": match[1],
+            },
+          };
+        }
+      }
+      node.children?.forEach(visit);
+    };
+    visit(tree);
+  };
+}
+
+function withRefComponents(
+  base: Components,
+  userId: string | undefined,
+  apiBase: string,
+  sessionId?: string,
+): Components {
+  if (!userId) return base;
+  const BaseLink = base.a;
+  const BaseImg = base.img;
+  return {
+    ...base,
+    a: (props: any) => {
+      const refId = props.node?.properties?.["data-ref-id"];
+      if (typeof refId === "string") {
+        const resolved = libraryContentPath(apiBase, userId, refId, {
+          sessionId,
+        });
+        return (
+          <a href={resolved} target="_blank" rel="noopener noreferrer">
+            {props.children}
+          </a>
+        );
+      }
+      return BaseLink ? <BaseLink {...props} /> : <a {...props} />;
+    },
+    img: (props: any) => {
+      const refId = props.node?.properties?.["data-ref-id"];
+      if (typeof refId === "string") {
+        const resolved = libraryContentPath(apiBase, userId, refId, {
+          sessionId,
+        });
+        return (
+          <img
+            src={resolved}
+            alt={props.alt ?? refId}
+            loading="lazy"
+            className="markdown-ref-image"
+          />
+        );
+      }
+      return BaseImg ? <BaseImg {...props} /> : <img {...props} />;
+    },
+  };
+}
+
 export const Markdown = memo(function Markdown({
   text,
   allowImages = true,
@@ -406,23 +487,31 @@ export const Markdown = memo(function Markdown({
   idPrefix?: string;
 }) {
   useSyncExternalStore(subscribeLocale, activeLocale, activeLocale);
+  const userId = useAppSelector((state) =>
+    state.authSession?.authenticated
+      ? state.authSession.principal?.owner
+      : undefined,
+  );
+  const apiBase = useAppSelector((state) => state.apiBase);
+  const sessionId = useAppSelector((state) => state.sessionId ?? undefined);
   const enabled = !!rich && !rich.streaming;
   const context = useMemo(() => ({ text, enabled }), [text, enabled]);
-  const components = useMemo(
-    () =>
+  const components = useMemo(() => {
+    const base =
       questionImages && allowImages
         ? { ...markdownComponents, ...questionImageComponents(questionImages) }
         : citation && allowImages
           ? { ...markdownComponents, ...citationComponents(citation) }
           : allowImages
             ? markdownComponents
-            : markdownWithoutImages,
-    [citation, questionImages, allowImages],
-  );
+            : markdownWithoutImages;
+    return withRefComponents(base, userId, apiBase, sessionId);
+  }, [citation, questionImages, allowImages, userId, apiBase, sessionId]);
   const plugins = useMemo(() => {
     const result: any[] = [
       remarkGfm,
       headingAttributes,
+      refDestinations,
       [markdownExtensions, { source: text, rich: enabled }],
     ];
     if (enabled) result.push(remarkMath, [mathProperties, { source: text }]);
@@ -436,6 +525,11 @@ export const Markdown = memo(function Markdown({
         <ReactMarkdown
           remarkPlugins={plugins}
           skipHtml
+          urlTransform={(url) =>
+            REF_DESTINATION_PATTERN.test(url.trim())
+              ? url.trim()
+              : defaultUrlTransform(url)
+          }
           components={components}
           {...(idPrefix === undefined
             ? {}

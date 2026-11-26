@@ -30,9 +30,10 @@ export function stateReferenceProjection(
   const list = (value: unknown): unknown[] =>
     Array.isArray(value) ? value : [];
   if (kind === "reference" && key === "references") {
-    list(value).forEach((row, index) =>
-      add(row, "content_digest", [String(index)]),
-    );
+    list(value).forEach((row, index) => {
+      add(row, "content_digest", [String(index)]);
+      add(row, "revision", [String(index)]);
+    });
   } else if (kind === "framework" && key === "agent_init") {
     add(value, "component");
     list(own(record(value), "cache_points")).forEach((point, index) => {

@@ -124,7 +124,7 @@ export interface NativeExecutionContentPage {
   revision: number;
   available: boolean;
 }
-export type ToolPresentation = "coding-file" | "message-receipt" | "view-image" | "plugin-artifact";
+export type ToolPresentation = "coding-file" | "message-receipt" | "reference" | "plugin-artifact";
 
 export interface NativeExecution {
   presentation?: ToolPresentation;

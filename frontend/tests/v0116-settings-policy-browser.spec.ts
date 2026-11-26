@@ -295,21 +295,71 @@ test("future grant has independent countdown, exact scope and timeout never acce
   ).toHaveLength(0);
 });
 
-test("Project references persist canonical sources then refresh only the explicit selected Session", async ({
+test("Project references persist PersonalLibrary mounts then refresh only the explicit selected Session", async ({
   page,
 }) => {
   await nativeBackend(page);
+  const refA = "ref_0123456789aaaaaa";
+  const refB = "ref_0123456789bbbbbb";
   let saved = {
-    revision: 3,
-    sources: [{ type: "host_path", path: "AGENTS.md" }],
+    project_id: "project-1",
+    ref_ids: [refA],
+    items: [
+      {
+        id: refA,
+        title: "AGENTS.md",
+        source_kind: "shortcut_host_path",
+        source: { type: "host_path", path: "AGENTS.md" },
+        media_type: "text/markdown",
+        revision: "1_a",
+        read_only: false,
+        created_at_unix_ms: 1,
+        updated_at_unix_ms: 1,
+        mounted_sessions: [],
+        mounted_projects: ["project-1"],
+      },
+    ],
   };
   const writes: any[] = [];
   const refreshes: any[] = [];
+  await page.route("**/api/v1/users/u1/library/objects**", async (route) => {
+    if (route.request().method() === "POST") {
+      return route.fulfill({
+        json: {
+          id: refB,
+          title: "docs/guide.md",
+          source_kind: "shortcut_host_path",
+          source: {
+            kind: "shortcut",
+            target: { type: "host_path", path: "docs/guide.md" },
+          },
+          media_type: "text/markdown",
+          revision: "1_b",
+          read_only: false,
+          created_at_unix_ms: 2,
+          updated_at_unix_ms: 2,
+          mounted_sessions: [],
+          mounted_projects: [],
+        },
+      });
+    }
+    return route.fulfill({
+      json: {
+        items: saved.items,
+        quota: {
+          used_bytes: 0,
+          max_bytes: 256 * 1024 * 1024,
+          object_count: 1,
+          max_entries: 2048,
+        },
+      },
+    });
+  });
   await page.route("**/api/v1/projects/project-1/references", async (route) => {
     if (route.request().method() === "PUT") {
       const body = route.request().postDataJSON();
       writes.push(body);
-      saved = { revision: 4, sources: body.sources };
+      saved = { ...saved, ref_ids: body.ref_ids };
     }
     await route.fulfill({ json: saved });
   });
@@ -319,7 +369,7 @@ test("Project references persist canonical sources then refresh only the explici
       refreshes.push(route.request().postDataJSON());
       await route.fulfill({
         json: {
-          project_revision: saved.revision,
+          project_revision: 0,
           applied: true,
           boundary: "next_state_patch",
         },
@@ -339,14 +389,10 @@ test("Project references persist canonical sources then refresh only the explici
   await page.getByTestId("project-ref-save").click();
   await expect.poll(() => writes.length).toBe(1);
   expect(writes[0]).toEqual({
-    expected_revision: 3,
-    sources: [
-      { type: "host_path", path: "AGENTS.md" },
-      { type: "host_path", path: "docs/guide.md" },
-    ],
+    ref_ids: [refA, refB],
   });
   expect(refreshes).toHaveLength(0);
   await page.getByTestId("project-ref-refresh").click();
   await expect.poll(() => refreshes.length).toBe(1);
-  expect(refreshes[0]).toEqual({ project_revision: 4 });
+  expect(refreshes[0]).toEqual({});
 });

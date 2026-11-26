@@ -1500,7 +1500,7 @@ export function TrajectoryView({
                       <section className="trajectory-pane">
                         <h3>参数</h3>
                         <div className="trajectory-scroll-area">
-                          {selected.block.tool?.presentation === "view-image" ? (
+                          {selected.block.tool?.presentation === "reference" ? (
                             <RequestAudit
                               block={selected.block as any}
                               presentationScope={auditPresentationScope}
@@ -1573,7 +1573,7 @@ export function TrajectoryView({
                 )}
                 {tab === "input" && (
                   <div className="trajectory-scroll-area">
-                    {selected.block.tool?.presentation === "view-image" ? (
+                    {selected.block.tool?.presentation === "reference" ? (
                       <RequestAudit
                         block={selected.block as any}
                         presentationScope={auditPresentationScope}

@@ -87,13 +87,10 @@ export interface SettingsSnapshot {
   application: "defaults_saved" | "applied" | "deferred";
   reason: string | null;
 }
-export type ReferenceSource =
-  | { type: "host_path"; path: string }
-  | { type: "host_glob"; root: string; pattern: string }
-  | { type: "url" | "directory_url"; url: string };
 export interface ReferencesSnapshot {
-  revision: number;
-  sources: ReferenceSource[];
+  project_id: string;
+  items: import("./library").PersonalLibraryObject[];
+  ref_ids: string[];
 }
 export interface ModelOverlay {
   id: string;
@@ -448,35 +445,15 @@ export function validatePublicProvider(
 export function validateReferences(
   value: unknown,
 ): asserts value is ReferencesSnapshot {
-  const row = own(value, "references", ["revision", "sources"]);
-  safeInteger(row.revision, "references.revision");
-  if (!Array.isArray(row.sources) || row.sources.length > 128)
-    throw Error("references.sources: expected at most 128 sources");
-  for (const [index, item] of row.sources.entries()) {
-    if (!isRecord(item))
-      throw Error(`references.sources[${index}]: expected object`);
-    const fields =
-      item.type === "host_path"
-        ? ["type", "path"]
-        : item.type === "host_glob"
-          ? ["type", "root", "pattern"]
-          : ["type", "url"];
-    const source = own(item, `references.sources[${index}]`, fields);
-    if (
-      !["host_path", "host_glob", "url", "directory_url"].includes(
-        String(source.type),
-      )
-    )
-      throw Error("references: unsupported source type");
-    for (const field of fields.filter((f) => f !== "type"))
-      if (
-        typeof source[field] !== "string" ||
-        !(source[field] as string).trim()
-      )
-        throw Error(
-          `references.sources[${index}].${field}: expected nonempty string`,
-        );
-    if ("url" in source)
-      endpoint(source.url, `references.sources[${index}].url`);
+  const row = own(value, "references", ["project_id", "items", "ref_ids"]);
+  if (typeof row.project_id !== "string" || !row.project_id)
+    throw Error("references.project_id: expected nonempty string");
+  if (!Array.isArray(row.items) || !Array.isArray(row.ref_ids))
+    throw Error("references: expected items and ref_ids arrays");
+  if (row.ref_ids.length > 256)
+    throw Error("references.ref_ids: expected at most 256 items");
+  for (const [index, id] of row.ref_ids.entries()) {
+    if (typeof id !== "string" || !id.startsWith("ref_"))
+      throw Error(`references.ref_ids[${index}]: expected ref_* id`);
   }
 }

@@ -16,6 +16,11 @@ const items: NavItem[] = [
     label: "仪表盘",
     icon: <Icon name="dashboard" size={15} />,
   },
+  {
+    id: "library",
+    label: "个人内容库",
+    icon: <Icon name="box" size={15} />,
+  },
   { id: "keys", label: "API 密钥", icon: <Icon name="key" size={15} /> },
   { id: "logs", label: "使用记录", icon: <Icon name="history" size={15} /> },
   { id: "plugins", label: "插件管理", icon: <Icon name="plugins" size={15} /> },

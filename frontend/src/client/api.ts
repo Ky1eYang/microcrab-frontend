@@ -1894,6 +1894,7 @@ export class ApiClient {
       throw new CommandError("overloaded", "Too many pending requests");
     return this.http<{
       attachment_id: string;
+      reference_id?: string;
       media_type: string;
       bytes: number;
       width: number;
@@ -1904,6 +1905,176 @@ export class ApiClient {
       file,
       120000,
       file.type,
+    );
+  }
+  async libraryQuota(userId: string) {
+    return this.http<import("./library").PersonalLibraryQuota>(
+      this.url(`api/v1/users/${encodeURIComponent(userId)}/library/quota`),
+      "GET",
+      undefined,
+      30000,
+    );
+  }
+  async libraryList(
+    userId: string,
+    filters?: {
+      source_kind?: string;
+      session_id?: string;
+      project_id?: string;
+      q?: string;
+    },
+  ) {
+    const query = new URLSearchParams();
+    if (filters?.source_kind) query.set("source_kind", filters.source_kind);
+    if (filters?.session_id) query.set("session_id", filters.session_id);
+    if (filters?.project_id) query.set("project_id", filters.project_id);
+    if (filters?.q) query.set("q", filters.q);
+    const qs = query.toString();
+    return this.http<import("./library").PersonalLibraryListResponse>(
+      this.url(
+        `api/v1/users/${encodeURIComponent(userId)}/library/objects${qs ? `?${qs}` : ""}`,
+      ),
+      "GET",
+      undefined,
+      30000,
+    );
+  }
+  async libraryUpload(
+    userId: string,
+    file: File,
+    opts?: {
+      title?: string;
+      mountSessionId?: string;
+      mountProjectId?: string;
+    },
+  ) {
+    if (this.httpPending.size + this.pending.size >= MAX_PENDING)
+      throw new CommandError("overloaded", "Too many pending requests");
+    const query = new URLSearchParams();
+    if (opts?.title?.trim()) query.set("title", opts.title.trim());
+    if (opts?.mountSessionId)
+      query.set("mount_session_id", opts.mountSessionId);
+    if (opts?.mountProjectId)
+      query.set("mount_project_id", opts.mountProjectId);
+    const qs = query.toString();
+    return this.http<import("./library").PersonalLibraryObject>(
+      this.url(
+        `api/v1/users/${encodeURIComponent(userId)}/library/objects${qs ? `?${qs}` : ""}`,
+      ),
+      "POST",
+      file,
+      120000,
+      file.type || "application/octet-stream",
+    );
+  }
+  async libraryCreateJson(
+    userId: string,
+    body: {
+      title?: string;
+      target?: import("./library").PersonalLibraryShortcutTarget;
+      media_type?: string;
+      text?: string;
+      base64?: string;
+      mount_session_id?: string;
+      mount_project_id?: string;
+    },
+  ) {
+    return this.http<import("./library").PersonalLibraryObject>(
+      this.url(`api/v1/users/${encodeURIComponent(userId)}/library/objects`),
+      "POST",
+      JSON.stringify(body),
+      60000,
+      "application/json",
+    );
+  }
+  async libraryUpdate(
+    userId: string,
+    refId: string,
+    body: {
+      expected_revision?: string;
+      title?: string;
+      media_type?: string;
+      text?: string;
+      base64?: string;
+      target?: import("./library").PersonalLibraryShortcutTarget;
+    },
+  ) {
+    return this.http<import("./library").PersonalLibraryObject>(
+      this.url(
+        `api/v1/users/${encodeURIComponent(userId)}/library/objects/${encodeURIComponent(refId)}`,
+      ),
+      "PATCH",
+      JSON.stringify(body),
+      30000,
+      "application/json",
+    );
+  }
+  async libraryDelete(userId: string, refId: string) {
+    return this.http<{
+      deleted: boolean;
+      id: string;
+      quota: import("./library").PersonalLibraryQuota;
+    }>(
+      this.url(
+        `api/v1/users/${encodeURIComponent(userId)}/library/objects/${encodeURIComponent(refId)}`,
+      ),
+      "DELETE",
+      undefined,
+      30000,
+    );
+  }
+  async libraryMountSession(
+    userId: string,
+    refId: string,
+    sessionId: string,
+    mount: boolean,
+  ) {
+    return this.http<import("./library").PersonalLibraryObject>(
+      this.url(
+        `api/v1/users/${encodeURIComponent(userId)}/library/objects/${encodeURIComponent(refId)}/mounts/sessions/${encodeURIComponent(sessionId)}`,
+      ),
+      mount ? "PUT" : "DELETE",
+      undefined,
+      30000,
+    );
+  }
+  async libraryMountProject(
+    userId: string,
+    refId: string,
+    projectId: string,
+    mount: boolean,
+  ) {
+    return this.http<import("./library").PersonalLibraryObject>(
+      this.url(
+        `api/v1/users/${encodeURIComponent(userId)}/library/objects/${encodeURIComponent(refId)}/mounts/projects/${encodeURIComponent(projectId)}`,
+      ),
+      mount ? "PUT" : "DELETE",
+      undefined,
+      30000,
+    );
+  }
+  async libraryReadBlob(
+    userId: string,
+    refId: string,
+    hint?: { sessionId?: string; projectId?: string },
+    signal?: AbortSignal,
+  ) {
+    const query = new URLSearchParams();
+    if (hint?.sessionId) query.set("session_id", hint.sessionId);
+    if (hint?.projectId) query.set("project_id", hint.projectId);
+    const qs = query.toString();
+    return this.http<Blob>(
+      this.url(
+        `api/v1/users/${encodeURIComponent(userId)}/library/objects/${encodeURIComponent(refId)}/content${qs ? `?${qs}` : ""}`,
+      ),
+      "GET",
+      undefined,
+      60000,
+      "application/json",
+      undefined,
+      undefined,
+      signal,
+      true,
     );
   }
   private async observe<T>(

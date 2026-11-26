@@ -109,12 +109,6 @@ export function toolReferenceProjection(
       path[0] === "artifact"
     )
       return "digest";
-    if (
-      direction === "arguments" &&
-      presentation === "view-image" &&
-      path[0] === "image_url"
-    )
-      return "internal-image";
     return undefined;
   });
 }

@@ -5,7 +5,6 @@ import {
 import { CommandError } from "./errors";
 import {
   admitsOrdinaryState,
-  byteFields,
   parseStateInspection,
 } from "./state-inspection";
 
@@ -13,7 +12,7 @@ export type NativeStateInspection = ReturnType<typeof parseStateInspection> & {
   exactRoots: ReadonlyMap<string, string>;
 };
 
-const maps = new Set(["values", "metadata", "descriptors", "bytes", "witness"]);
+const maps = new Set(["values", "metadata", "descriptors", "witness"]);
 const isOpen = (kind: string) => kind === "object" || kind === "array";
 const isClose = (kind: string) => kind === "endObject" || kind === "endArray";
 
@@ -70,11 +69,10 @@ export async function decodeNativeStateInspection(
           if (part === "values") names[key] = undefined;
         } else if (
           depth === 3 &&
-          (part === "metadata" || part === "descriptors" || part === "bytes")
+          (part === "metadata" || part === "descriptors")
         ) {
           const key = decodeJsonString(source, from, end);
-          if (rowFields.has(key) || (part === "bytes" && !byteFields.has(key)))
-            throw invalid();
+          if (rowFields.has(key)) throw invalid();
           rowFields.add(key);
         }
         continue;
@@ -90,17 +88,10 @@ export async function decodeNativeStateInspection(
         }
         continue;
       }
-      if (
-        (depth === 0 ||
-          (depth === 1 && maps.has(part)) ||
-          (depth === 2 && part === "bytes")) &&
-        kind !== "object"
-      )
+      if ((depth === 0 || (depth === 1 && maps.has(part))) && kind !== "object")
         throw invalid();
       if (isOpen(kind)) {
         if (depth === 1) start = from;
-        // Byte rows are flat metadata, never objects/arrays in their fields.
-        if (part === "bytes" && depth === 3) throw invalid();
         depth++;
       }
     }

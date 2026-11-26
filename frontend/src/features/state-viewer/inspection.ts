@@ -4,7 +4,6 @@ import {
   parseStateInspection,
   record,
   stateKeyPattern,
-  type BytesMetadata,
 } from "../../client/state-inspection";
 import type { NativeStateInspection } from "../../client/native-state-inspection";
 import { stateReferenceProjection } from "./references";
@@ -68,7 +67,6 @@ export interface ExecutionCapacity {
 
 export interface StateTree {
   roots: StateNode[];
-  bytes: BytesMetadata[];
   nodes: Map<number, StateNode>;
   limited: boolean;
   revision: string;
@@ -136,7 +134,6 @@ export function buildNativeStateTree(
 function projectStateTree(
   {
     ordinary: { values, metadata, descriptors, witness },
-    bytes,
   }: ReturnType<typeof parseStateInspection>,
   exactRoots?: ReadonlyMap<string, string>,
 ): StateTree {
@@ -282,7 +279,6 @@ function projectStateTree(
       : undefined;
   return {
     roots,
-    bytes,
     nodes,
     limited,
     revision: witness.variables_revision,

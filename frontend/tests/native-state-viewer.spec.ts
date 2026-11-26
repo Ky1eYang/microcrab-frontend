@@ -173,151 +173,19 @@ test("capacity uses validated framework values, independent of tree bounds, and 
   expect(buildStateTree(custom).executionCapacity.buffers).toBeUndefined();
 });
 
-const runtimeHex = "1a348fbe3f8f47e8b4fc561531759c42";
-function bytesRow(name = "private_image", revision = "2") {
-  return {
-    name,
-    kind: "bytes",
-    media_type: "image/png",
-    byte_length: 33,
-    lifecycle: "ephemeral",
-    availability: "available",
-    revision,
-    selector: `bytes_${runtimeHex}_${BigInt(revision).toString(16).padStart(16, "0")}`,
-  };
-}
-
-function bytesInspection(bytes: unknown = { private_image: bytesRow() }) {
-  return {
-    ...stateInspection({ ordinary: true }, {}, "18446744073709551615"),
-    bytes,
-  };
-}
-
-test("Bytes are validated and projected separately without touching unknown payload fields", () => {
-  const max = "18446744073709551615";
-  const bytes = {
-    private_image: {
-      ...bytesRow("private_image", max),
-      redirect_execution_id: max,
-    },
-    constructor: bytesRow("constructor"),
-    ["__proto__"]: bytesRow("__proto__", "3"),
-  };
-  const source = bytesInspection(bytes);
+test("witness and state inspection maps reject malformed revisions and prototype keys", () => {
+  const source = stateInspection({ ordinary: true }, {}, "18446744073709551615");
   const tree = buildStateTree(source);
   expect(tree.roots.map(({ label }) => label)).toEqual(["ordinary"]);
-  expect(tree.bytes).toEqual(Object.values(bytes));
-  expect(tree.bytes[0].selector).toBe(`bytes_${runtimeHex}_ffffffffffffffff`);
-  expect(findStateNodes(tree.roots, "private_image").size).toBe(0);
-  expect(parseStateInspection(source).ordinary).toEqual(
-    stateInspection({ ordinary: true }, {}, max),
-  );
-  expect(buildStateTree(stateInspection({ legacy: null })).bytes).toEqual([]);
-
-  const poisoned = Object.defineProperty(bytesRow(), "data", {
-    enumerable: true,
-    get() {
-      throw Error("payload must not be read");
-    },
-  });
-  expect(() =>
-    buildStateTree(bytesInspection({ private_image: poisoned })),
-  ).toThrow(/^invalid_result$/);
-  for (const field of ["values", "metadata", "descriptors"] as const) {
-    const collision = bytesInspection();
-    Object.defineProperty(collision[field], "private_image", {
-      enumerable: true,
-      get() {
-        throw Error("ordinary payload must not be read");
-      },
-    });
-    expect(() => buildStateTree(collision)).toThrow(/^invalid_result$/);
-  }
-});
-
-test("malformed Bytes metadata fails closed at grammar, identity, numeric and map bounds", () => {
-  const row = bytesRow();
-  const maxImageBytes = 20 * 1024 * 1024;
-  const badMaps: unknown[] = [
-    null,
-    [],
-    undefined,
-    { private_image: [] },
-    ...[
-      { name: "mismatch" },
-      { kind: "image" },
-      { lifecycle: "persisted" },
-      { availability: "expired" },
-      { media_type: "image/svg+xml" },
-      { media_type: "image/png;charset=utf-8" },
-      { byte_length: 0 },
-      { byte_length: -1 },
-      { byte_length: 1.25 },
-      { byte_length: "33" },
-      { byte_length: maxImageBytes + 1 },
-      { byte_length: Number.MAX_SAFE_INTEGER + 1 },
-      { revision: "0" },
-      { revision: "02" },
-      { revision: "2\n" },
-      { revision: 2 },
-      { revision: "18446744073709551616" },
-      { selector: `https://example.invalid/${row.selector}` },
-      { selector: row.selector + "\n" },
-      { selector: row.selector.toUpperCase() },
-      { selector: `bytes_${runtimeHex}_0000000000000003` },
-      { selector: `bytes_${"a".repeat(32)}_0000000000000002` },
-      { selector: `bytes_${runtimeHex}_2` },
-      { redirect_execution_id: null },
-      { redirect_execution_id: "0" },
-      { redirect_execution_id: 1 },
-      { redirect_execution_id: "1\n" },
-      { redirect_execution_id: "18446744073709551616" },
-    ].map((patch) => ({ private_image: { ...row, ...patch } })),
-    { ["x\n"]: bytesRow("x\n") },
-    { private_image: row, duplicate: bytesRow("duplicate") },
-    Object.fromEntries(
-      Array.from({ length: 65 }, (_, i) => [
-        `k${i}`,
-        bytesRow(`k${i}`, String(i + 1)),
-      ]),
-    ),
-    Object.fromEntries(
-      Array.from({ length: 4 }, (_, i) => [
-        `k${i}`,
-        { ...bytesRow(`k${i}`, String(i + 1)), byte_length: maxImageBytes },
-      ]),
-    ),
-  ];
-  for (const bytes of badMaps) {
-    // Passing undefined explicitly must exercise present-but-undefined, not the helper's default.
-    expect(() => buildStateTree({ ...bytesInspection(), bytes })).toThrow(
-      /^invalid_result$/,
-    );
-  }
-  const source = bytesInspection();
+  expect(parseStateInspection(source).ordinary).toEqual(source);
   for (const witness of [
-    { ...source.witness, variables_revision: "1" },
+    { ...source.witness, variables_revision: "not-a-uint" },
     { ...source.witness, variables_revision: "18446744073709551616" },
-    { ...source.witness, runtime_instance_id: "unrelated" },
+    { ...source.witness, runtime_instance_id: 123 },
   ]) {
     expect(() => buildStateTree({ ...source, witness })).toThrow(
       /^invalid_result$/,
     );
-  }
-  for (const media_type of [
-    "image/png",
-    "image/jpeg",
-    "image/gif",
-    "image/webp",
-  ]) {
-    expect(
-      buildStateTree(
-        bytesInspection({
-          private_image: { ...row, media_type, byte_length: maxImageBytes },
-        }),
-      ).bytes[0].media_type,
-    ).toBe(media_type);
   }
 });
 
@@ -439,7 +307,7 @@ test("native State copies exact HTTP spans outside its display budget and fences
   const wire =
     `{"values":{"bytes":${ordinary},"secret":"\\u0066alse","token":{"BODY_MARKER":true},"unknown":{"UNCLASSIFIED_MARKER":true},"empty":"","zero":-0,"nil":null,"flag":false},` +
     `"metadata":{"bytes":{"visibility":"visible"},"secret":{"visibility":"invisible"},"token":{"visibility":"secret"},"empty":{"visibility":"visible"},"zero":{"visibility":"visible"},"nil":{"visibility":"visible"},"flag":{"visibility":"visible"}},` +
-    `"descriptors":{},"witness":{"runtime_instance_id":"1a348fbe-3f8f-47e8-b4fc-561531759c42","variables_revision":"9"},"bytes":{"private_image":${JSON.stringify(bytesRow())}}}`;
+    `"descriptors":{},"witness":{"runtime_instance_id":"1a348fbe-3f8f-47e8-b4fc-561531759c42","variables_revision":"9"}}`;
   await page.route("**/api/v1/**", (route) => {
     requests.push(
       `${route.request().method()} ${new URL(route.request().url()).pathname}`,
@@ -470,7 +338,7 @@ test("native State copies exact HTTP spans outside its display budget and fences
     await exact.click();
     await expect.poll(async () => (await written()).at(-1)).toBe(value);
   }
-  for (const label of ["token Secret", "unknown", "private_image Bytes"]) {
+  for (const label of ["token Secret", "unknown"]) {
     await panel.getByRole("button", { name: label, exact: true }).click();
     await expect(preview).toHaveCount(0);
   }
@@ -662,84 +530,49 @@ test("only the selected container renders a preview, with narrow zoomed reflow a
   expect(requests).toEqual(["/api/v1/sessions/s1/state/inspection"]);
 });
 
-test("native Bytes is read-only with exact explicit clipboard, never a value or media request", async ({
+test("reference items expose explicit Markdown ref and placeholder copy without rendering external URLs", async ({
   page,
 }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
-  const row = { ...bytesRow(), redirect_execution_id: "178" };
-  let response = bytesInspection({ private_image: row });
-  const requests: string[] = [];
-  await page.route("**/api/v1/**", (route) => {
-    const request = route.request();
-    requests.push(`${request.method()} ${new URL(request.url()).pathname}`);
-    return route.fulfill({ json: response });
-  });
+  const refId = "ref_0123456789abcdef";
+  const response = {
+    values: {
+      references: [
+        {
+          id: refId,
+          title: "Diagram",
+          source_kind: "upload",
+          media_type: "image/png",
+          byte_length: 33,
+          revision: "1_abcd",
+          read_only: false,
+        },
+      ],
+    },
+    metadata: {},
+    descriptors: {
+      references: { kind: "reference", editable: false, deletable: false },
+    },
+    witness: {
+      runtime_instance_id: "1a348fbe-3f8f-47e8-b4fc-561531759c42",
+      variables_revision: "2",
+    },
+  };
+  await page.route("**/api/v1/**", (route) => route.fulfill({ json: response }));
   await mount(page);
   const panel = page.getByRole("region", { name: "Session State" });
-  const bytes = panel.getByRole("region", { name: "Private byte variables" });
-  const copy = panel.getByRole("button", {
-    name: "Copy view_image source",
-    exact: true,
-  });
-  await bytes.getByRole("button", { name: "private_image Bytes" }).click();
-  await expect(panel.getByText("Bytes — contents not previewed")).toBeVisible();
-  await expect(panel).toContainText(
-    "Paste the copied reference as the value of image_url",
-  );
-  await expect(panel).toContainText(
-    "The reference contains no raw data and does not grant access.",
-  );
-  await expect(panel.getByText("image/png", { exact: true })).toBeVisible();
-  for (const fact of ["33", "Ephemeral", "Available", "2", "178"]) {
-    await expect(panel.getByText(fact, { exact: true })).toBeVisible();
-  }
-  await expect(panel.getByText(row.selector)).toHaveCount(0);
-  await expect(panel.locator("img, a, pre, input[type=file]")).toHaveCount(0);
-  await expect(
-    panel.getByRole("button", { name: "Copy reference" }),
-  ).toHaveCount(0);
-  expect(await page.evaluate(() => (window as any).copiedState)).toEqual([]);
-  await copy.click();
-  await expect(panel.getByRole("status")).toHaveText(
-    "view_image source copied.",
-  );
+  await panel.getByRole("button", { name: /^references/ }).click();
+  await panel.getByRole("button", { name: "Expand: references" }).click();
+  await panel.getByRole("button", { name: /^0 / }).click();
+  await panel.getByRole("button", { name: "Copy Markdown ref link" }).click();
   expect(await page.evaluate(() => (window as any).copiedState)).toEqual([
-    "{{var:base64:@bytes_1a348fbe3f8f47e8b4fc561531759c42_0000000000000002}}",
+    `![${refId}](ref:${refId})`,
   ]);
-  expect(
-    await page.evaluate(
-      () => (window as any).stateStore.getSnapshot().composer,
-    ),
-  ).toBe("Keep this draft");
-  const search = panel.getByRole("searchbox");
-  await search.fill(row.selector);
-  await expect(panel.getByText("No matching State fields.")).toBeVisible();
-  await search.fill("private_image");
-  await expect(
-    bytes.getByRole("button", { name: "private_image Bytes" }),
-  ).toBeVisible();
-  await page.evaluate(() =>
-    (window as any).stateStore.update({ resolvedLocale: "zh-CN" }),
-  );
-  await expect(
-    page.getByRole("button", { name: "复制 view_image 来源", exact: true }),
-  ).toBeVisible();
-  await expect(page.getByText("字节 — 不预览内容")).toBeVisible();
-  await page.evaluate(() =>
-    (window as any).stateStore.update({ resolvedLocale: "en" }),
-  );
-  response = bytesInspection({
-    private_image: { ...row, data: "SYNTHETIC_BYTE_PAYLOAD" },
-  });
-  await panel.getByRole("button", { name: "Refresh State" }).click();
-  await expect(panel.getByRole("alert")).toHaveText(
-    "The server returned an invalid State inspection.",
-  );
-  await expect(panel).not.toContainText("SYNTHETIC_BYTE_PAYLOAD");
-  await expect(copy).toHaveCount(0);
-  expect(requests).toEqual([
-    "GET /api/v1/sessions/s1/state/inspection",
-    "GET /api/v1/sessions/s1/state/inspection",
+  await panel
+    .getByRole("button", { name: "Copy {{ref:...}} placeholder" })
+    .click();
+  expect(await page.evaluate(() => (window as any).copiedState)).toEqual([
+    `![${refId}](ref:${refId})`,
+    `{{ref:base64:${refId}}}`,
   ]);
 });
 
@@ -750,7 +583,11 @@ test("plugin State inspection and its publication remain JSON-only", async ({
   await expect
     .poll(() => page.evaluate(() => (window as any).pendingState?.length))
     .toBe(1);
-  const source = bytesInspection();
+  const source = stateInspection(
+    { ordinary: true },
+    {},
+    "18446744073709551615",
+  );
   const projected = await page.evaluate(async (inspection) => {
     // @ts-expect-error Browser source import is resolved by the existing test server.
     const { ClientPlugins } = await import("/src/state/client-plugins.ts");
@@ -772,6 +609,7 @@ test("plugin State inspection and its publication remain JSON-only", async ({
     wire = {
       ...inspection,
       values: { private_image: "SYNTHETIC_BYTE_PAYLOAD" },
+      witness: { ...inspection.witness, variables_revision: "not-a-uint" },
     };
     let error: string | undefined;
     try {

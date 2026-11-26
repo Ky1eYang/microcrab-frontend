@@ -6,6 +6,11 @@ import { DashboardSidebar } from "./components/DashboardSidebar";
 const OverviewTab = lazy(() =>
   import("./views/OverviewTab").then((m) => ({ default: m.OverviewTab })),
 );
+const PersonalLibraryView = lazy(() =>
+  import("./views/PersonalLibraryView").then((m) => ({
+    default: m.PersonalLibraryView,
+  })),
+);
 const CacheTab = lazy(() =>
   import("./views/CacheTab").then((m) => ({ default: m.CacheTab })),
 );
@@ -89,6 +94,7 @@ export const DashboardPage: React.FC = () => {
     "overview",
   );
   const [animating, setAnimating] = useState(false);
+  const [libraryRefresh, setLibraryRefresh] = useState(0);
 
   const reportUnsupported = (operation: string) => {
     try {
@@ -121,6 +127,8 @@ export const DashboardPage: React.FC = () => {
     switch (tab) {
       case "dashboard":
         return dashboardSubTab === "overview" ? <OverviewTab /> : <CacheTab />;
+      case "library":
+        return <PersonalLibraryView refreshSignal={libraryRefresh} />;
       case "keys":
         return <ApiKeysView />;
       case "logs":
@@ -210,6 +218,7 @@ export const DashboardPage: React.FC = () => {
   // Get active tab title label for the sub-header
   const getTabTitle = () => {
     if (tab === "dashboard") return "用量与缓存仪表盘";
+    if (tab === "library") return "个人内容库";
     const titleMap: Record<string, string> = {
       ops: "运维监控",
       users: "用户管理",
@@ -264,7 +273,10 @@ export const DashboardPage: React.FC = () => {
               <button
                 type="button"
                 className="sb-btn sb-btn-ghost sb-btn-sm"
-                onClick={() => reportUnsupported("刷新仪表盘统计数据")}
+                onClick={() => {
+                  if (tab === "library") setLibraryRefresh((n) => n + 1);
+                  else reportUnsupported("刷新仪表盘统计数据");
+                }}
                 title="刷新数据"
               >
                 <svg
@@ -311,6 +323,7 @@ export const DashboardPage: React.FC = () => {
         <div
           className="sb-dashboard-content"
           onClickCapture={(event) => {
+            if (tab === "library") return;
             // TODO: Replace mock management mutations with native commands per view.
             const target = event.target;
             if (!(target instanceof Element)) return;
@@ -331,6 +344,7 @@ export const DashboardPage: React.FC = () => {
             }
           }}
           onChangeCapture={(event) => {
+            if (tab === "library") return;
             if (tab === "users" && event.target instanceof HTMLSelectElement) {
               event.preventDefault();
               event.stopPropagation();
@@ -338,20 +352,23 @@ export const DashboardPage: React.FC = () => {
             }
           }}
           onSubmitCapture={(event) => {
+            if (tab === "library") return;
             event.preventDefault();
             event.stopPropagation();
             reportUnsupported(`${getTabTitle()}：提交配置`);
           }}
         >
-          <div
-            className="settings-feedback-banner"
-            role="status"
-            data-testid="dashboard-unsupported-notice"
-          >
-            示例界面：统计、图表、账单、密钥、插件及管理列表为原版演示数据，不代表当前服务的真实状态。
-            [unsupported] TODO(dashboard
-            APIs)：当前服务尚未提供这些管理接口；修改操作会返回未支持错误。
-          </div>
+          {tab !== "library" && (
+            <div
+              className="settings-feedback-banner"
+              role="status"
+              data-testid="dashboard-unsupported-notice"
+            >
+              示例界面：统计、图表、账单、密钥、插件及管理列表为原版演示数据，不代表当前服务的真实状态。
+              [unsupported] TODO(dashboard
+              APIs)：当前服务尚未提供这些管理接口；修改操作会返回未支持错误。
+            </div>
+          )}
           <Suspense fallback={null}>{renderContent()}</Suspense>
         </div>
       </div>

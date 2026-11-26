@@ -68,20 +68,6 @@ test("projection preserves source, JSON lexemes and unclassified payloads", () =
       "arguments",
     ),
   ).toBeUndefined();
-  expect(
-    toolReferenceProjection(
-      { image_url: `file:${a}` },
-      "view-image",
-      "arguments",
-    ),
-  ).toMatchObject({ synthetic: true });
-  expect(
-    toolReferenceProjection(
-      { image_url: `https://example.com/${a}` },
-      "view-image",
-      "arguments",
-    ),
-  ).toBeUndefined();
 });
 
 test("State projection uses descriptors and known paths, not custom field names", () => {
