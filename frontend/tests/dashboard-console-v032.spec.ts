@@ -317,10 +317,8 @@ async function setupConsoleRoutes(page: Page) {
       return route.fulfill({ json: { key: keys.find((k) => k.id === id) } });
     }
     if (route.request().method() === "DELETE") {
-      keys = keys.map((k) =>
-        k.id === id ? { ...k, revoked: true, enabled: false, revision: k.revision + 1 } : k,
-      );
-      return route.fulfill({ json: { key: keys.find((k) => k.id === id) } });
+      keys = keys.filter((k) => k.id !== id);
+      return route.fulfill({ json: { deleted: true, id } });
     }
     return route.continue();
   });
@@ -348,13 +346,19 @@ for (const width of [1440, 390]) {
     await page.locator('.shell [data-testid="nav-dashboard"]').filter({ visible: true }).first().click();
 
     await expect(page.getByTestId("dashboard")).toBeVisible();
+    // Hidden shell must not occupy height below Console or expose document scrolling into chat.
+    await expect(page.locator(".shell")).toBeHidden();
+    expect(
+      await page.evaluate(() => ({
+        hScroll: document.documentElement.scrollWidth <= innerWidth,
+        vScroll: document.documentElement.scrollHeight <= innerHeight + 1,
+        shellDisplay: getComputedStyle(document.querySelector(".shell")!).display,
+      })),
+    ).toEqual({ hScroll: true, vScroll: true, shellDisplay: "none" });
     // Ensure old admin/fake mock tabs do not exist and OpenRouter reference note appears.
     await expect(page.getByTestId("dashboard")).not.toContainText("余额");
     await expect(page.getByTestId("dashboard")).toContainText("OpenRouter");
     await expect(page.getByTestId("dashboard")).toContainText("未知");
-    expect(
-      await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
-    ).toBe(true);
 
     const openMobileDashDrawerIfNeeded = async () => {
       const btn = page.locator('[data-testid="dashboard"] [data-testid="header-open-rail"]');
@@ -365,7 +369,7 @@ for (const width of [1440, 390]) {
     await page.getByRole("tab", { name: "缓存分析" }).click();
     await expect(page.getByTestId("dashboard")).toContainText("80.0%");
 
-    // API Keys lifecycle + one-time reveal + native dialog revoke
+    // API Keys lifecycle + one-time reveal + {count} formatting + permanent deletion on revoke
     await openMobileDashDrawerIfNeeded();
     await page.getByTestId("dashboard-nav-keys").click();
     await page.getByTestId("relay-key-quick-name").fill("New Automation Key");
@@ -373,9 +377,13 @@ for (const width of [1440, 390]) {
     await expect(page.getByTestId("relay-key-secret-banner")).toContainText(
       "mc_sk_new999_secret_once_only",
     );
-    await expect(page.getByTestId("relay-key-row-rk-2")).toContainText("尚未使用");
+    await expect(page.getByTestId("relay-key-row-rk-2")).toContainText("0 次");
+    await expect(page.getByTestId("relay-key-row-rk-2")).not.toContainText("{count}");
+    await page.getByTestId("relay-key-delete-rk-2").click();
+    await page.getByTestId("relay-key-confirm-revoke").click();
+    await expect(page.getByTestId("relay-key-row-rk-2")).toHaveCount(0);
 
-    // Usage Logs & Plugins & Console Preferences sync
+    // Usage Logs & Plugins (verify WASM rail is not squashed) & Console Preferences sync
     await openMobileDashDrawerIfNeeded();
     await page.getByTestId("dashboard-nav-logs").click();
     await expect(page.getByTestId("dashboard")).toContainText("CLI Client");
@@ -383,6 +391,10 @@ for (const width of [1440, 390]) {
     await openMobileDashDrawerIfNeeded();
     await page.getByTestId("dashboard-nav-plugins").click();
     await expect(page.getByTestId("client-plugins-manager")).toBeVisible();
+    const railHeight = await page
+      .getByTestId("client-plugins-rail")
+      .evaluate((el) => el.getBoundingClientRect().height);
+    expect(railHeight).toBeGreaterThan(220);
 
     await openMobileDashDrawerIfNeeded();
     await page.getByTestId("dashboard-nav-settings").click();

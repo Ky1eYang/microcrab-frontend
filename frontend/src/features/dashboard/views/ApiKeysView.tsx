@@ -333,7 +333,9 @@ export const ApiKeysView: React.FC<{
                       </td>
                       <td className="py-3 px-4 text-[11px] text-neutral-400">
                         <div>
-                          {key.request_count.toLocaleString()} {t("relayKeys.callsUnit")}
+                          {t("relayKeys.callsUnit", {
+                            count: key.request_count.toLocaleString(),
+                          })}
                         </div>
                         <div className="text-[10px] text-neutral-500">
                           {key.last_used_at_ms
@@ -342,11 +344,7 @@ export const ApiKeysView: React.FC<{
                         </div>
                       </td>
                       <td className="py-3 px-4">
-                        {key.revoked ? (
-                          <span className="text-rose-400 text-[11px]">
-                            {t("relayKeys.status.revoked")}
-                          </span>
-                        ) : key.enabled ? (
+                        {key.enabled ? (
                           <span className="text-emerald-400 text-[11px]">
                             {t("relayKeys.status.active")}
                           </span>
@@ -358,39 +356,36 @@ export const ApiKeysView: React.FC<{
                       </td>
                       <td className="py-3 px-4 text-right">
                         <div className="flex items-center justify-end gap-2">
-                          {!key.revoked && (
-                            <>
-                              <button
-                                type="button"
-                                className="sb-btn sb-btn-ghost sb-btn-sm"
-                                disabled={pending}
-                                onClick={() =>
-                                  void mutate(async () => {
-                                    await api.editRelayKey(owner, key.id, {
-                                      enabled: !key.enabled,
-                                      expected_revision: key.revision,
-                                    });
-                                  })
-                                }
-                              >
-                                {key.enabled
-                                  ? t("relayKeys.action.disable")
-                                  : t("relayKeys.action.enable")}
-                              </button>
-                              <button
-                                type="button"
-                                className="sb-btn sb-btn-ghost sb-btn-sm"
-                                disabled={pending}
-                                onClick={() => openEditModal(key)}
-                              >
-                                {t("common.edit")}
-                              </button>
-                            </>
-                          )}
+                          <button
+                            type="button"
+                            className="sb-btn sb-btn-ghost sb-btn-sm"
+                            disabled={pending}
+                            onClick={() =>
+                              void mutate(async () => {
+                                await api.editRelayKey(owner, key.id, {
+                                  enabled: !key.enabled,
+                                  expected_revision: key.revision,
+                                });
+                              })
+                            }
+                          >
+                            {key.enabled
+                              ? t("relayKeys.action.disable")
+                              : t("relayKeys.action.enable")}
+                          </button>
+                          <button
+                            type="button"
+                            className="sb-btn sb-btn-ghost sb-btn-sm"
+                            disabled={pending}
+                            onClick={() => openEditModal(key)}
+                          >
+                            {t("common.edit")}
+                          </button>
                           <button
                             type="button"
                             className="sb-btn sb-btn-danger sb-btn-sm"
-                            disabled={pending || key.revoked}
+                            data-testid={`relay-key-delete-${key.id}`}
+                            disabled={pending}
                             onClick={() => setRevokeTarget(key)}
                           >
                             {t("relayKeys.action.revoke")}

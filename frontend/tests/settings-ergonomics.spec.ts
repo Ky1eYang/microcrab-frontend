@@ -33,9 +33,14 @@ async function open(page: Page, tab = "会话默认设置") {
   if (onDash) {
     await expect(page.getByTestId("dashboard")).toBeVisible();
   } else {
-    await expect(page.getByTestId("composer")).toBeVisible();
+    await expect(page.getByTestId("composer").locator("textarea")).toBeVisible();
     const railMenu = page.locator('.shell [data-testid="header-open-rail"]');
-    if (await railMenu.isVisible()) await railMenu.click();
+    if (await railMenu.isVisible()) {
+      await railMenu.click();
+      await expect(
+        page.locator('.shell [data-testid="nav-dashboard"]').filter({ visible: true }).first(),
+      ).toBeVisible();
+    }
     await page.locator('.shell [data-testid="nav-dashboard"]').filter({ visible: true }).first().click();
   }
   const dashMenu = page.locator('[data-testid="dashboard"] [data-testid="header-open-rail"]');

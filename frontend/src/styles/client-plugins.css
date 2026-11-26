@@ -60,13 +60,14 @@
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-sans);
-  font-size: var(--fs-sm);
+  font-size: var(--fs-md);
   overflow-wrap: anywhere;
 }
 
 .client-plugins-page[data-embedded="true"] {
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
+  height: clamp(540px, calc(100dvh - 148px), 920px);
   min-height: 520px;
 }
 
@@ -367,7 +368,7 @@
 .client-plugins-rail-footer {
   padding: var(--sp-2) var(--sp-3);
   border-top: 1px solid var(--border);
-  font-size: var(--fs-2xs);
+  font-size: var(--fs-xs);
   line-height: 1.45;
   color: var(--text-3);
 }
@@ -882,15 +883,19 @@
 }
 
 @media (max-width: 767px) {
-  .client-plugins-page {
+  .client-plugins-page,
+  .client-plugins-page[data-embedded="true"] {
     flex-direction: column;
+    height: auto;
+    min-height: 0;
     overflow-y: auto;
   }
   .client-plugins-rail {
     width: 100%;
     max-width: none;
     height: auto;
-    max-height: 42vh;
+    min-height: 240px;
+    max-height: 44vh;
     border-right: 0;
     border-bottom: 1px solid var(--border);
   }

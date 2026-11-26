@@ -49,9 +49,10 @@ function settings() {
   };
 }
 async function open(page: Page, tab = "模型服务商") {
+  await expect(page.getByTestId("composer").locator("textarea")).toBeVisible();
   const railMenu = page.locator('.shell [data-testid="header-open-rail"]');
   if (await railMenu.isVisible()) await railMenu.click();
-  await page.locator('.shell [data-testid="nav-dashboard"]').first().click();
+  await page.locator('.shell [data-testid="nav-dashboard"]').filter({ visible: true }).first().click();
   const dashMenu = page.locator('[data-testid="dashboard"] [data-testid="header-open-rail"]');
   if (await dashMenu.isVisible()) await dashMenu.click();
   await page.getByTestId("dashboard-nav-settings").click();

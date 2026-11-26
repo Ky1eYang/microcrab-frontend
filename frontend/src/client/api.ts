@@ -2033,7 +2033,7 @@ export class ApiClient {
     );
   }
   revokeRelayKey(owner: string, id: string, expected_revision: number) {
-    return this.http<{ key: import("./relay-keys").RelayKey }>(
+    return this.http<{ deleted: boolean; id: string }>(
       this.relayKeyPath(owner, id),
       "DELETE",
       JSON.stringify({ expected_revision }),
