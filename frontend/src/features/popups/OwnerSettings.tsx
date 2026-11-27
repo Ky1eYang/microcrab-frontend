@@ -10,6 +10,7 @@ import {
   PROMPT_FIELDS,
   validateSettingsOverrides,
   validateProviderConfig,
+  validateModelOverlays,
   type SettingsSnapshot,
   type SettingsOverrides,
   type ProviderConfig,
@@ -1136,6 +1137,9 @@ const emptyProvider = (): ProviderConfig => ({
   max_response_bytes: 1073741824,
   models: [],
 });
+type HeaderRow = { key: string; value: string };
+const toHeaderRows = (headers?: Record<string, string>): HeaderRow[] =>
+  Object.entries(headers ?? {}).map(([key, value]) => ({ key, value }));
 export function ProvidersSettings() {
   const { state, dispatch } = useApp();
   const owner = JSON.stringify([
@@ -1147,6 +1151,7 @@ export function ProvidersSettings() {
   const [creatingNew, setCreatingNew] = useState(false);
   const [id, setId] = useState("");
   const [draft, setDraft] = useState<ProviderConfig>(emptyProvider);
+  const [headerRows, setHeaderRows] = useState<HeaderRow[]>([]);
   const [keyAction, setKeyAction] = useState("retain");
   const [secret, setSecret] = useState("");
   const [busy, setBusy] = useState(false);
@@ -1181,7 +1186,9 @@ export function ProvidersSettings() {
       setPendingFailure(null);
     }
   }, [pendingFailure]);
-  const readonly = selected?.read_only || selected?.scope === "admin";
+  const connectionReadonly = Boolean(
+    selected?.read_only || selected?.scope === "admin",
+  );
   const request = (method: string, params = {}) =>
     dispatch({ type: "SettingsRequest", method, params });
   const edit = (provider: PublicProvider | null, isNew = false) => {
@@ -1206,10 +1213,12 @@ export function ProvidersSettings() {
             auth: provider.auth,
             timeout_ms: provider.timeout_ms,
             max_response_bytes: provider.max_response_bytes,
+            ...(provider.headers ? { headers: provider.headers } : {}),
             models: structuredClone(provider.models),
           }
         : emptyProvider(),
     );
+    setHeaderRows(toHeaderRows(provider?.headers));
     setSecret("");
     setKeyAction("retain");
     setError("");
@@ -1259,7 +1268,8 @@ export function ProvidersSettings() {
     };
   }, [owner]);
   const mutate = async (method: string) => {
-    if (readonly || busyRef.current) return;
+    if (busyRef.current) return;
+    if (connectionReadonly && method === "provider.delete") return;
     const ticket = generation.current;
     const intent = editIntent.current;
     try {
@@ -1274,44 +1284,75 @@ export function ProvidersSettings() {
         providerId = `user:${localId}`;
       }
       if (!providerId) return;
+      let params: Record<string, unknown> = {
+        provider_id: providerId,
+        expected_revision: selected?.revision ?? 0,
+      };
       if (method === "provider.set") {
-        try {
-          new URL(draft.endpoint);
-        } catch {
-          throw Error(`provider.endpoint: ${t("settingsUX.endpoint")}`);
-        }
-        for (const [index, model] of draft.models.entries()) {
-          if (model.endpoint !== undefined) {
-            try {
-              new URL(model.endpoint);
-            } catch {
-              throw Error(
-                `provider.models[${index}].endpoint: ${t("settingsUX.endpoint")}`,
-              );
+        if (connectionReadonly) {
+          validateModelOverlays(draft.models, "provider.models", false);
+          params = { ...params, models: draft.models };
+        } else {
+          try {
+            new URL(draft.endpoint);
+          } catch {
+            throw Error(`provider.endpoint: ${t("settingsUX.endpoint")}`);
+          }
+          for (const [index, model] of draft.models.entries()) {
+            if (model.endpoint !== undefined) {
+              try {
+                new URL(model.endpoint);
+              } catch {
+                throw Error(
+                  `provider.models[${index}].endpoint: ${t("settingsUX.endpoint")}`,
+                );
+              }
             }
           }
+          const headers: Record<string, string> = {};
+          const seenHeaders = new Set<string>();
+          for (const row of headerRows) {
+            const key = row.key.trim();
+            if (!key && !row.value) continue;
+            if (!key)
+              throw Error(
+                `provider.headers: ${t("ownerSettings.headerNameRequired")}`,
+              );
+            const lower = key.toLowerCase();
+            if (seenHeaders.has(lower))
+              throw Error(
+                `provider.headers: ${t("ownerSettings.headerDuplicate")}`,
+              );
+            seenHeaders.add(lower);
+            headers[key] = row.value;
+          }
+          const nextDraft: ProviderConfig = {
+            name: draft.name,
+            protocol: draft.protocol,
+            endpoint: draft.endpoint,
+            auth: draft.auth,
+            timeout_ms: draft.timeout_ms,
+            max_response_bytes: draft.max_response_bytes,
+            ...(Object.keys(headers).length > 0 ? { headers } : {}),
+            models: draft.models,
+          };
+          validateProviderConfig(nextDraft);
+          if (keyAction === "replace" && !secret)
+            throw Error(`provider.secret: ${t("ownerSettings.keyRequired")}`);
+          params = {
+            ...params,
+            provider: nextDraft,
+            ...(keyAction === "replace"
+              ? { api_key: secret }
+              : keyAction === "clear"
+                ? { api_key: null }
+                : {}),
+          };
         }
-        validateProviderConfig(draft);
       }
-      if (method === "provider.set" && keyAction === "replace" && !secret)
-        throw Error(`provider.secret: ${t("ownerSettings.keyRequired")}`);
       busyRef.current = true;
       setBusy(true);
       setError("");
-      const params = {
-        provider_id: providerId,
-        expected_revision: selected?.revision ?? 0,
-        ...(method === "provider.set"
-          ? {
-              provider: draft,
-              ...(keyAction === "replace"
-                ? { api_key: secret }
-                : keyAction === "clear"
-                  ? { api_key: null }
-                  : {}),
-            }
-          : {}),
-      };
       const result = await request(method, params);
       if (ticket !== generation.current || intent !== editIntent.current)
         return;
@@ -1323,7 +1364,7 @@ export function ProvidersSettings() {
         setError(errorText(failure));
         const path = failurePath(failure);
         const index = /^provider\.models\[(\d+)\]/.exec(path)?.[1];
-        setConfigOpen(true);
+        if (!connectionReadonly || index === undefined) setConfigOpen(true);
         if (index !== undefined) {
           setModelSearch("");
           setModelFilter("all");
@@ -1339,7 +1380,7 @@ export function ProvidersSettings() {
     }
   };
   const updateModel = (index: number, patch: Partial<ModelOverlay>) => {
-    if (readonly || busyRef.current) return;
+    if (busyRef.current) return;
     editIntent.current++;
     setDraft((current) => ({
       ...current,
@@ -1354,7 +1395,7 @@ export function ProvidersSettings() {
     patch: Partial<ModelOverlay>,
     rowKey: string,
   ) => {
-    if (readonly || busyRef.current) return;
+    if (busyRef.current) return;
     editIntent.current++;
     if (!draft.models.some((m) => m.id === model.id))
       modelKeys.current.push(rowKey);
@@ -1422,8 +1463,11 @@ export function ProvidersSettings() {
   });
 
   const renderProviderConfigForm = () => (
-    <fieldset disabled={busy || readonly} className="settings-flat-fieldset">
-      {readonly && (
+    <fieldset
+      disabled={busy || connectionReadonly}
+      className="settings-flat-fieldset"
+    >
+      {connectionReadonly && (
         <p className="inline-notice">{t("ownerSettings.adminReadonly")}</p>
       )}
       <div className="limits-grid">
@@ -1549,6 +1593,81 @@ export function ProvidersSettings() {
           )}
         </label>
       </div>
+      {!connectionReadonly && (
+        <div className="predicate-editor" style={{ marginTop: "var(--sp-3)" }}>
+          <div className="providers-header-bar">
+            <span className="limits-group-title">
+              {t("ownerSettings.headers")}
+            </span>
+            <button
+              type="button"
+              className="ghost-btn"
+              data-testid="provider-add-header"
+              onClick={() => {
+                editIntent.current++;
+                setHeaderRows((rows) => [...rows, { key: "", value: "" }]);
+              }}
+            >
+              + {t("ownerSettings.addHeader")}
+            </button>
+          </div>
+          <p className="settings-row-sub">{t("ownerSettings.headersHint")}</p>
+          {headerRows.map((row, idx) => (
+            <div className="predicate-arg-row" key={idx}>
+              <label className="settings-form-group">
+                {t("ownerSettings.headerName")}
+                <input
+                  className="settings-input"
+                  placeholder="User-Agent"
+                  value={row.key}
+                  data-testid={`provider-header-name-${idx}`}
+                  data-validation-path="provider.headers"
+                  onChange={(e) => {
+                    editIntent.current++;
+                    const key = e.target.value;
+                    setHeaderRows((rows) =>
+                      rows.map((item, at) =>
+                        at === idx ? { ...item, key } : item,
+                      ),
+                    );
+                  }}
+                />
+              </label>
+              <label className="settings-form-group">
+                {t("ownerSettings.headerValue")}
+                <input
+                  className="settings-input"
+                  value={row.value}
+                  data-testid={`provider-header-value-${idx}`}
+                  onChange={(e) => {
+                    editIntent.current++;
+                    const value = e.target.value;
+                    setHeaderRows((rows) =>
+                      rows.map((item, at) =>
+                        at === idx ? { ...item, value } : item,
+                      ),
+                    );
+                  }}
+                />
+              </label>
+              <div className="settings-actions-row" style={{ margin: 0 }}>
+                <button
+                  type="button"
+                  className="ghost-btn"
+                  onClick={() => {
+                    editIntent.current++;
+                    setHeaderRows((rows) =>
+                      rows.filter((_, at) => at !== idx),
+                    );
+                  }}
+                >
+                  {t("ownerSettings.remove")}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="settings-actions-row">
         <button
           className="primary-btn"
@@ -1556,14 +1675,6 @@ export function ProvidersSettings() {
           onClick={() => void mutate("provider.set")}
         >
           {t("ownerSettings.save")}
-        </button>
-        <button
-          className="ghost-btn"
-          disabled={!selected}
-          onClick={() => void mutate("provider.discover")}
-          data-testid="provider-discover"
-        >
-          {t("ownerSettings.discover")}
         </button>
         {selected && (
           <button
@@ -1648,7 +1759,29 @@ export function ProvidersSettings() {
                 {t("ownerSettings.modelsCardTitle")}
                 {selected ? ` · ${selected.name}` : ""}
               </span>
-              <span className="limit-source-pill">{mergedModels.length}</span>
+              <div className="model-row-actions">
+                <span className="limit-source-pill">{mergedModels.length}</span>
+                <button
+                  type="button"
+                  className="ghost-btn"
+                  disabled={busy || !selected}
+                  onClick={() => void mutate("provider.discover")}
+                  data-testid="provider-discover"
+                >
+                  {t("ownerSettings.discover")}
+                </button>
+                {connectionReadonly && (
+                  <button
+                    type="button"
+                    className="primary-btn"
+                    disabled={busy}
+                    onClick={() => void mutate("provider.set")}
+                    data-testid="provider-models-save"
+                  >
+                    {t("ownerSettings.saveModels")}
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="model-toolbar">
@@ -1684,7 +1817,7 @@ export function ProvidersSettings() {
               <button
                 type="button"
                 className="ghost-btn"
-                disabled={busy || readonly}
+                disabled={busy}
                 onClick={() => {
                   editIntent.current++;
                   const used = new Set(allModels.map(({ model }) => model.id));
@@ -1717,13 +1850,16 @@ export function ProvidersSettings() {
                         ? { id: model.id }
                         : draft.models[manualIndex];
                     const updateRow = (patch: Partial<ModelOverlay>) => {
-                      if (readonly || busyRef.current) return;
+                      if (busyRef.current) return;
                       if (manualIndex === null)
                         upsertManualOverride(model, patch, rowKey);
                       else updateModel(manualIndex, patch);
                     };
                     const expanded = expandedModelKey === rowKey;
                     const enabled = !model.disabled;
+                    const textFields = connectionReadonly
+                      ? (["id", "name"] as const)
+                      : (["id", "name", "endpoint"] as const);
                     return (
                       <div
                         className="model-row-card"
@@ -1765,7 +1901,7 @@ export function ProvidersSettings() {
                               type="button"
                               className="mc-state-btn"
                               data-enabled={enabled}
-                              disabled={busy || readonly}
+                              disabled={busy}
                               onClick={() => {
                                 if (manualIndex !== null) {
                                   updateModel(manualIndex, {
@@ -1818,39 +1954,37 @@ export function ProvidersSettings() {
                             id={`${controlId}-model-${encodeURIComponent(rowKey)}`}
                           >
                             <fieldset
-                              disabled={busy || readonly}
+                              disabled={busy}
                               className="settings-flat-fieldset model-expand-fields"
                             >
-                              {(["id", "name", "endpoint"] as const).map(
-                                (field) => (
-                                  <label
-                                    className="settings-form-group"
-                                    key={field}
-                                  >
-                                    {t(`ownerSettings.model.${field}`)}
-                                    <input
-                                      className="settings-input"
-                                      disabled={busy || readonly}
-                                      value={overlay[field] ?? ""}
-                                      data-validation-path={
-                                        manualIndex === null
-                                          ? undefined
-                                          : `provider.models[${manualIndex}].${field}`
-                                      }
-                                      onChange={(e) =>
-                                        updateRow({
-                                          [field]: e.target.value || undefined,
-                                        })
-                                      }
-                                    />
-                                  </label>
-                                ),
-                              )}
+                              {textFields.map((field) => (
+                                <label
+                                  className="settings-form-group"
+                                  key={field}
+                                >
+                                  {t(`ownerSettings.model.${field}`)}
+                                  <input
+                                    className="settings-input"
+                                    disabled={busy}
+                                    value={overlay[field] ?? ""}
+                                    data-validation-path={
+                                      manualIndex === null
+                                        ? undefined
+                                        : `provider.models[${manualIndex}].${field}`
+                                    }
+                                    onChange={(e) =>
+                                      updateRow({
+                                        [field]: e.target.value || undefined,
+                                      })
+                                    }
+                                  />
+                                </label>
+                              ))}
                               <label className="settings-form-group">
                                 {t("ownerSettings.model.variants")}
                                 <input
                                   className="settings-input"
-                                  disabled={busy || readonly}
+                                  disabled={busy}
                                   value={overlay.variants?.join(", ") ?? ""}
                                   onChange={(e) =>
                                     updateRow({
@@ -1868,7 +2002,7 @@ export function ProvidersSettings() {
                                   className="settings-input"
                                   type="number"
                                   min="1"
-                                  disabled={busy || readonly}
+                                  disabled={busy}
                                   value={overlay.context_window_tokens ?? ""}
                                   data-validation-path={
                                     manualIndex === null
@@ -1884,62 +2018,66 @@ export function ProvidersSettings() {
                                   }
                                 />
                               </label>
-                              <label className="settings-form-group">
-                                {t("ownerSettings.protocol")}
-                                <select
-                                  className="settings-input"
-                                  disabled={busy || readonly}
-                                  value={overlay.protocol ?? ""}
-                                  onChange={(e) =>
-                                    updateRow({
-                                      protocol: e.target.value
-                                        ? (e.target
-                                            .value as ModelOverlay["protocol"])
-                                        : undefined,
-                                    })
-                                  }
-                                >
-                                  <option value="">
-                                    {t("ownerSettings.inherit")}
-                                  </option>
-                                  {[
-                                    "openai-compatible",
-                                    "openai",
-                                    "anthropic",
-                                    "google",
-                                  ].map((protocol) => (
-                                    <option key={protocol}>{protocol}</option>
-                                  ))}
-                                </select>
-                              </label>
-                              <label className="settings-form-group">
-                                {t("ownerSettings.auth")}
-                                <select
-                                  className="settings-input"
-                                  disabled={busy || readonly}
-                                  value={overlay.auth ?? ""}
-                                  onChange={(e) =>
-                                    updateRow({
-                                      auth: e.target.value
-                                        ? (e.target
-                                            .value as ModelOverlay["auth"])
-                                        : undefined,
-                                    })
-                                  }
-                                >
-                                  <option value="">
-                                    {t("ownerSettings.inherit")}
-                                  </option>
-                                  <option value="native">native</option>
-                                  <option value="bearer">bearer</option>
-                                </select>
-                              </label>
+                              {!connectionReadonly && (
+                                <>
+                                  <label className="settings-form-group">
+                                    {t("ownerSettings.protocol")}
+                                    <select
+                                      className="settings-input"
+                                      disabled={busy}
+                                      value={overlay.protocol ?? ""}
+                                      onChange={(e) =>
+                                        updateRow({
+                                          protocol: e.target.value
+                                            ? (e.target
+                                                .value as ModelOverlay["protocol"])
+                                            : undefined,
+                                        })
+                                      }
+                                    >
+                                      <option value="">
+                                        {t("ownerSettings.inherit")}
+                                      </option>
+                                      {[
+                                        "openai-compatible",
+                                        "openai",
+                                        "anthropic",
+                                        "google",
+                                      ].map((protocol) => (
+                                        <option key={protocol}>{protocol}</option>
+                                      ))}
+                                    </select>
+                                  </label>
+                                  <label className="settings-form-group">
+                                    {t("ownerSettings.auth")}
+                                    <select
+                                      className="settings-input"
+                                      disabled={busy}
+                                      value={overlay.auth ?? ""}
+                                      onChange={(e) =>
+                                        updateRow({
+                                          auth: e.target.value
+                                            ? (e.target
+                                                .value as ModelOverlay["auth"])
+                                            : undefined,
+                                        })
+                                      }
+                                    >
+                                      <option value="">
+                                        {t("ownerSettings.inherit")}
+                                      </option>
+                                      <option value="native">native</option>
+                                      <option value="bearer">bearer</option>
+                                    </select>
+                                  </label>
+                                </>
+                              )}
                               <div className="settings-actions-row">
                                 {manualIndex !== null && (
                                   <button
                                     type="button"
                                     className="ghost-btn"
-                                    disabled={busy || readonly}
+                                    disabled={busy}
                                     onClick={() => {
                                       editIntent.current++;
                                       modelKeys.current.splice(manualIndex, 1);

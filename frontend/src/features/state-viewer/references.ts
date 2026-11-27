@@ -29,7 +29,7 @@ export function stateReferenceProjection(
   };
   const list = (value: unknown): unknown[] =>
     Array.isArray(value) ? value : [];
-  if (kind === "reference" && key === "references") {
+  if (kind === "reference") {
     list(value).forEach((row, index) => {
       add(row, "content_digest", [String(index)]);
       add(row, "revision", [String(index)]);

@@ -93,19 +93,54 @@ test("private Providers are reachable without editing or copying a startup Provi
     name: "Startup Gateway",
     scope: "admin",
     read_only: true,
+    models: [],
     revision: 0,
   };
   const items = [shared, provider()];
   const { writes } = await setup(page, items);
+  await page.route("**/api/v1/providers/gateway", async (route) => {
+    const body = route.request().postDataJSON();
+    writes.push(body);
+    expect(route.request().method()).toBe("PUT");
+    expect(body).not.toHaveProperty("provider");
+    expect(body).not.toHaveProperty("api_key");
+    Object.assign(shared, {
+      models: body.models,
+      revision: shared.revision + 1,
+    });
+    await route.fulfill({ json: shared });
+  });
+  await page.route("**/api/v1/providers/gateway/discover", async (route) => {
+    expect(route.request().method()).toBe("POST");
+    Object.assign(shared, {
+      discovered: [
+        ...shared.discovered,
+        { id: "shared-refreshed", name: "Shared Refreshed" },
+      ],
+      revision: shared.revision + 1,
+    });
+    await route.fulfill({ json: shared });
+  });
   // The actual Server lists startup Providers first.
   await expect(page.getByTestId("provider-id")).toHaveValue("user:alpha");
   await expect(page.getByTestId("provider-save")).toBeEnabled();
   await page.locator('[data-provider-id="gateway"]').click();
   await expect(page.getByTestId("provider-save")).toBeDisabled();
-  await expect(page.getByTestId("provider-discover")).toBeDisabled();
+  await expect(page.getByTestId("provider-discover")).toBeEnabled();
+  await expect(page.getByTestId("provider-models-save")).toBeEnabled();
   await expect(page.getByTestId("providers-settings")).toContainText(
     "创建独立的私有配置",
   );
+  await page.getByTestId("provider-discover").click();
+  await expect(model(page, "shared-refreshed")).toBeVisible();
+  await model(page, "shared-refreshed").locator(".mc-state-btn").click();
+  await page.getByTestId("provider-models-save").click();
+  await expect.poll(() => writes.length).toBe(1);
+  expect(writes[0]).toEqual({
+    expected_revision: 1,
+    models: [{ id: "shared-refreshed", disabled: true }],
+  });
+  writes.length = 0;
 
   await page.route("**/api/v1/providers/user%3Agateway", async (route) => {
     const body = route.request().postDataJSON();
@@ -139,12 +174,15 @@ test("private Providers are reachable without editing or copying a startup Provi
   await page.getByTestId("provider-id").fill("gateway");
   await page.getByTestId("provider-name").fill("My Gateway");
   await page.getByTestId("provider-endpoint").fill("https://mine.example/v1");
+  await page.getByTestId("provider-add-header").click();
+  await page.getByTestId("provider-header-name-0").fill("User-Agent");
+  await page.getByTestId("provider-header-value-0").fill("pi-agent");
   await page.getByTestId("provider-save").click();
   await expect(page.getByTestId("provider-id")).toHaveValue("user:gateway");
   await expect(page.getByTestId("provider-id")).toBeDisabled();
   expect(writes[0]).toMatchObject({
     expected_revision: 0,
-    provider: { models: [] },
+    provider: { models: [], headers: { "User-Agent": "pi-agent" } },
   });
   expect(writes[0]).not.toHaveProperty("api_key");
 
@@ -303,13 +341,15 @@ test("mutation blocks provider selection and model writes; read-only disclosure 
   release();
   await expect(page.locator('[data-provider-id="admin"]')).toBeEnabled();
   await page.locator('[data-provider-id="admin"]').click();
+  await expect(page.getByTestId("provider-name")).toBeDisabled();
   const row = model(page, "catalog-a");
   await row
     .getByRole("button", { name: "编辑覆盖 · catalog-a", exact: true })
     .click();
-  await expect(row.getByLabel("模型名称", { exact: true })).toBeDisabled();
-  await expect(row.getByTestId("provider-model-row")).toHaveCount(0);
-  await expect(row.locator(".mc-state-btn")).toBeDisabled();
+  await expect(row.getByLabel("模型名称", { exact: true })).toBeEnabled();
+  await expect(row).not.toHaveAttribute("data-testid", "provider-model-row");
+  await expect(row.getByLabel("模型端点覆盖（可选）", { exact: true })).toHaveCount(0);
+  await expect(row.locator(".mc-state-btn")).toBeEnabled();
   expect(writes).toHaveLength(1);
 });
 

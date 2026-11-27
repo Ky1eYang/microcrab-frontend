@@ -109,6 +109,7 @@ export interface ProviderConfig {
   auth: "native" | "bearer";
   timeout_ms: number;
   max_response_bytes: number;
+  headers?: Record<string, string>;
   models: ModelOverlay[];
 }
 export interface PublicProvider extends ProviderConfig {
@@ -328,36 +329,46 @@ export function normalizeSettingsSnapshot(value: unknown): SettingsSnapshot {
       view.constraints.agent_wasm_fuel_default;
   return view;
 }
-export function validateProviderConfig(
-  value: unknown,
-): asserts value is ProviderConfig {
-  const row = own(value, "provider", [
-    "name",
-    "protocol",
-    "endpoint",
-    "auth",
-    "timeout_ms",
-    "max_response_bytes",
-    "models",
-  ]);
-  if (typeof row.name !== "string" || !row.name.trim())
-    throw Error("provider.name: expected nonempty string");
-  if (
-    !["openai-compatible", "openai", "anthropic", "google"].includes(
-      String(row.protocol),
-    )
-  )
-    throw Error("provider.protocol: unsupported protocol");
-  if (!["native", "bearer"].includes(String(row.auth)))
-    throw Error("provider.auth: expected native or bearer");
-  endpoint(row.endpoint, "provider.endpoint");
-  safeInteger(row.timeout_ms, "provider.timeout_ms", 1);
-  safeInteger(row.max_response_bytes, "provider.max_response_bytes", 1);
-  if (!Array.isArray(row.models) || row.models.length > 1024)
-    throw Error("provider.models: expected at most 1024 models");
+const RESERVED_HEADERS = new Set([
+  "authorization",
+  "x-api-key",
+  "x-goog-api-key",
+  "content-type",
+  "host",
+  "content-length",
+  "transfer-encoding",
+  "connection",
+]);
+
+function validateHeaders(headers: unknown, path: string): void {
+  if (!isRecord(headers)) throw Error(`${path}: expected object`);
+  const entries = Object.entries(headers);
+  if (entries.length > 64) throw Error(`${path}: at most 64 custom headers`);
   const seen = new Set<string>();
-  for (const [index, item] of row.models.entries()) {
-    const at = `provider.models[${index}]`;
+  for (const [name, val] of entries) {
+    if (!/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(name) || name.length > 128)
+      throw Error(`${path}: invalid HTTP header name "${name}"`);
+    const lower = name.toLowerCase();
+    if (RESERVED_HEADERS.has(lower))
+      throw Error(`${path}: header "${name}" is reserved by the transport`);
+    if (seen.has(lower))
+      throw Error(`${path}: duplicate HTTP header "${name}"`);
+    seen.add(lower);
+    if (typeof val !== "string" || /[\r\n\0]/.test(val) || val.length > 8192)
+      throw Error(`${path}.${name}: invalid header value`);
+  }
+}
+
+export function validateModelOverlays(
+  models: unknown,
+  path = "provider.models",
+  allowRouteOverrides = true,
+): asserts models is ModelOverlay[] {
+  if (!Array.isArray(models) || models.length > 1024)
+    throw Error(`${path}: expected at most 1024 models`);
+  const seen = new Set<string>();
+  for (const [index, item] of models.entries()) {
+    const at = `${path}[${index}]`;
     const model = own(item, at, [
       "id",
       "name",
@@ -385,8 +396,14 @@ export function validateProviderConfig(
         `${at}.context_window_tokens`,
         1,
       );
-    if (model.endpoint !== undefined)
+    if (!allowRouteOverrides) {
+      if (model.endpoint !== undefined)
+        throw Error(`${at}.endpoint: shared providers cannot override endpoint`);
+      if (model.auth !== undefined)
+        throw Error(`${at}.auth: shared providers cannot override auth`);
+    } else if (model.endpoint !== undefined) {
       endpoint(model.endpoint, `${at}.endpoint`);
+    }
     if (
       model.protocol !== undefined &&
       !["openai-compatible", "openai", "anthropic", "google"].includes(
@@ -403,6 +420,36 @@ export function validateProviderConfig(
       throw Error(`${at}.disabled: expected boolean`);
   }
 }
+
+export function validateProviderConfig(
+  value: unknown,
+): asserts value is ProviderConfig {
+  const row = own(value, "provider", [
+    "name",
+    "protocol",
+    "endpoint",
+    "auth",
+    "timeout_ms",
+    "max_response_bytes",
+    "headers",
+    "models",
+  ]);
+  if (typeof row.name !== "string" || !row.name.trim())
+    throw Error("provider.name: expected nonempty string");
+  if (
+    !["openai-compatible", "openai", "anthropic", "google"].includes(
+      String(row.protocol),
+    )
+  )
+    throw Error("provider.protocol: unsupported protocol");
+  if (!["native", "bearer"].includes(String(row.auth)))
+    throw Error("provider.auth: expected native or bearer");
+  endpoint(row.endpoint, "provider.endpoint");
+  safeInteger(row.timeout_ms, "provider.timeout_ms", 1);
+  safeInteger(row.max_response_bytes, "provider.max_response_bytes", 1);
+  if (row.headers !== undefined) validateHeaders(row.headers, "provider.headers");
+  validateModelOverlays(row.models, "provider.models", true);
+}
 export function validatePublicProvider(
   value: unknown,
 ): asserts value is PublicProvider {
@@ -417,6 +464,7 @@ export function validatePublicProvider(
     "auth",
     "timeout_ms",
     "max_response_bytes",
+    "headers",
     "api_key_configured",
     "models",
     "discovered",

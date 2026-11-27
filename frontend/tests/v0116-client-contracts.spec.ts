@@ -225,6 +225,24 @@ test("public Provider validation never admits credentials and manual routes rema
   expect(() =>
     validateProviderConfig({ ...provider, models: [{ id: "a" }, { id: "a" }] }),
   ).toThrow("unique nonempty model");
+  expect(() =>
+    validateProviderConfig({
+      ...provider,
+      headers: { "User-Agent": "pi", "X-Custom": "1" },
+    }),
+  ).not.toThrow();
+  expect(() =>
+    validateProviderConfig({
+      ...provider,
+      headers: { Authorization: "Bearer hijack" },
+    }),
+  ).toThrow("reserved");
+  expect(() =>
+    validateProviderConfig({
+      ...provider,
+      headers: { "X-Foo": "bad\nvalue" },
+    }),
+  ).toThrow("invalid header value");
 });
 
 test("reference mounts validate PersonalLibrary project contract and reject bad ref IDs", () => {
